@@ -42,12 +42,13 @@ program amplicol_generate
      integer,allocatable :: process(:),dipole_ijk(:,:),dipole_topology(:)
      logical,allocatable :: alpha_active(:),active(:),passes_cuts(:)
   end type tail_record
-  integer :: iproc
+  integer :: iproc,iident,target_label
   real(kind=8) :: weight
   integer :: i
   real(kind=8),dimension(:),allocatable :: mass,width
   character(len=80) :: filename,real_filename,logfile,limit_logfile,tag
-  character(len=256) :: tail_logfile,tail_replay_output,tail_residual_replay_output,tail_replay_file
+  character(len=256) :: input_filename,tail_logfile,tail_replay_output,&
+       tail_residual_replay_output,tail_replay_file
   integer(kind=4) :: PS_choice
   integer,parameter :: nevent_hel_filter=10
   integer :: igroup
@@ -87,24 +88,25 @@ program amplicol_generate
   logical :: tail_last_migration_converged
 
   call get_run_arguments()
+  call read_run_parameters(input_filename)
+  call write_run_parameters(99)
   timing_enabled=timing_mode.ne.timing_none
   if (timing_enabled) call cpu_time(tTot_B)
-  
-  if (include_pdf) then
-     if (use_lhapdf) then
-        call InitPDFsetbyname(trim(adjustl(lhapdfset)))
-        call initPDF(0)
-        call setlhaparm('SILENT')
-     else
-        call PDF_initialise
-     endif
+
+  call phys_model%init_part()
+  if (.not.use_amplitude_library) then
+     call apply_final_state_widths_from_process_file(filename)
   endif
-  
-!!$  call phys_model%init_part(173d0,1.491500d0,91.188d0,2.441404d0,&
-!!$                           80.419002445756163d0,2.0476d0,125d0,0.0063823389999999999d0)
-  call phys_model%init_part(173d0,0d0,91.188d0,2.441404d0,&
-                           80.419002445756163d0,2.0476d0,125d0,0.0063823389999999999d0)
   call phys_model%init_vert()
+
+  ! LHAPDF also supplies alpha_s when PDFs themselves are disabled.
+  if (use_lhapdf) then
+     call InitPDFsetbyname(trim(adjustl(lhapdfset)))
+     call initPDF(lhapdf_member)
+     call setlhaparm('SILENT')
+  elseif (include_pdf) then
+     call PDF_initialise(trim(adjustl(internal_pdf_grid)),lhapdf_member)
+  endif
 
   if (timing_mode.eq.timing_detailed) call cpu_time(tBefore)
   if (use_amplitude_library) then
@@ -173,15 +175,38 @@ program amplicol_generate
 
      allocate(mass(pgl(igroup)%next))
      allocate(width(pgl(igroup)%next))
+     do iproc=1,pgl(igroup)%nproc
+        do iident=1,pgl(igroup)%iden_iproc(iproc)
+           do i=1,pgl(igroup)%next
+              if (phys_model%get_mass(pgl(igroup)%processes(i,iproc)).ne.&
+                   phys_model%get_mass(pgl(igroup)%iden_processes(i,iident,iproc))) then
+                 write (*,*) 'Reduced amplitude changes the physical external-mass layout',&
+                      igroup,iproc,iident,i
+                 stop 1
+              endif
+           enddo
+        enddo
+     enddo
      do i=1,pgl(igroup)%next
-        mass(i)=phys_model%get_mass(pgl(igroup)%processes(i,1))
-        width(i)=phys_model%get_width(pgl(igroup)%processes(i,1))
-        do iproc=2,pgl(igroup)%nproc
-           if (mass(i).ne.phys_model%get_mass(pgl(igroup)%processes(i,iproc)) .or. &
-                width(i).ne.phys_model%get_width(pgl(igroup)%processes(i,iproc))) then
-              write (*,*) 'masses and widths not compatible among processes'
-              stop 1
-           endif
+        ! The phase-space generator uses the canonical density labels, while
+        ! iden_processes stores physical subprocesses in the fixed matrix-
+        ! element labelling.  Translate the former into the latter before
+        ! assigning a mass.  The reduced amplitude representative itself can
+        ! have a different crossing and must not be used for this purpose.
+        target_label=pgl(igroup)%phase_space_permutations(i,1)
+        mass(i)=phys_model%get_mass(pgl(igroup)%iden_processes(target_label,1,1))
+        width(i)=phys_model%get_width(pgl(igroup)%iden_processes(target_label,1,1))
+        do iproc=1,pgl(igroup)%nproc
+           target_label=pgl(igroup)%phase_space_permutations(i,iproc)
+           do iident=1,pgl(igroup)%iden_iproc(iproc)
+              if (mass(i).ne.phys_model%get_mass(&
+                   pgl(igroup)%iden_processes(target_label,iident,iproc)) .or. &
+                   width(i).ne.phys_model%get_width(&
+                   pgl(igroup)%iden_processes(target_label,iident,iproc))) then
+                 write (*,*) 'masses and widths not compatible among physical subprocesses'
+                 stop 1
+              endif
+           enddo
         enddo
      enddo
      ! Initialise the phase-space parametrisation
@@ -646,8 +671,9 @@ contains
     logical,intent(in),optional :: replay_unsplit
     real(kind=8), dimension(:),allocatable,save :: val,val_abs,vol_ichan
     real(kind=8),dimension(pgl(ichan)%nproc) :: colour_singlet_multichannel_weight
-    integer :: ih,iproc,eval_iint,integration_role,icopy,idip,requested_stratum,point_stratum
+    integer :: ih,iproc,a,target_label,eval_iint,integration_role,icopy,idip,requested_stratum,point_stratum
     integer :: resolution_info,resolution_dipole,kernel_info,kernel_dipole
+    real(kind=8),dimension(0:3,pgl(ichan)%next) :: p_generated
     real(kind=8), parameter :: pi=3.14159265358979323846d0,conv=389379660d0
     real(kind=8) :: amp2_integrand,amp2_dip,icoeff(-2:0),pterm,kterm,z,real_hist_factor,real_counter_scale
     real(kind=8) :: full_f,full_f_abs,regular_f,migration_f,real_margin,threshold_distance
@@ -697,6 +723,11 @@ contains
     f_abs=0d0
     f_components=0d0
     val_abs=0d0
+    if (keep_processes_separate) then
+       iproc=eval_iint
+    else
+       iproc=1
+    endif
     point_stratum=real_stratum_regular
     stratum_selected=.true.
     threshold_distance=-1d0
@@ -723,6 +754,16 @@ contains
        endif
        return
     endif
+    if (.not.read_momenta) then
+       ! The adaptive grid uses a canonical labelling of interchangeable
+       ! massless-QCD final legs.  Restore the fixed coefficient labelling
+       ! before cuts, amplitudes, scales, and event output.
+       p_generated=pgl(ichan)%ps(1)%p
+       do a=1,pgl(ichan)%next
+          target_label=pgl(ichan)%phase_space_permutations(a,iproc)
+          pgl(ichan)%ps(1)%p(:,target_label)=p_generated(:,a)
+       enddo
+    endif
     if (pgl(ichan)%is_subtracted_real) then
        call check_real_subtraction_resolution(eval_iint,ichan,resolution_info,&
             resolution_dipole,unresolved_invariant,resolution_tolerance)
@@ -743,7 +784,7 @@ contains
        endif
     endif
     pgl(ichan)%passed(eval_iint) = pgl(ichan)%passed(eval_iint) + 1
-    call compute_multichannel_weight(ichan,pgl(ichan)%ps(1),colour_singlet_multichannel_weight)
+    call compute_multichannel_weight(ichan,eval_iint,pgl(ichan)%ps(1),colour_singlet_multichannel_weight)
     if (time_physics) then
        call cpu_time(tAfter)
        t_PS= t_PS + (tAfter-tBefore)*dble(timing_sample)
@@ -823,7 +864,8 @@ contains
 
     ! set scales and update alphaS
     if (time_physics) call cpu_time(tBefore)
-    call set_scale(scale_choice,pgl(ichan)%next,pgl(ichan)%ps(1)%p,pgl(ichan)%processes(:,1),scale_ren)
+    call set_scale(scale_choice,pgl(ichan)%next,pgl(ichan)%ps(1)%p,&
+         pgl(ichan)%iden_processes(:,1,iproc),scale_ren)
     scale_fac=scale_ren
     scale_shower=scale_ren
     if (use_lhapdf) then
@@ -1758,7 +1800,8 @@ contains
     integer :: timing_sample_arg
     integer(kind=8) iseed
     common /to_seed/iseed
-    call parse_argument(filename,real_filename,ncalls0,itmax,PS_choice,iseed,library,tag,read_momenta,me_points,&
+    call parse_argument(filename,real_filename,input_filename,ncalls0,itmax,PS_choice,iseed,library,tag,&
+         read_momenta,me_points,&
          limit_test,timing_arg,timing_sample_arg,accuracy,alpha_dipole,dim_reg_scheme,has_real_process,&
          tail_replay_file,replay_tail,migration_tail_fraction_limit)
 

@@ -1,7 +1,7 @@
 module argument_parser
   implicit none
 contains
-  subroutine parse_argument(filename,real_filename,ncalls0,itmax,PS_choice,seed,library,tag,read_momenta,me_points,&
+  subroutine parse_argument(filename,real_filename,input_file,ncalls0,itmax,PS_choice,seed,library,tag,read_momenta,me_points,&
        limit_test,timing,timing_sample,accuracy,alpha_dipole,dim_reg_scheme,has_real_process,&
        tail_replay_file,replay_tail,migration_tail_fraction_limit)
     integer :: i
@@ -19,6 +19,7 @@ contains
     show_help=.false.
     filename='processes.txt'
     real_filename=''
+    input_file='run_card.dat'
     ncalls0=10000
     PS_choice=1
     seed=0
@@ -47,6 +48,8 @@ contains
        elseif (index(arg, "--real-process=").eq.1) then
           real_filename = arg(index(arg, "=")+1:)
           has_real_process=.true.
+       elseif (index(arg, "--input=").eq.1 .or. index(arg, "--card=").eq.1) then
+          input_file = arg(index(arg, "=")+1:)
        elseif (index(arg, "--nevents=").eq.1 .or. index(arg, "-n=").eq.1) then
           tmp = arg(index(arg, "=")+1:)
           read(tmp,*) ncalls0
@@ -112,6 +115,7 @@ contains
        write (*,'(a)') "  --help,           -h      : Show this message."
        write (*,'(a)') "  --process=[X],    -p=[X]  : Born process specified in file [X] (default is './processes.txt')."
        write (*,'(a)') "  --real-process=[X]         : Real-emission process file; integrates B + R-sum(D) in one run."
+       write (*,'(a)') "  --input=[X], --card=[X]   : Physics/run input card (default is './run_card.dat')."
        write (*,'(a)') "  --nevents=[X],    -n=[X]  : Number of unweighted events to generate; ignored with"// &
             " --accuracy (default is 10000)."
        write (*,'(a)') "  --phasespace=[X], -ps=[X] : Phase-space parametrisation to use "// &

@@ -22,6 +22,7 @@ module phase_space_base
      real(kind=8),dimension(:,:),allocatable :: invm_min,invm_max,ETmin
      integer(kind=4),dimension(:),allocatable :: order
      logical :: t_channel
+     logical :: can_invert_momenta=.false.
    contains
      procedure(phase_space_interface_init),deferred :: init
      procedure(phase_space_interface_generate_momenta),deferred :: generate_momenta

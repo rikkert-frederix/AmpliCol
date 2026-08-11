@@ -1,11 +1,13 @@
 module amplitude_library
   use handling_processes
   use read_process_file
+  use pdf_wrap, only: set_ipdgs_for_PDF
 contains
   subroutine create_amplitude_lib()
     implicit none
     character(len=170) :: tmp,line,filename
     integer :: igroup,j,iamp
+    real(kind=8),dimension(9) :: stored_model_signature
     filename='Library/amplib.f03'
     open(unit=14,file=filename,status='unknown')
     write(14,*) 'module amp_lib'
@@ -64,6 +66,9 @@ contains
     close(14)
     filename='Library/amplitudes.bin'
     open(unit=14,file=filename,form='unformatted',access='stream',status='unknown')
+    write(14) 4 ! binary amplitude-library format version
+    stored_model_signature=phys_model%model_signature()
+    write(14) stored_model_signature
     write(14) pgl_unique%next,pgl_unique%nproc
     write(14) unique_map
     write(14) unique_map_value
@@ -89,8 +94,12 @@ contains
        write(14) size(pgl(igroup)%multichan%map_proc_to_channelgroup),&
             pgl(igroup)%multichan%map_proc_to_channelgroup
        write(14) size(pgl(igroup)%multichan%number_of_channels),pgl(igroup)%multichan%number_of_channels
+       write(14) shape(pgl(igroup)%multichan%channels),pgl(igroup)%multichan%channels
+       write(14) shape(pgl(igroup)%multichan%channel_permutations),&
+            pgl(igroup)%multichan%channel_permutations
        ! rest
        write(14) shape(pgl(igroup)%processes),pgl(igroup)%processes
+       write(14) shape(pgl(igroup)%phase_space_permutations),pgl(igroup)%phase_space_permutations
        write(14) size(pgl(igroup)%iden_iproc),pgl(igroup)%iden_iproc
        write(14) size(pgl(igroup)%phase_space_orders),pgl(igroup)%phase_space_orders
        write(14) size(pgl(igroup)%nhel),pgl(igroup)%nhel
@@ -115,11 +124,20 @@ contains
   subroutine read_amplitude_lib()
     implicit none
     character(len=170) :: filename
-    integer :: dim1,dim2,dim3,iamp,igroup
+    integer :: dim1,dim2,dim3,iamp,igroup,library_version
+    real(kind=8),dimension(9) :: stored_model_signature,current_model_signature
+    real(kind=8),dimension(9) :: tolerance
     filename='Library/amplitudes.bin'
     open(unit=14,file=filename,form='unformatted',access='stream',status='old')
+    read(14) library_version
+    if (library_version.ne.4) then
+       write (*,*) 'Amplitude library has an incompatible binary format; recreate it'
+       stop 1
+    endif
+    read(14) stored_model_signature
     allocate(pgl_unique)
     read(14) pgl_unique%next,pgl_unique%nproc
+    next=pgl_unique%next
     allocate(unique_map(pgl_unique%nproc))
     read(14) unique_map
     allocate(unique_map_value(pgl_unique%nproc))
@@ -163,10 +181,20 @@ contains
        read(14) dim1
        allocate(pgl(igroup)%multichan%number_of_channels(dim1))
        read(14) pgl(igroup)%multichan%number_of_channels
+       read(14) dim1,dim2
+       allocate(pgl(igroup)%multichan%channels(dim1,dim2))
+       read(14) pgl(igroup)%multichan%channels
+       pgl(igroup)%multichan%max_channels=dim1
+       read(14) dim1,dim2,dim3
+       allocate(pgl(igroup)%multichan%channel_permutations(dim1,dim2,dim3))
+       read(14) pgl(igroup)%multichan%channel_permutations
        ! rest
        read(14) dim1,dim2
        allocate(pgl(igroup)%processes(dim1,dim2))
        read(14) pgl(igroup)%processes
+       read(14) dim1,dim2
+       allocate(pgl(igroup)%phase_space_permutations(dim1,dim2))
+       read(14) pgl(igroup)%phase_space_permutations
        read(14) dim1
        allocate(pgl(igroup)%iden_iproc(dim1))
        read(14) pgl(igroup)%iden_iproc
@@ -197,7 +225,7 @@ contains
        read(14) pgl(igroup)%iden
        read(14) pgl(igroup)%ipdgs
        read(14) pgl(igroup)%next,pgl(igroup)%ndim
-       allocate(pgl(igroup)%hel(next))
+       allocate(pgl(igroup)%hel(pgl(igroup)%next))
        read(14) dim1
        allocate(pgl(igroup)%col_fac(dim1))
        read(14) pgl(igroup)%col_fac
@@ -213,6 +241,31 @@ contains
        read(14) pgl(igroup)%color_orders
     enddo
     close(14)
+    call apply_final_state_widths_from_loaded_groups()
+    ! Phase-space dimensionality and PDF flavour masks are run settings, not
+    ! properties of the compiled matrix elements.  Reconstruct them so that a
+    ! library can be reused when include_pdf changes.
+    pgl_unique%ndim=3*(pgl_unique%next-2)-4
+    if (include_pdf) pgl_unique%ndim=pgl_unique%ndim+2
+    do igroup=1,ngroups
+       pgl(igroup)%ndim=3*(pgl(igroup)%next-2)-4
+       if (include_pdf) then
+          pgl(igroup)%ndim=pgl(igroup)%ndim+2
+          call set_ipdgs_for_PDF(pgl(igroup))
+       else
+          pgl(igroup)%ipdgs=.false.
+       endif
+    enddo
+    current_model_signature=phys_model%model_signature()
+    tolerance=1d-13*max(1d0,abs(current_model_signature),&
+         abs(stored_model_signature))
+    if (any(abs(current_model_signature-stored_model_signature).gt.tolerance)) then
+       write (*,*) 'Amplitude library was created with incompatible model parameters.'
+       write (*,*) 'Recreate it with --library=create and the current input card.'
+       write (*,*) 'Stored model signature:',stored_model_signature
+       write (*,*) 'Current model signature:',current_model_signature
+       stop 1
+    endif
   end subroutine read_amplitude_lib
 
   subroutine test_lib

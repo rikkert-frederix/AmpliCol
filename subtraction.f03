@@ -1000,11 +1000,11 @@ contains
        ij=pgl(ichan)%dpl(iint)%dl(idip)%dip_r_ijk(1)
        call create_rho(iint,ichan,idip,rho)
        if (ij.gt.2) then
-          call ext_gluon_cmplx(pgl(ichan)%dpl(iint)%dl(idip)%p_mapped_ij,-1, 1, eps_parent(0:3,1))
-          call ext_gluon_cmplx(pgl(ichan)%dpl(iint)%dl(idip)%p_mapped_ij, 1, 1, eps_parent(0:3,2))
+          call ext_massless_vector_cmplx(pgl(ichan)%dpl(iint)%dl(idip)%p_mapped_ij,-1, 1, eps_parent(0:3,1))
+          call ext_massless_vector_cmplx(pgl(ichan)%dpl(iint)%dl(idip)%p_mapped_ij, 1, 1, eps_parent(0:3,2))
        else
-          call ext_gluon_cmplx(-pgl(ichan)%dpl(iint)%dl(idip)%p_mapped_ij,-1, 1, eps_parent(0:3,1))
-          call ext_gluon_cmplx(-pgl(ichan)%dpl(iint)%dl(idip)%p_mapped_ij, 1, 1, eps_parent(0:3,2))
+          call ext_massless_vector_cmplx(-pgl(ichan)%dpl(iint)%dl(idip)%p_mapped_ij,-1, 1, eps_parent(0:3,1))
+          call ext_massless_vector_cmplx(-pgl(ichan)%dpl(iint)%dl(idip)%p_mapped_ij, 1, 1, eps_parent(0:3,2))
        endif
        ! HELAS returns the external gluon wavefunction epsilon^*.  The CS
        ! helicity projection expects the physical polarization epsilon.

@@ -48,14 +48,14 @@ c The actual call to the PDFs
       
   
 
-      subroutine PDF_initialise
+      subroutine PDF_initialise(gridfilename,irep)
       implicit none
-      real*8 asmz
-      call NNPDFDriver('NNPDF23nlo_as_0119_qed_mem0.grid')      
-      call NNinitPDF(0)
-      asmz=0.119d0
-      write (*,*) 'NNPDF 23 NLO (alpha_s 0.119) QED set initialised'
-      write (99,*) 'NNPDF 23 NLO (alpha_s 0.119) QED set initialised'
+      character*(*) gridfilename
+      integer irep
+      call NNPDFDriver(gridfilename)
+      call NNinitPDF(irep)
+      write (*,*) 'Internal PDF grid initialised: ',gridfilename
+      write (99,*) 'Internal PDF grid initialised: ',gridfilename
       return
       end
 

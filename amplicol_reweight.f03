@@ -43,6 +43,7 @@ program amplicol_reweight
   use amplitude_QCD_mod
   use timings
   use particles
+  use run_parameters
   use overall
   implicit none
   logical,parameter :: use_only_canonical_form=.true.
@@ -59,38 +60,37 @@ program amplicol_reweight
   real(kind=8),dimension(:),allocatable :: unique_map_value
   complex(kind=8) :: amp2_c,amp_col_c
   logical :: done
+  character(len=256) :: event_filename,input_filename
   
   call get_run_arguments()
+  call read_run_parameters(input_filename)
 
   call cpu_time(tTot_B)
-  
-  call phys_model%init_part(173d0,1.491500d0,91.188d0,2.441404d0,&
-                           80.419002445756163d0,2.0476d0,125d0,0.0063823389999999999d0)
-!!$  call phys_model%init_part(173d0,0d0,91.188d0,2.441404d0,80.419002445756163d0,2.0476d0)
+
+  call phys_model%init_part()
+  open(unit=11,file=trim(event_filename),status='old')
+  call read_unique_in_file()
+  call allocate_process_info()
+  open(unit=12,file=trim(event_filename)//'.rwgt',status='unknown')
+  call read_init_and_allocate_events(11)
+  do nevt=1,nevents
+     call read_event(11,events(nevt))
+  enddo
+  call apply_final_state_widths_from_events()
   call phys_model%init_vert()
 
   nprocs=0
   call setup_spin()
   col_acc=20
 
-  call read_init_and_allocate_events(11)
-
   xsec=0d0
   xsec_abs=0d0
   max_wgt=0d0
   do nevt=1,nevents
-     call read_event(11,events(nevt))
+     call map_to_canonical_form(events(nevt))
      do iproc=1,nprocs
         if (all(part(1:next,1).eq.processes(1:next,iproc)))exit
      enddo
-     if (three_quark_lines(part(1,1))) then
-        ! Don't reweight the three-quark-line processes
-        events(nevt)%matrix2(1:3)=1d0
-        max_wgt=max(max_wgt,events(nevt)%matrix2(3)/events(nevt)%matrix2(1))
-        xsec=xsec+events(nevt)%matrix2(3)/events(nevt)%matrix2(1)*events(nevt)%XWGTUP
-        xsec_abs=xsec_abs+abs(events(nevt)%matrix2(3)/events(nevt)%matrix2(1)*events(nevt)%XWGTUP)
-        cycle
-     endif
      if (iproc.eq.nprocs+1) then
         call cpu_time(tBefore)
         nprocs=nprocs+1
@@ -153,8 +153,8 @@ program amplicol_reweight
      xsec=xsec+events(nevt)%matrix2(3)/events(nevt)%matrix2(1)*events(nevt)%XWGTUP
      xsec_abs=xsec_abs+abs(events(nevt)%matrix2(3)/events(nevt)%matrix2(1)*events(nevt)%XWGTUP)
   enddo
-  xsec=xsec/dble(nevt)
-  xsec_abs=xsec_abs/dble(nevt)
+  xsec=xsec/dble(nevents)
+  xsec_abs=xsec_abs/dble(nevents)
   close(11)
 
   ! write event file
@@ -182,7 +182,7 @@ contains
     use arguments
     implicit none
     integer :: argc,i,k
-    character(len=256) :: argv,filename
+    character(len=256) :: argv
     logical :: show_help
     ! integration steps:
     ! imode=0  (Setting up grids)
@@ -194,6 +194,8 @@ contains
     show_help=.false.
     unwgt=.false.
     keep_comments=.true.
+    event_filename=''
+    input_filename='run_card.dat'
     
     if (argc.lt.1) then
        show_help=.true.
@@ -208,11 +210,21 @@ contains
              unwgt=.true.
           elseif (index(argv, "--remove_comments").eq.1) then
              keep_comments=.false.
+          elseif (index(argv, "--input=").eq.1 .or. index(argv, "--card=").eq.1) then
+             input_filename=argv(index(argv,"=")+1:)
+          elseif (index(argv,"-").eq.1) then
+             write (*,*) 'Unknown argument: ',trim(argv)
+             stop 1
           else
-             read(argv,'(a)') filename
+             if (len_trim(event_filename).ne.0) then
+                write (*,*) 'More than one event file was specified'
+                stop 1
+             endif
+             event_filename=argv
           endif
        enddo
     endif
+    if (len_trim(event_filename).eq.0) show_help=.true.
 
     if (show_help) then
        write (*,'(a)') ""
@@ -224,16 +236,35 @@ contains
        write (*,'(a)') "  --help,   -h      : Show this message."
        write (*,'(a)') "  --unwgt           : Unweight the reweight events."
        write (*,'(a)') "  --remove_comments : Remove comment lines in the final LHEF."
+       write (*,'(a)') "  --input=[X]       : Physics/run input card (default is './run_card.dat')."
        write (*,'(a)') ""
        stop
     endif
 
-    open(unit=11,file=filename,status='old')
-    call read_unique_in_file()
-    call allocate_process_info()
-    open(unit=12,file=trim(adjustl(filename))//'.rwgt',status='unknown')
-
   end subroutine get_run_arguments
+
+  subroutine apply_final_state_widths_from_events()
+    implicit none
+    integer :: ievent,i
+    integer,dimension(:,:),allocatable :: event_process
+    if (ignore_final_state_width_fix) return
+    if (nevents.eq.0) return
+    allocate(event_process(events(1)%NUP,nevents))
+    do ievent=1,nevents
+       if (events(ievent)%NUP.ne.events(1)%NUP) then
+          write (*,*) 'Cannot combine LHE events with different particle multiplicities'
+          stop 1
+       endif
+       event_process(:,ievent)=21
+       event_process(1:2,ievent)=events(ievent)%IDUP(1:2)
+       do i=3,events(ievent)%NUP
+          if (events(ievent)%ISTUP(i).eq.1) &
+               event_process(i,ievent)=events(ievent)%IDUP(i)
+       enddo
+    enddo
+    call phys_model%apply_final_state_widths(events(1)%NUP,nevents,event_process)
+    deallocate(event_process)
+  end subroutine apply_final_state_widths_from_events
 
   subroutine allocate_process_info()
     implicit none
@@ -302,7 +333,6 @@ contains
 !!$    do i=1,next
 !!$       read (iunit,*,err=99,end=99) iPDG(i),momenta(1:3,i),momenta(0,i)
 !!$    enddo
-    call map_to_canonical_form(event)
     read (iunit,'(a)') string  ! </event>-tag
   end subroutine read_event
 
@@ -356,7 +386,8 @@ contains
     type(lhef_event) :: event
     integer,dimension(next) :: mapping
     real(kind=8),dimension(0:3,next) :: p_cross
-    integer :: i,iproc
+    integer :: i,iproc,j
+    logical :: compatible_mass_layout
     next=event%NUP
     part(1:next,1)=event%IDUP(1:next)
     if (.not.use_only_canonical_form) then
@@ -397,7 +428,21 @@ contains
           if (all(part(1:next,1).eq.unique_processes(1:next,iproc))) then
              process_map_value=unique_map_value(iproc)
              if (unique_map(iproc).gt.0) then
-                part(1:next,1)=unique_processes(1:next,unique_map(iproc))
+                compatible_mass_layout=.true.
+                do j=1,next
+                   if (phys_model%get_mass(unique_processes(j,iproc)).ne.&
+                        phys_model%get_mass(unique_processes(j,unique_map(iproc)))) then
+                      compatible_mass_layout=.false.
+                      exit
+                   endif
+                enddo
+                if (compatible_mass_layout) then
+                   part(1:next,1)=unique_processes(1:next,unique_map(iproc))
+                else
+                   ! Backward compatibility for LHE files written before
+                   ! massive-leg layouts were excluded from flavour maps.
+                   process_map_value=1d0
+                endif
              endif
              exit
           endif
@@ -493,24 +538,4 @@ contains
     allocate(events(nevents))
   end subroutine read_init_and_allocate_events
   
-  logical function three_quark_lines(ipdg)
-    implicit none
-    integer,dimension(next),intent(in) :: ipdg
-    integer :: i,nq
-    nq=0
-    do i=1,next
-       if (phys_model%is_quark(ipdg(i)) .or. phys_model%is_antiquark(ipdg(i))) nq=nq+1
-    enddo
-    if (nq.eq.0 .or. nq.eq.2 .or. nq.eq.4) then
-       three_quark_lines=.false.
-       return
-    elseif (nq.eq.6) then
-       three_quark_lines=.true.
-       return
-    else
-       write (*,*) 'Unknown or impossible number of quark lines',nq
-       stop 1
-    endif
-  end function three_quark_lines
-
 end program amplicol_reweight

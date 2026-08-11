@@ -1,6 +1,7 @@
 module phase_space_gen23_mod
   !  use common
   use phase_space_base
+  use run_parameters, only: z_mass,z_width
   implicit none
   type,extends(phase_space_type),public :: phase_space_gen23
      ! Whether this phase-space instance uses the cut-aware (soft) bounds
@@ -78,6 +79,7 @@ contains
     integer(kind=4) :: i,j,ndim_extra,cnt1,cnt2
     integer(kind=4),dimension(2) :: iset
     this%use_soft_bounds_as_actual_limits=use_soft_bounds_as_actual_limits
+    this%can_invert_momenta=.true.
     this%sqrtshat=sqrts
     this%sqrts=sqrts
     this%t_channel=t_chan
@@ -511,8 +513,8 @@ contains
       real(kind=8),dimension(1:2) :: A,B
       smin=50d0**2
       smax=this%sqrts**2
-      qmass=91.188d0
-      qwidth=2.441404d0
+      qmass=z_mass
+      qwidth=z_width
       A=atan((qmass-smin/qmass)/qwidth)
       B=atan((qmass-smax/qmass)/qwidth)
       ix=ix+1
@@ -1577,8 +1579,8 @@ contains
       real(kind=8),dimension(1:2) :: A,B
       smin=50d0**2
       smax=this%sqrts**2
-      qmass=91.188d0
-      qwidth=2.441404d0
+      qmass=z_mass
+      qwidth=z_width
       A=atan((qmass-smin/qmass)/qwidth)
       B=atan((qmass-smax/qmass)/qwidth)
       ix=ix+1

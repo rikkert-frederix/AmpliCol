@@ -446,38 +446,32 @@ contains
     implicit none
     type(phase_space_order_group),intent(inout) :: pgl
     integer,intent(in) :: ichan
-    integer :: i,j
+    integer :: i,j,iproc,iident
+    integer,dimension(:),allocatable :: reference_process
     if (allocated(pgl%pT_min)) then
        write (*,*) 'ERROR: setting-up phase space cuts already'//&
             ' done for this phase-space group'
        stop 1
     endif
-    ! check consistency among processes
-    if (ichan.gt.0) then
+    allocate(reference_process(pgl%next))
+    if (ichan.gt.0 .and. allocated(pgl%iden_processes)) then
+       ! Cuts act on the physical, target-labelled momenta.  Reduced matrix-
+       ! element representatives may use a different flavour crossing, so
+       ! derive the particle classes from the physical subprocess aliases.
+       reference_process=pgl%iden_processes(:,1,1)
        do i=1,pgl%next
-          if (phys_model%is_jet(pgl%processes(i,1))) then
-             do j=2,pgl%nproc
-                if (.not.phys_model%is_jet(pgl%processes(i,j))) then
-                   write (*,*) 'inconsistent processes and cuts #1'
+          do iproc=1,pgl%nproc
+             do iident=1,pgl%iden_iproc(iproc)
+                if (cut_particle_class(reference_process(i)).ne.&
+                     cut_particle_class(pgl%iden_processes(i,iident,iproc))) then
+                   write (*,*) 'inconsistent physical subprocesses and cuts',i,iproc,iident
                    stop 1
                 endif
              enddo
-          elseif(phys_model%is_photon(pgl%processes(i,1))) then
-             do j=2,pgl%nproc
-                if (.not.phys_model%is_photon(pgl%processes(i,j))) then
-                   write (*,*) 'inconsistent processes and cuts #2'
-                   stop 1
-                endif
-             enddo
-          else
-             do j=2,pgl%nproc
-                if (phys_model%is_jet(pgl%processes(i,j)) .or. phys_model%is_photon(pgl%processes(i,j))) then
-                   write (*,*) 'inconsistent processes and cuts #3'
-                   stop 1
-                endif
-             enddo
-          endif
+          enddo
        enddo
+    else
+       reference_process=pgl%processes(:,1)
     endif
     ! initialize all:
     allocate(pgl%pT_min(1:pgl%next))
@@ -490,28 +484,28 @@ contains
     pgl%sqrt_s_min(1:pgl%next,1:pgl%next)=-1d0
     ! cuts on single jets
     do i=3,pgl%next
-       if (.not. phys_model%is_jet(pgl%processes(i,1))) cycle
+       if (.not. phys_model%is_jet(reference_process(i))) cycle
        pgl%pT_min(i)=ptj_min
        pgl%eta_max(i)=etaj_max
     enddo
     ! cuts on single photons
     do i=3,pgl%next
-       if (.not. phys_model%is_photon(pgl%processes(i,1))) cycle
+       if (.not. phys_model%is_photon(reference_process(i))) cycle
        pgl%pT_min(i)=pta_min
        pgl%eta_max(i)=etaa_max
     enddo
     ! cuts on single leptons
     do i=3,pgl%next
-       if (.not. phys_model%is_lepton_any(pgl%processes(i,1))) cycle
+       if (.not. phys_model%is_lepton_any(reference_process(i))) cycle
        pgl%pT_min(i)=ptl_min
        pgl%eta_max(i)=etal_max
     enddo
     ! cuts on pair of jets
     do i=1,pgl%next
-       if (.not. phys_model%is_jet(pgl%processes(i,1))) cycle
+       if (.not. phys_model%is_jet(reference_process(i))) cycle
           do j=1,pgl%next
           if (i.eq.j) cycle
-          if (.not. phys_model%is_jet(pgl%processes(j,1))) cycle
+          if (.not. phys_model%is_jet(reference_process(j))) cycle
           pgl%sqrt_s_min(i,j)=sqrt_sjj_min
           if (i.ge.3 .and. j.ge.3) then
              pgl%DR_min(i,j)=DRjj_min
@@ -520,10 +514,10 @@ contains
     enddo
     ! cuts on pair of photons
     do i=1,pgl%next
-       if (.not. phys_model%is_photon(pgl%processes(i,1))) cycle
+       if (.not. phys_model%is_photon(reference_process(i))) cycle
           do j=1,pgl%next
           if (i.eq.j) cycle
-          if (.not. phys_model%is_photon(pgl%processes(j,1))) cycle
+          if (.not. phys_model%is_photon(reference_process(j))) cycle
           pgl%sqrt_s_min(i,j)=sqrt_saa_min
           if (i.ge.3 .and. j.ge.3) then
              pgl%DR_min(i,j)=DRaa_min
@@ -532,10 +526,10 @@ contains
     enddo
     ! cuts on pair of leptons
     do i=1,pgl%next
-       if (.not. phys_model%is_lepton_any(pgl%processes(i,1))) cycle
+       if (.not. phys_model%is_lepton_any(reference_process(i))) cycle
           do j=1,pgl%next
           if (i.eq.j) cycle
-          if (.not. phys_model%is_lepton_any(pgl%processes(j,1))) cycle
+          if (.not. phys_model%is_lepton_any(reference_process(j))) cycle
           pgl%sqrt_s_min(i,j)=sqrt_sll_min
           if (i.ge.3 .and. j.ge.3) then
              pgl%DR_min(i,j)=DRll_min
@@ -546,8 +540,10 @@ contains
     do i=1,pgl%next
        do j=1,pgl%next
           if (i.eq.j) cycle
-          if (.not.((phys_model%is_jet(pgl%processes(i,1)) .and. phys_model%is_photon(pgl%processes(j,1))) .or. &
-                    (phys_model%is_photon(pgl%processes(i,1)) .and. phys_model%is_jet(pgl%processes(j,1))))) cycle
+          if (.not.((phys_model%is_jet(reference_process(i)) .and. &
+               phys_model%is_photon(reference_process(j))) .or. &
+               (phys_model%is_photon(reference_process(i)) .and. &
+               phys_model%is_jet(reference_process(j))))) cycle
           pgl%sqrt_s_min(i,j)=sqrt_sja_min
           if (i.ge.3 .and. j.ge.3) then
              pgl%DR_min(i,j)=DRja_min
@@ -558,8 +554,10 @@ contains
     do i=1,pgl%next
        do j=1,pgl%next
           if (i.eq.j) cycle
-          if (.not.((phys_model%is_jet(pgl%processes(i,1)) .and. phys_model%is_lepton_any(pgl%processes(j,1))) .or. &
-                    (phys_model%is_lepton_any(pgl%processes(i,1)) .and. phys_model%is_jet(pgl%processes(j,1))))) cycle
+          if (.not.((phys_model%is_jet(reference_process(i)) .and. &
+               phys_model%is_lepton_any(reference_process(j))) .or. &
+               (phys_model%is_lepton_any(reference_process(i)) .and. &
+               phys_model%is_jet(reference_process(j))))) cycle
           pgl%sqrt_s_min(i,j)=sqrt_sjl_min
           if (i.ge.3 .and. j.ge.3) then
              pgl%DR_min(i,j)=DRjl_min
@@ -570,8 +568,10 @@ contains
     do i=1,pgl%next
        do j=1,pgl%next
           if (i.eq.j) cycle
-          if (.not.((phys_model%is_lepton_any(pgl%processes(i,1)) .and. phys_model%is_photon(pgl%processes(j,1))) .or. &
-                    (phys_model%is_photon(pgl%processes(i,1)) .and. phys_model%is_lepton_any(pgl%processes(j,1))))) cycle
+          if (.not.((phys_model%is_lepton_any(reference_process(i)) .and. &
+               phys_model%is_photon(reference_process(j))) .or. &
+               (phys_model%is_photon(reference_process(i)) .and. &
+               phys_model%is_lepton_any(reference_process(j))))) cycle
           pgl%sqrt_s_min(i,j)=sqrt_sla_min
           if (i.ge.3 .and. j.ge.3) then
              pgl%DR_min(i,j)=DRla_min
@@ -588,7 +588,22 @@ contains
           write (99,*) i,j,'sqrt_s_min:',pgl%sqrt_s_min(i,j),'DR_min',pgl%DR_min(i,j)
        enddo
     enddo
+    deallocate(reference_process)
     write (99,*) '****************************************************'
   end subroutine setup_cuts_for_each_particle
+
+  integer function cut_particle_class(ipdg)
+    implicit none
+    integer,intent(in) :: ipdg
+    if (phys_model%is_jet(ipdg)) then
+       cut_particle_class=1
+    elseif (phys_model%is_photon(ipdg)) then
+       cut_particle_class=2
+    elseif (phys_model%is_lepton_any(ipdg)) then
+       cut_particle_class=3
+    else
+       cut_particle_class=0
+    endif
+  end function cut_particle_class
   
 end module cuts

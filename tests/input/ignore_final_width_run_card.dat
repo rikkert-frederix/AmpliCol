@@ -1,0 +1,3 @@
+&amplicol
+  ignore_final_state_width_fix=.true.
+/

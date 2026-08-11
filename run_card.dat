@@ -1,0 +1,61 @@
+! Runtime physics parameters for AmpliCol.  Values omitted from this namelist
+! retain the defaults defined in run_parameters.f03.
+&amplicol
+  ! Particle masses and nominal widths [GeV]
+  top_mass   = 173d0
+  top_width  = 1.4915d0
+  z_mass     = 91.188d0
+  z_width    = 2.441404d0
+  w_mass     = 80.419002445756163d0
+  w_width    = 2.0476d0
+  higgs_mass = 125d0
+  higgs_width= 0.0063823389999999999d0
+
+  ! Couplings
+  sw         = 0.47143025548407230d0
+  ! alphaS_MZ is used by the internal running coupling.  When use_lhapdf is
+  ! true, alpha_s is supplied by the selected LHAPDF member instead.
+  alphaS_MZ  = 0.119d0
+  alphaEW    = 0.007546771114d0
+
+  ! Collider and scale choice:
+  ! 0=MZ, 1=HT, 2=HT/2, 3=sqrt(shat), 4=min(jet pT), 5=m(non-jet system)
+  sqrts       = 14000d0
+  scale_choice= 2
+
+  ! PDFs
+  include_pdf      = .true.
+  use_lhapdf       = .true.
+  lhapdfset        = 'NNPDF23_nlo_as_0119_qed'
+  lhapdf_member    = 0
+  pdf_lhaid        = 244800
+  internal_pdf_grid= 'NNPDF23nlo_as_0119_qed_mem0.grid'
+
+  ! The default safeguard sets the width of every massive final-state species
+  ! to zero in every subprocess.  Set this to true to retain nominal widths.
+  ignore_final_state_width_fix = .false.
+
+  ! A negative cut disables it.  Momenta and invariant masses are in GeV.
+  pTj_min      = 30d0
+  DRjj_min     = 0.4d0
+  etaj_max     = 6d0
+  sqrt_sjj_min = -1d0
+
+  pTa_min      = 30d0
+  DRaa_min     = 0.4d0
+  etaa_max     = 6d0
+  sqrt_saa_min = -1d0
+
+  ! These lepton cuts apply to PDG codes 11--16, including neutrinos.
+  pTl_min      = 20d0
+  DRll_min     = 0.4d0
+  etal_max     = 2.5d0
+  sqrt_sll_min = -1d0
+
+  DRja_min     = 0.4d0
+  sqrt_sja_min = -1d0
+  DRjl_min     = 0.4d0
+  sqrt_sjl_min = -1d0
+  DRla_min     = 0.4d0
+  sqrt_sla_min = -1d0
+/

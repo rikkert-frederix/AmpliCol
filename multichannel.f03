@@ -1,9 +1,10 @@
 module multichannel
   use handling_processes
   use simple_integrator_mod
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
 !  use mint_module
 contains
-  subroutine compute_multichannel_weight(ichan,ps,weight)
+  subroutine compute_multichannel_weight(ichan,iint,ps,weight)
     ! Computes the multichannel weight 'weight' when there are
     ! 'chans(0)' channels (that are listed in the array 'chans(1:)') and
     ! the current channel is 'ichan'. The momenta 'p' have been
@@ -15,57 +16,84 @@ contains
     ! with J_i the combined Jacobian coming from MINT and the
     ! phase-space.
     implicit none
-    integer,intent(in) :: ichan
+    integer,intent(in) :: ichan,iint
     type(psv),intent(in) :: ps
     type(psv) :: ps_local
-    real(kind=8),dimension(pgl(ichan)%multichan%n_unique_channels) :: factors
-    logical,dimension(pgl(ichan)%multichan%n_unique_channels) :: target_active
-    real(kind=8),dimension(pgl(ichan)%multichan%n_unique_channelgroups) :: weight_factors
+    real(kind=8),dimension(0:3,pgl(ichan)%next) :: p_target
     real(kind=8),dimension(pgl(ichan)%nproc),intent(out) :: weight
-    integer :: i,j,ii
-    real(kind=8) :: vol_ichan,vol
+    integer :: i,iproc,k,a,iproc_first,iproc_last,self_count
+    real(kind=8) :: vol_ichan,vol,denominator
+    weight=0d0
+    if (keep_processes_separate) then
+       iproc_first=iint
+       iproc_last=iint
+    else
+       iproc_first=1
+       iproc_last=pgl(ichan)%nproc
+       do iproc=2,pgl(ichan)%nproc
+          if (any(pgl(ichan)%phase_space_permutations(:,iproc).ne.&
+               pgl(ichan)%phase_space_permutations(:,1))) then
+             write (*,*) 'keep_processes_separate=false is incompatible with different phase-space permutations'
+             stop 1
+          endif
+       enddo
+    endif
     if (.not. use_colour_singlet_multichannel) then
-       weight(1:pgl(ichan)%nproc)=1d0/dble(pgl(ichan)%multichan%number_of_channels(1:pgl(ichan)%nproc))
+       do iproc=iproc_first,iproc_last
+          weight(iproc)=1d0/dble(pgl(ichan)%multichan%number_of_channels(iproc))
+       enddo
        return
     endif
-    ps_local=ps
-    target_active=.true.
-    call simple_integrator%compute_wgt_from_x(ichan,ps_local%x,vol_ichan)
-    do j=1,pgl(ichan)%multichan%n_unique_channels
-       i=pgl(ichan)%multichan%unique_channel_list(j)
-       if (i.eq.ichan) then
-          ii=j
-          cycle
-       endif
-       ! Each inverse must start from the generated physical point.  Besides
-       ! avoiding state carried over from a previous inverse, this makes an
-       ! unavailable target chart a local zero-density contribution below.
-       ps_local=ps
-       call pgl(i)%phase_space%compute_x_from_momenta(ps_local)
-       if (ps_local%jac.lt.0d0) then
-          ! A target chart can be singular at a phase-space boundary (or be
-          ! unavailable for this point).  Its density 1/J_i is then zero in
-          ! the multichannel denominator.  Do not discard the complete
-          ! multichannel correction merely because this one alternate chart
-          ! has no regular inverse.
-          write (99,'(a,i0,a,i0,a,i0)') &
-               'INFO: multi-channel inverse unavailable; source channel=',ichan,&
-               ', target channel=',i,', status=',nint(ps_local%jac)
-          target_active(j)=.false.
-          cycle
-       endif
-       call simple_integrator%compute_wgt_from_x(i,ps_local%x,vol)
-       factors(j)=ps_local%jac*vol
-    enddo
-    do i=1,pgl(ichan)%multichan%n_unique_channelgroups
-       weight_factors(i)=1d0
-       do j=1,pgl(ichan)%multichan%unique_channelgroup_list(0,i)
-          if (pgl(ichan)%multichan%unique_channelgroup_list(j,i).eq.ii) cycle
-          if (.not.target_active(pgl(ichan)%multichan%unique_channelgroup_list(j,i))) cycle
-          weight_factors(i)=weight_factors(i)+ps%jac*vol_ichan/factors(pgl(ichan)%multichan%unique_channelgroup_list(j,i))
+    if (.not.pgl(ichan)%phase_space%can_invert_momenta) then
+       ! HAAG and the pT-based generator do not implement the inverse map.
+       ! Use the same uniform partition in every partner channel rather than
+       ! attempting a point-dependent multichannel weight.
+       do iproc=iproc_first,iproc_last
+          weight(iproc)=1d0/dble(pgl(ichan)%multichan%number_of_channels(iproc))
        enddo
+       return
+    endif
+    p_target=ps%p
+    call simple_integrator%compute_wgt_from_x(ichan,ps%x,vol_ichan)
+    do iproc=iproc_first,iproc_last
+       denominator=0d0
+       self_count=0
+       do k=1,pgl(ichan)%multichan%number_of_channels(iproc)
+          if (pgl(ichan)%multichan%channels(k,iproc).eq.ichan .and. all(&
+               pgl(ichan)%multichan%channel_permutations(:,k,iproc).eq.&
+               pgl(ichan)%phase_space_permutations(:,iproc))) &
+               self_count=self_count+1
+       enddo
+       if (self_count.ne.1) then
+          write (*,*) 'Could not identify exactly one current multichannel density',ichan,iproc,self_count
+          stop 1
+       endif
+       do k=1,pgl(ichan)%multichan%number_of_channels(iproc)
+          i=pgl(ichan)%multichan%channels(k,iproc)
+          if (i.eq.ichan .and. all(&
+               pgl(ichan)%multichan%channel_permutations(:,k,iproc).eq.&
+               pgl(ichan)%phase_space_permutations(:,iproc))) then
+             denominator=denominator+1d0
+             cycle
+          endif
+          ps_local=ps
+          do a=1,pgl(ichan)%next
+             ps_local%p(:,a)=p_target(:,&
+                  pgl(ichan)%multichan%channel_permutations(a,k,iproc))
+          enddo
+          call pgl(i)%phase_space%compute_x_from_momenta(ps_local)
+          ! A point outside a partner map's support has zero density in that
+          ! map.  It must be omitted from the MIS denominator; replacing the
+          ! whole point by a local 1/N weight would not form a partition of
+          ! unity across the partner channels.
+          if (ps_local%jac.le.0d0 .or. .not.ieee_is_finite(ps_local%jac)) cycle
+          if (any(.not.ieee_is_finite(ps_local%x))) cycle
+          call simple_integrator%compute_wgt_from_x(i,ps_local%x,vol)
+          if (vol.le.0d0 .or. .not.ieee_is_finite(vol)) cycle
+          denominator=denominator+ps%jac*vol_ichan/(ps_local%jac*vol)
+       enddo
+       weight(iproc)=1d0/denominator
     enddo
-    weight(1:pgl(ichan)%nproc)=1d0/weight_factors(pgl(ichan)%multichan%map_proc_to_channelgroup(1:pgl(ichan)%nproc))
   end subroutine compute_multichannel_weight
 
   subroutine setup_optimised_multichannel_weight_computation(pgl)
@@ -92,8 +120,10 @@ contains
        found=.false.
        do i=1,nchans_group
           if (all_unique_channelgroups(0,i).ne.pgl%multichan%number_of_channels(iproc))cycle
-          if (all(all_unique_chans_inv(all_unique_channelgroups(1:pgl%multichan%number_of_channels(iproc),i)).eq. &
-               pgl%multichan%channels(1:pgl%multichan%number_of_channels(iproc),iproc))) then
+          ! Stored channel groups use compact positions in all_unique_chans,
+          ! whereas pgl%multichan%channels still contains global group IDs.
+          if (all(all_unique_channelgroups(1:pgl%multichan%number_of_channels(iproc),i).eq. &
+               all_unique_chans_inv(pgl%multichan%channels(1:pgl%multichan%number_of_channels(iproc),iproc)))) then
              map_proc_to_group(iproc)=i
              found=.true.
              exit
@@ -117,7 +147,8 @@ contains
          all_unique_channelgroups(0:pgl%multichan%max_channels,1:nchans_group)
     allocate(pgl%multichan%map_proc_to_channelgroup(pgl%nproc))
     pgl%multichan%map_proc_to_channelgroup(1:pgl%nproc)=map_proc_to_group(1:pgl%nproc)
-    deallocate(pgl%multichan%channels)
+    ! Keep the uncompressed channel list: phase-space permutations make a
+    ! density specific to an individual matrix-element row.
   end subroutine setup_optimised_multichannel_weight_computation
 
   subroutine determine_multi_channel_size(part,n_ps)

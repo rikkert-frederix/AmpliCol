@@ -1,20 +1,24 @@
 module read_process_file
   use handling_processes
+  use run_parameters, only: ignore_final_state_width_fix
   implicit none
   integer :: sf_nprocs
   integer,dimension(:,:),allocatable :: unique_procs,processes,color_orders,multi_chans
+  integer,dimension(:,:),allocatable :: phase_space_permutations
+  integer,dimension(:,:,:),allocatable :: multi_chan_permutations
   type(phase_space_order_group),allocatable :: pgl_unique
   real(kind=8),dimension(:),allocatable :: unique_map_value
   integer,dimension(:),allocatable :: unique_map,iden_iproc
   integer,dimension(:,:,:),allocatable :: iden_processes
   real(kind=8),dimension(:,:),allocatable :: idenCOandMAPfactor
 contains
-  subroutine read_process_file_header(iunit,file_next,file_nunique,file_flavour_scheme)
+  subroutine read_process_file_header(iunit,file_next,file_nunique,file_flavour_scheme,file_version)
     implicit none
     integer,intent(in) :: iunit
     integer,intent(out) :: file_next,file_nunique,file_flavour_scheme
+    integer,intent(out),optional :: file_version
     character(len=1024) :: line
-    integer :: ios,ipos
+    integer :: ios,ipos,version
 
     read(iunit,'(a)',iostat=ios) line
     if (ios.ne.0) then
@@ -29,14 +33,28 @@ contains
           write(*,*) 'ERROR: invalid process-file flavour scheme header: ',trim(line)
           stop 1
        endif
-       read(iunit,*,iostat=ios) file_next,file_nunique
-    else
+       read(iunit,'(a)',iostat=ios) line
+       if (ios.ne.0) then
+          write(*,*) 'ERROR: cannot read numerical process-file header'
+          stop 1
+       endif
+    endif
+
+    version=1
+    read(line,*,iostat=ios) file_next,file_nunique,version
+    if (ios.ne.0) then
+       version=1
        read(line,*,iostat=ios) file_next,file_nunique
     endif
     if (ios.ne.0) then
        write(*,*) 'ERROR: invalid process-file first record: ',trim(line)
        stop 1
     endif
+    if (version.lt.1 .or. version.gt.2) then
+       write(*,*) 'ERROR: unsupported process-file version: ',version
+       stop 1
+    endif
+    if (present(file_version)) file_version=version
   end subroutine read_process_file_header
 
   subroutine count_process_groups(filename,nfile_groups)
@@ -71,23 +89,130 @@ contains
     if (allocated(unique_map)) deallocate(unique_map)
   end subroutine clear_process_file_metadata
 
+  subroutine apply_final_state_widths_from_process_file(filename)
+    implicit none
+    character(len=*),intent(in) :: filename
+    character(len=65536) :: buffer
+    integer :: iunit,ios,n_external,n_unique,version,iproc,igroup,ngroup_file,file_flavour_scheme
+    integer :: group_index,nproc_in_group,max_channels,nchannels
+    integer,dimension(:),allocatable :: phase_order,channels
+    integer,dimension(:,:),allocatable :: physical_process
+
+    if (ignore_final_state_width_fix) return
+    open(newunit=iunit,file=trim(filename),status='old',action='read',iostat=ios)
+    if (ios.ne.0) then
+       write (*,*) 'Could not open process file while applying final-state widths: ',trim(filename)
+       stop 1
+    endif
+    call read_process_file_header(iunit,n_external,n_unique,file_flavour_scheme,version)
+    if (n_external.lt.3 .or. n_unique.lt.1) then
+       write (*,*) 'Malformed process-file header while applying final-state widths'
+       stop 1
+    endif
+    do iproc=1,n_unique
+       read(iunit,*,iostat=ios)
+       if (ios.ne.0) then
+          write (*,*) 'Could not read unique subprocess while applying final-state widths',iproc
+          stop 1
+       endif
+    enddo
+    ! The first block contains canonical amplitude representatives, not the
+    ! physical subprocess labelling.  Walk the phase-space-group rows instead;
+    ! their first process field is the one later stored in iden_processes and
+    ! has physical incoming/final-state positions.
+    read(iunit,*,iostat=ios)
+    read(iunit,*,iostat=ios)
+    read(iunit,*,iostat=ios) ngroup_file
+    if (ios.ne.0 .or. ngroup_file.lt.1) then
+       write (*,*) 'Could not read phase-space groups while applying final-state widths'
+       stop 1
+    endif
+    read(iunit,*,iostat=ios)
+    allocate(phase_order(n_external))
+    allocate(physical_process(n_external,1))
+    do igroup=1,ngroup_file
+       read(iunit,*,iostat=ios) group_index,nproc_in_group,max_channels,phase_order
+       if (ios.ne.0 .or. group_index.ne.igroup .or. nproc_in_group.lt.1 .or.&
+            max_channels.lt.1) then
+          write (*,*) 'Malformed phase-space group while applying final-state widths',igroup
+          stop 1
+       endif
+       do iproc=1,nproc_in_group
+          read(iunit,'(a)',iostat=ios) buffer
+          if (ios.ne.0 .or. len_trim(buffer).eq.len(buffer)) then
+             write (*,*) 'Could not read subprocess row while applying final-state widths',igroup,iproc
+             stop 1
+          endif
+          read(buffer,*,iostat=ios) nchannels
+          if (ios.ne.0 .or. nchannels.lt.1 .or. nchannels.gt.max_channels) then
+             write (*,*) 'Invalid multichannel count while applying final-state widths',igroup,iproc
+             stop 1
+          endif
+          allocate(channels(nchannels))
+          read(buffer,*,iostat=ios) nchannels,channels,physical_process(:,1)
+          deallocate(channels)
+          if (ios.ne.0) then
+             write (*,*) 'Malformed subprocess process field while applying final-state widths',igroup,iproc
+             stop 1
+          endif
+          call phys_model%apply_final_state_widths(n_external,1,physical_process)
+       enddo
+       read(iunit,*,iostat=ios)
+       read(iunit,*,iostat=ios)
+       read(iunit,*,iostat=ios)
+       if (ios.ne.0 .and. igroup.ne.ngroup_file) then
+          write (*,*) 'Unexpected end of process file while applying final-state widths'
+          stop 1
+       endif
+    enddo
+    close(iunit)
+    deallocate(phase_order)
+    deallocate(physical_process)
+  end subroutine apply_final_state_widths_from_process_file
+
+  subroutine apply_final_state_widths_from_loaded_groups()
+    implicit none
+    integer :: igroup,iproc,iident
+    integer,dimension(:,:),allocatable :: physical_processes
+
+    if (ignore_final_state_width_fix) return
+    do igroup=1,ngroups
+       if (.not.allocated(pgl(igroup)%iden_processes)) cycle
+       allocate(physical_processes(pgl(igroup)%next,&
+            sum(pgl(igroup)%iden_iproc(1:pgl(igroup)%nproc))))
+       iident=0
+       do iproc=1,pgl(igroup)%nproc
+          physical_processes(:,iident+1:iident+pgl(igroup)%iden_iproc(iproc))=&
+               pgl(igroup)%iden_processes(:,1:pgl(igroup)%iden_iproc(iproc),iproc)
+          iident=iident+pgl(igroup)%iden_iproc(iproc)
+       enddo
+       call phys_model%apply_final_state_widths(pgl(igroup)%next,iident,&
+            physical_processes(:,1:iident))
+       deallocate(physical_processes)
+    enddo
+  end subroutine apply_final_state_widths_from_loaded_groups
+
   subroutine read_processes_from_file(filename,igroup_offset,file_flavour_scheme)
     implicit none
     character(len=80) :: filename
     integer,intent(in),optional :: igroup_offset
     integer,intent(out),optional :: file_flavour_scheme
-    integer :: iproc,igroup,igroup_global,icheck,nproc_in_group,max_channels,iflav,ndim,nfile_groups,offset,nf
+    integer :: iproc,igroup,igroup_global,icheck,nproc_in_group,max_channels,iflav,ndim,&
+         nfile_groups,offset,nf,process_file_version
     real(kind=8) :: idenCOfactor
-    integer,dimension(:),allocatable :: process,order,ichans,phase_space_orders
-    character(len=1024) :: buff
-    integer :: i,j
+    integer,dimension(:),allocatable :: process,order,ichans,phase_space_orders,phase_permutation
+    integer,dimension(:,:),allocatable :: channel_permutations
+    character(len=65536) :: buff
+    integer :: i,j,ios
+
     offset=0
     if (present(igroup_offset)) offset=igroup_offset
-    if (allocated(pgl_unique) .or. allocated(unique_procs) .or. allocated(unique_map) .or. allocated(unique_map_value)) then
+    if (allocated(pgl_unique) .or. allocated(unique_procs) .or. allocated(unique_map) .or.&
+         allocated(unique_map_value)) then
        call clear_process_file_metadata()
     endif
     open(unit=10,file=filename,status='old')
-    call read_process_file_header(10,next,nproc_unique,nf)
+    call read_process_file_header(10,next,nproc_unique,nf,process_file_version)
     if (present(file_flavour_scheme)) file_flavour_scheme=nf
     ndim=3*(next-2)-4
     if (include_pdf) ndim=ndim+2
@@ -113,6 +238,7 @@ contains
 
     allocate(process(1:next))
     allocate(order(1:next))
+    allocate(phase_permutation(1:next))
 
     read (10,*) 
     do igroup=1,nfile_groups
@@ -128,19 +254,79 @@ contains
        allocate(iden_iproc(nproc_in_group))
        allocate(processes(1:next,nproc_in_group))
        allocate(color_orders(1:next,nproc_in_group))
+       allocate(phase_space_permutations(1:next,nproc_in_group))
+       phase_space_permutations=0
        allocate(iden_processes(1:next,nproc_in_group,nproc_in_group))
        allocate(idenCOandMAPfactor(nproc_in_group,nproc_in_group))
        allocate(multi_chans(0:max_channels,nproc_in_group))
+       allocate(multi_chan_permutations(1:next,1:max_channels,nproc_in_group))
+       multi_chan_permutations=0
        allocate(ichans(0:max_channels))
+       allocate(channel_permutations(1:next,1:max_channels))
        do iflav=1,2
           do iproc=1,nproc_in_group
-             read(10,'(a)') buff
-             read(buff,*) ichans(0)
-             read(buff,*) ichans(0),ichans(1:ichans(0)),process(1:next),order(1:next),idenCOfactor
+             read(10,'(a)',iostat=ios) buff
+             if (ios.ne.0 .or. len_trim(buff).eq.len(buff)) then
+                write (*,*) 'Could not read a complete subprocess row'
+                stop 1
+             endif
+             read(buff,*,iostat=ios) ichans(0)
+             if (ios.ne.0 .or. ichans(0).lt.1 .or. ichans(0).gt.max_channels) then
+                write (*,*) 'Invalid number of multichannel partners in subprocess row'
+                stop 1
+             endif
+             read(buff,*,iostat=ios) ichans(0),ichans(1:ichans(0)),process(1:next),order(1:next),&
+                  idenCOfactor,phase_permutation(1:next),&
+                  channel_permutations(1:next,1:ichans(0))
+             if (ios.ne.0) then
+                if (process_file_version.ge.2) then
+                   write (*,*) 'Malformed version-2 subprocess row; phase-space maps are required'
+                   stop 1
+                endif
+                ! Backward compatibility with process files written before
+                ! per-density external-leg permutations were introduced.
+                read(buff,*,iostat=ios) ichans(0),ichans(1:ichans(0)),process(1:next),order(1:next),idenCOfactor
+                if (ios.ne.0) then
+                   write (*,*) 'Malformed legacy subprocess row'
+                   stop 1
+                endif
+                phase_permutation=[(i,i=1,next)]
+                do i=1,ichans(0)
+                   channel_permutations(1:next,i)=[(j,j=1,next)]
+                enddo
+             endif
+             if (any(ichans(1:ichans(0)).lt.1) .or. any(ichans(1:ichans(0)).gt.nfile_groups)) then
+                write (*,*) 'Multichannel partner outside the phase-space group range'
+                stop 1
+             endif
+             if (phase_permutation(1).ne.1 .or. phase_permutation(2).ne.2) then
+                write (*,*) 'Phase-space permutation must keep both incoming legs fixed'
+                stop 1
+             endif
+             if (any(channel_permutations(1:2,1:ichans(0)).ne.&
+                  spread([1,2],2,ichans(0)))) then
+                write (*,*) 'Multichannel phase-space permutations must keep incoming legs fixed'
+                stop 1
+             endif
+             do i=1,next
+                if (count(phase_permutation.eq.i).ne.1) then
+                   write (*,*) 'Invalid phase-space permutation',phase_permutation
+                   stop 1
+                endif
+                do j=1,ichans(0)
+                   if (count(channel_permutations(:,j).eq.i).ne.1) then
+                      write (*,*) 'Invalid multichannel phase-space permutation',&
+                           channel_permutations(:,j)
+                      stop 1
+                   endif
+                enddo
+             enddo
              if (iflav.eq.1) then
-                call add_to_process_list(process,order,idenCOfactor,max_channels,ichans,.true.)
+                call add_to_process_list(process,order,phase_permutation,channel_permutations,&
+                     idenCOfactor,max_channels,ichans,.true.)
              else
-                call add_to_process_list(process,order,idenCOfactor,max_channels,ichans,.false.)
+                call add_to_process_list(process,order,phase_permutation,channel_permutations,&
+                     idenCOfactor,max_channels,ichans,.false.)
              endif
           enddo
           if (iflav.eq.1) then
@@ -166,37 +352,54 @@ contains
        endif
        allocate(pgl(igroup_global)%processes(1:next,1:pgl(igroup_global)%nproc))
        allocate(pgl(igroup_global)%color_orders(1:next,1:pgl(igroup_global)%nproc))
+       allocate(pgl(igroup_global)%phase_space_permutations(1:next,1:pgl(igroup_global)%nproc))
        allocate(pgl(igroup_global)%phase_space_orders(1:next))
-       allocate(pgl(igroup_global)%idenCOandMAPfactor(1:maxval(iden_iproc(1:pgl(igroup_global)%nproc)),1:pgl(igroup_global)%nproc))
+       allocate(pgl(igroup_global)%idenCOandMAPfactor(&
+            1:maxval(iden_iproc(1:pgl(igroup_global)%nproc)),1:pgl(igroup_global)%nproc))
        allocate(pgl(igroup_global)%iden_iproc(1:pgl(igroup_global)%nproc))
-       allocate(pgl(igroup_global)%iden_processes(1:next,1:maxval(iden_iproc(1:pgl(igroup_global)%nproc)), &
-            1:pgl(igroup_global)%nproc))
-       allocate(pgl(igroup_global)%val_procs(1:maxval(iden_iproc(1:pgl(igroup_global)%nproc)),1:pgl(igroup_global)%nproc))
-       allocate(pgl(igroup_global)%multichan%channels(1:max_channels,1:pgl(igroup_global)%nproc))
+       allocate(pgl(igroup_global)%iden_processes(1:next,&
+            1:maxval(iden_iproc(1:pgl(igroup_global)%nproc)),1:pgl(igroup_global)%nproc))
+       allocate(pgl(igroup_global)%val_procs(&
+            1:maxval(iden_iproc(1:pgl(igroup_global)%nproc)),1:pgl(igroup_global)%nproc))
+       allocate(pgl(igroup_global)%multichan%channels(&
+            1:max_channels,1:pgl(igroup_global)%nproc))
+       allocate(pgl(igroup_global)%multichan%channel_permutations(&
+            1:next,1:max_channels,1:pgl(igroup_global)%nproc))
        allocate(pgl(igroup_global)%multichan%number_of_channels(1:pgl(igroup_global)%nproc))
-       pgl(igroup_global)%processes(1:next,1:pgl(igroup_global)%nproc)=processes(1:next,1:pgl(igroup_global)%nproc)
-       pgl(igroup_global)%color_orders(1:next,1:pgl(igroup_global)%nproc)=color_orders(1:next,1:pgl(igroup_global)%nproc)
-       pgl(igroup_global)%phase_space_orders(1:next)=phase_space_orders(1:next)
-       pgl(igroup_global)%idenCOandMAPfactor(1:maxval(iden_iproc(1:pgl(igroup_global)%nproc)),1:pgl(igroup_global)%nproc)=&
-            idenCOandMAPfactor(1:maxval(iden_iproc(1:pgl(igroup_global)%nproc)),1:pgl(igroup_global)%nproc)
-       pgl(igroup_global)%iden_iproc(1:pgl(igroup_global)%nproc)=iden_iproc(1:pgl(igroup_global)%nproc)
-       pgl(igroup_global)%iden_processes(1:next,1:maxval(iden_iproc(1:pgl(igroup_global)%nproc)),1:pgl(igroup_global)%nproc)=&
-            iden_processes(1:next,1:maxval(iden_iproc(1:pgl(igroup_global)%nproc)),1:pgl(igroup_global)%nproc)
+       pgl(igroup_global)%processes=processes(1:next,1:pgl(igroup_global)%nproc)
+       pgl(igroup_global)%color_orders=color_orders(1:next,1:pgl(igroup_global)%nproc)
+       pgl(igroup_global)%phase_space_permutations=&
+            phase_space_permutations(1:next,1:pgl(igroup_global)%nproc)
+       pgl(igroup_global)%phase_space_orders=phase_space_orders(1:next)
+       pgl(igroup_global)%idenCOandMAPfactor=&
+            idenCOandMAPfactor(1:maxval(iden_iproc(1:pgl(igroup_global)%nproc)),&
+            1:pgl(igroup_global)%nproc)
+       pgl(igroup_global)%iden_iproc=iden_iproc(1:pgl(igroup_global)%nproc)
+       pgl(igroup_global)%iden_processes=&
+            iden_processes(1:next,1:maxval(iden_iproc(1:pgl(igroup_global)%nproc)),&
+            1:pgl(igroup_global)%nproc)
        pgl(igroup_global)%multichan%channels=0
+       pgl(igroup_global)%multichan%channel_permutations=0
        do iproc=1,pgl(igroup_global)%nproc
           pgl(igroup_global)%multichan%channels(1:multi_chans(0,iproc),iproc)=&
                multi_chans(1:multi_chans(0,iproc),iproc)+offset
+          pgl(igroup_global)%multichan%channel_permutations(:,1:multi_chans(0,iproc),iproc)=&
+               multi_chan_permutations(:,1:multi_chans(0,iproc),iproc)
        enddo
-       pgl(igroup_global)%multichan%number_of_channels(1:pgl(igroup_global)%nproc)=multi_chans(0,1:pgl(igroup_global)%nproc)
+       pgl(igroup_global)%multichan%number_of_channels=&
+            multi_chans(0,1:pgl(igroup_global)%nproc)
        pgl(igroup_global)%passed=0
        deallocate(iden_iproc)
        deallocate(processes)
        deallocate(color_orders)
+       deallocate(phase_space_permutations)
        deallocate(phase_space_orders)
        deallocate(iden_processes)
        deallocate(idenCOandMAPfactor)
        deallocate(multi_chans)
+       deallocate(multi_chan_permutations)
        deallocate(ichans)
+       deallocate(channel_permutations)
        write (99,*) '****************************************************'
        do iproc=1,pgl(igroup_global)%nproc
           write(99,*) iproc,':',pgl(igroup_global)%processes(1:next,iproc),' ; ',&
@@ -319,7 +522,7 @@ contains
     real(kind=8),dimension(nevent,pgl%nproc),intent(in) :: amp2
     real(kind=8),dimension(pgl%nproc),intent(out) :: unique_map_value
     integer,dimension(pgl%nproc),intent(out) :: unique_map
-    integer :: i,j
+    integer :: i,j,k
     real(kind=8),dimension(nevent) :: ratio
     real(kind=8) :: ave
     real(kind=8),parameter :: tiny=1d-6
@@ -332,6 +535,14 @@ contains
        endif
        do j=1,i-1
           if (all(amp2(1:nevent,j).eq.0d0)) cycle
+          ! A numerical relation found on the deliberately massless probe
+          ! point is not a valid runtime reduction if it moves a massive
+          ! species to another external leg.
+          do k=1,pgl%next
+             if (phys_model%get_mass(pgl%processes(k,i)).ne.&
+                  phys_model%get_mass(pgl%processes(k,j))) exit
+          enddo
+          if (k.le.pgl%next) cycle
           ratio(1:nevent)=amp2(1:nevent,i)/amp2(1:nevent,j)
           ave=sum(ratio(1:nevent))/nevent
           if (all(abs(ratio(1:nevent)/ave-1d0).lt.tiny)) then
@@ -347,11 +558,13 @@ contains
     enddo
   end subroutine find_unique
 
-  subroutine add_to_process_list(process,order,idenCOfactor,max_channels,ichans,skip_same_flavour)
+  subroutine add_to_process_list(process,order,phase_permutation,channel_permutations,&
+       idenCOfactor,max_channels,ichans,skip_same_flavour)
     implicit none
     integer :: max_channels
     integer,dimension(0:max_channels) :: ichans
-    integer,dimension(next) :: process,order,process_unique
+    integer,dimension(next) :: process,order,process_unique,phase_permutation
+    integer,dimension(next,max_channels) :: channel_permutations
     real(kind=8) :: idenCOfactor,idenCOMAPfactor,idenMAPfactor
     integer,dimension(0:6) :: quarks
     logical :: skip_same_flavour,is_same_flavour
@@ -367,7 +580,8 @@ contains
        idenCOMAPfactor=idenCOfactor
     endif
     if (idenCOMAPfactor.eq.0d0) return
-    call add_to_unique_process_list(process,process_unique,order,idenCOMAPfactor,max_channels,ichans)
+    call add_to_unique_process_list(process,process_unique,order,phase_permutation,&
+         channel_permutations,idenCOMAPfactor,max_channels,ichans)
   end subroutine add_to_process_list
 
 
@@ -431,6 +645,20 @@ contains
           endif
        enddo
     endif
+    ! Numerical flavour reduction is constructed on a common massless phase-
+    ! space point.  It is valid only when the reduced representative has the
+    ! same external mass layout as the physical subprocess.  In particular,
+    ! crossing a final-state top into an initial light-quark slot would feed
+    ! massive wavefunctions the wrong labelled momentum.  Retain the exact
+    ! subprocess in that case; light-flavour reductions remain unchanged.
+    do i=1,next
+       if (phys_model%get_mass(process_unique(i)).ne.&
+            phys_model%get_mass(process(i))) then
+          process_unique=process
+          idenMAPfactor=1d0
+          exit
+       endif
+    enddo
     if (pgl_unique%amps(1)%same_flav(iproc)) then
        is_same_flavour=.true.
     else
@@ -438,11 +666,13 @@ contains
     endif
   end subroutine get_unique_process_from_quarks
 
-  subroutine add_to_unique_process_list(process,process_unique,order,idenCOMAPfactor,max_channels,ichans)
+  subroutine add_to_unique_process_list(process,process_unique,order,phase_permutation,&
+       channel_permutations,idenCOMAPfactor,max_channels,ichans)
     implicit none
     integer,intent(in) :: max_channels
     integer,dimension(0:max_channels),intent(in) :: ichans
-    integer,dimension(next) :: process,process_unique,order
+    integer,dimension(next) :: process,process_unique,order,phase_permutation
+    integer,dimension(next,max_channels) :: channel_permutations
     real(kind=8) :: idenCOMAPfactor
     integer :: iproc
     call move_colour_singlet_in_order(process,order)
@@ -451,15 +681,19 @@ contains
        nprocs=nprocs+1
        processes(1:next,nprocs)=process(1:next)
        color_orders(1:next,nprocs)=order(1:next)
+       phase_space_permutations(1:next,nprocs)=phase_permutation(1:next)
        iden_iproc(nprocs)=1
        iden_processes(1:next,iden_iproc(nprocs),nprocs)=process(1:next)
        idenCOandMAPfactor(iden_iproc(nprocs),nprocs)=idenCOMAPfactor
        multi_chans(0:ichans(0),nprocs)=ichans(0:ichans(0))
+       multi_chan_permutations(1:next,1:ichans(0),nprocs)=&
+            channel_permutations(1:next,1:ichans(0))
        return
     endif
     do iproc=1,nprocs
        if (all(process_unique(1:next).eq.processes(1:next,iproc)) &
-            .and. all(order(1:next).eq.color_orders(1:next,iproc))) exit
+            .and. all(order(1:next).eq.color_orders(1:next,iproc)) &
+            .and. all(phase_permutation(1:next).eq.phase_space_permutations(1:next,iproc))) exit
     enddo
 
     if (iproc.gt.nprocs) then
@@ -467,10 +701,13 @@ contains
        nprocs=nprocs+1
        processes(1:next,nprocs)=process_unique(1:next)
        color_orders(1:next,nprocs)=order(1:next)
+       phase_space_permutations(1:next,nprocs)=phase_permutation(1:next)
        iden_iproc(nprocs)=1
        iden_processes(1:next,iden_iproc(nprocs),nprocs)=process(1:next)
        idenCOandMAPfactor(iden_iproc(nprocs),nprocs)=idenCOMAPfactor
        multi_chans(0:ichans(0),nprocs)=ichans(0:ichans(0))
+       multi_chan_permutations(1:next,1:ichans(0),nprocs)=&
+            channel_permutations(1:next,1:ichans(0))
     else
        ! identical to another matrix element
        iden_iproc(iproc)=iden_iproc(iproc)+1
@@ -485,6 +722,11 @@ contains
           write (*,*) 'Multi-channels not the same among identical processes'
           write (*,*) ichans(1:ichans(0))
           write (*,*) multi_chans(1:ichans(0),iproc)
+          stop 1
+       endif
+       if (any(channel_permutations(1:next,1:ichans(0)).ne.&
+            multi_chan_permutations(1:next,1:ichans(0),iproc))) then
+          write (*,*) 'Phase-space permutations not the same among identical processes'
           stop 1
        endif
     endif

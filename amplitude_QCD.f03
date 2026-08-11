@@ -5,6 +5,7 @@ module amplitude_QCD_mod
   logical,parameter :: use_real_gluons=.false.
   logical,parameter :: use_symm_cm=.true.
   logical,parameter :: use_cm_dict=.true.
+  integer(kind=8),parameter :: max_three_line_color_orders=5000_8
   type :: current
      ! if adding variables here, also update the finalize_current and assign_current subroutines
      integer :: type,bin,n_vert,chirality
@@ -47,7 +48,7 @@ module amplitude_QCD_mod
      integer,dimension(:),allocatable :: n_cur_start,n_cur_end,n_vert_start,n_vert_end, &
           pp_bin_to_i,pp_i_to_bin,col_index,n_col_vals,iproc_start,n_sing,n_qqbar
      integer,dimension(:,:),allocatable :: perm,curr2amp,i_col_i,processes,&
-          same_flavour_sum,same_flavour_sum_operation
+          same_flavour_sum,same_flavour_sum_operation,three_line_partner_curr2amp
      integer,dimension(:,:,:),allocatable :: spins,row_index
      logical,dimension(:),allocatable :: include_amp,same_flav
      logical :: lib_created=.false.
@@ -178,6 +179,9 @@ contains
 
     if (this%imode.eq.1) call allocate_and_fill_spins()
     call allocate_and_fill_colour_permutations()
+    if (this%imode.eq.2 .and. this%n_qqbar(1).eq.3) then
+       call group_three_line_colour_flows()
+    endif
     call allocate_and_fill_momentum_array()
 
     ! All done. But there could be currents that are not needed. Filter them out
@@ -382,6 +386,139 @@ contains
       enddo
     end subroutine allocate_and_fill_colour_permutations
 
+    subroutine group_three_line_colour_flows()
+      ! The alternative three-line canonical order is needed while building
+      ! currents, but it can close the same physical open-string flow more
+      ! than once. Keep one amplitude for each set of q[g...]qbar strings and
+      ! retain the second closure so that both contributions are evaluated.
+      implicit none
+      integer :: old_amp,flow,flow_count
+      integer,dimension(:),allocatable :: representative,partner
+      integer,dimension(:,:),allocatable :: old_curr2amp,old_perm,&
+           old_same_flavour_sum,old_same_flavour_sum_operation
+      logical,dimension(:),allocatable :: old_include_amp
+
+      allocate(representative(this%n_amps))
+      allocate(partner(this%n_amps))
+      representative=0
+      partner=0
+      flow_count=0
+      do old_amp=1,this%n_amps
+         do flow=1,flow_count
+            if (same_three_line_flow(this%perm(:,old_amp),&
+                 this%perm(:,representative(flow)))) exit
+         enddo
+         if (flow.gt.flow_count) then
+            flow_count=flow_count+1
+            representative(flow_count)=old_amp
+         elseif (partner(flow).eq.0) then
+            partner(flow)=old_amp
+         else
+            write (*,*) 'More than two closures for a three-line colour flow',flow
+            stop 1
+         endif
+      enddo
+      if (flow_count.ne.this%nColOrd) then
+         write (*,*) 'Unexpected three-line colour-flow closure multiplicity',&
+              flow_count,this%nColOrd,this%n_amps
+         stop 1
+      endif
+
+      allocate(old_curr2amp(2,this%n_amps))
+      allocate(old_perm(size(this%perm,1),this%n_amps))
+      allocate(old_include_amp(this%n_amps))
+      allocate(old_same_flavour_sum(this%n_amps,2))
+      allocate(old_same_flavour_sum_operation(this%n_amps,2))
+      old_curr2amp=this%curr2amp
+      old_perm=this%perm
+      old_include_amp=this%include_amp
+      old_same_flavour_sum=this%same_flavour_sum
+      old_same_flavour_sum_operation=this%same_flavour_sum_operation
+      allocate(this%three_line_partner_curr2amp(2,this%nColOrd))
+      this%three_line_partner_curr2amp=0
+      do flow=1,this%nColOrd
+         this%curr2amp(:,flow)=old_curr2amp(:,representative(flow))
+         this%perm(:,flow)=old_perm(:,representative(flow))
+         this%include_amp(flow)=old_include_amp(representative(flow))
+         this%same_flavour_sum(flow,:)=&
+              old_same_flavour_sum(representative(flow),:)
+         this%same_flavour_sum_operation(flow,:)=&
+              old_same_flavour_sum_operation(representative(flow),:)
+         if (partner(flow).ne.0) then
+            this%three_line_partner_curr2amp(:,flow)=old_curr2amp(:,partner(flow))
+         endif
+      enddo
+      this%n_amps=this%nColOrd
+      this%iproc_start(this%nprocs+1)=this%n_amps+1
+    end subroutine group_three_line_colour_flows
+
+    logical function same_three_line_flow(left,right)
+      implicit none
+      integer,dimension(:),intent(in) :: left,right
+      integer :: line,other,candidate
+      integer,dimension(3) :: left_len,right_len
+      integer,dimension(n,3) :: left_lines,right_lines
+
+      call split_three_line_flow(left,left_len,left_lines)
+      call split_three_line_flow(right,right_len,right_lines)
+      same_three_line_flow=.true.
+      do line=1,3
+         other=0
+         do candidate=1,3
+            if (right_lines(1,candidate).eq.left_lines(1,line)) then
+               other=candidate
+               exit
+            endif
+         enddo
+         if (other.eq.0) then
+            same_three_line_flow=.false.
+            return
+         endif
+         if (left_len(line).ne.right_len(other)) then
+            same_three_line_flow=.false.
+            return
+         endif
+         if (any(left_lines(1:left_len(line),line).ne.&
+              right_lines(1:right_len(other),other))) then
+            same_three_line_flow=.false.
+            return
+         endif
+      enddo
+    end function same_three_line_flow
+
+    subroutine split_three_line_flow(word,line_len,lines)
+      implicit none
+      integer,dimension(:),intent(in) :: word
+      integer,dimension(3),intent(out) :: line_len
+      integer,dimension(n,3),intent(out) :: lines
+      integer :: pos,label,line,nord
+
+      line_len=0
+      lines=0
+      line=0
+      nord=size(word)
+      do pos=1,nord
+         label=word(pos)
+         if (is_quark_from_order(label,1)) then
+            line=line+1
+            if (line.gt.3) then
+               write (*,*) 'Too many strings in three-line colour flow',word
+               stop 1
+            endif
+         endif
+         if (line.eq.0) then
+            write (*,*) 'Three-line colour flow does not begin with a quark',word
+            stop 1
+         endif
+         line_len(line)=line_len(line)+1
+         lines(line_len(line),line)=label
+      enddo
+      if (line.ne.3) then
+         write (*,*) 'Incomplete three-line colour flow',word
+         stop 1
+      endif
+    end subroutine split_three_line_flow
+
     subroutine allocate_and_fill_momentum_array()
       implicit none
       integer :: ic
@@ -430,10 +567,11 @@ contains
       use math_functions
       implicit none
       integer :: i,nq,naq,nglu,nsing,iq,iaq,iglu,ising
+      integer(kind=8) :: color_orders_64
       do iproc=1,this%nprocs
          nq=0; naq=0 ; nglu=0 ; nsing=0
          do i=1,n
-            if (pm%is_gluon(this%processes(i,iproc))) nglu=nglu+1
+            if (pm%is_colour_flow_vector(this%processes(i,iproc))) nglu=nglu+1
             if (is_quark_from_order(i,iproc)) nq=nq+1
             if (is_antiquark_from_order(i,iproc)) naq=naq+1
             if (pm%is_singlet(this%processes(i,iproc))) nsing=nsing+1
@@ -442,18 +580,23 @@ contains
             write (*,*) 'not the same number of quarks and anti-quarks',nq,naq
             stop 1
          endif
-         if (nq.gt.2) then
-            write (*,*) 'more than two quarks',nq
+         if (nq.gt.3) then
+            write (*,*) 'more than three quarks',nq
             stop 1
          endif
          if (nq+naq+nsing+nglu.ne.n) then
             write (*,*) 'particle types do not add up',nq,naq,nsing,nglu,':',n
             stop 1
          endif
+         if (nq.eq.3) then
+            ! The three-line order was canonicalised while checking the input.
+            ! Rebuilding it with the two-line layout below would drop a line.
+            cycle
+         endif
          iq=0; iaq=0 ; iglu=0 ; ising=0
          order(1:n,1,iproc)= 0
          do i=1,n
-            if (pm%is_gluon(this%processes(i,iproc))) then
+            if (pm%is_colour_flow_vector(this%processes(i,iproc))) then
                iglu=iglu+1
                if (nq.ge.1) then
                   order(iglu+1,1,iproc)=i
@@ -490,6 +633,23 @@ contains
          this%nColOrd=factorial(nglu)
       elseif (nq.eq.2) then
          this%nColOrd=factorial(nglu)*(nglu+1)*2
+      elseif (nq.eq.3) then
+         ! Distribute the gluons over three ordered strings and connect the
+         ! three quarks to the three antiquarks in all 3! ways.
+         color_orders_64=3_8*int(nglu+1,kind=8)*int(nglu+2,kind=8)
+         do i=2,nglu
+            if (color_orders_64.gt.max_three_line_color_orders/int(i,kind=8)) then
+               color_orders_64=max_three_line_color_orders+1_8
+               exit
+            endif
+            color_orders_64=color_orders_64*int(i,kind=8)
+         enddo
+         if (color_orders_64.gt.max_three_line_color_orders) then
+            write (*,*) 'Three-line colour basis exceeds supported size',&
+                 color_orders_64,max_three_line_color_orders
+            stop 1
+         endif
+         this%nColOrd=int(color_orders_64)
       else
          write (*,*) 'Number of colour orders unknown',nq
          stop 1
@@ -523,6 +683,15 @@ contains
       allocate(this%processes(n,this%nprocs))
       allocate(this%n_qqbar(1:this%nprocs))
       this%processes(1:n,1:this%nprocs)=part(1:n,1:this%nprocs)
+      do iproc=2,this%nprocs
+         do i=1,n
+            if (pm%is_lepton_any(this%processes(i,iproc)) .neqv. &
+                 pm%is_lepton_any(this%processes(i,1))) then
+               write (*,*) 'Lepton positions must agree within a process group',i,iproc
+               stop 1
+            endif
+         enddo
+      enddo
       do iproc=1,this%nprocs
          this%n_qqbar(iproc)=number_of_quark_lines(this%processes(1,iproc))
       enddo
@@ -539,6 +708,7 @@ contains
       allocate(this%same_flav(1:this%nprocs))
       do iproc=1,this%nprocs
          if (this%n_qqbar(iproc).eq.3) then
+            if (this%imode.eq.2) call canonicalize_three_line_order(iproc)
             call fill_alternative_quark_order(iproc)
          endif
          this%same_flav(iproc)=.false. ! This will be updated once the numerical check using 'find_same_flavour' is done
@@ -617,46 +787,127 @@ contains
       enddo
     end subroutine check_input_consistency
 
+    subroutine canonicalize_three_line_order(iproc)
+      implicit none
+      integer,intent(in) :: iproc
+      integer :: i,pos,nq,naq,nglu,nsing
+      integer,dimension(3) :: q,aq
+      integer,dimension(n) :: gluons,singlets
+
+      q=0
+      aq=0
+      gluons=0
+      singlets=0
+      nq=0
+      naq=0
+      nglu=0
+      nsing=0
+      do i=1,n
+         if (is_quark_from_order(i,iproc)) then
+            nq=nq+1
+            if (nq.le.3) q(nq)=i
+         elseif (is_antiquark_from_order(i,iproc)) then
+            naq=naq+1
+            if (naq.le.3) aq(naq)=i
+         elseif (pm%is_colour_flow_vector(this%processes(i,iproc))) then
+            nglu=nglu+1
+            gluons(nglu)=i
+         elseif (pm%is_singlet(this%processes(i,iproc))) then
+            nsing=nsing+1
+            singlets(nsing)=i
+         else
+            write (*,*) 'Unknown particle in three-line colour order',&
+                 this%processes(i,iproc)
+            stop 1
+         endif
+      enddo
+      if (nq.ne.3 .or. naq.ne.3) then
+         write (*,*) 'Three-line colour order has inconsistent endpoints',nq,naq
+         stop 1
+      endif
+
+      pos=1
+      order(pos,1,iproc)=q(1)
+      do i=1,nglu
+         pos=pos+1
+         order(pos,1,iproc)=gluons(i)
+      enddo
+      pos=pos+1
+      order(pos,1,iproc)=aq(1)
+      pos=pos+1
+      order(pos,1,iproc)=q(2)
+      pos=pos+1
+      order(pos,1,iproc)=aq(2)
+      pos=pos+1
+      order(pos,1,iproc)=q(3)
+      do i=1,nsing
+         pos=pos+1
+         order(pos,1,iproc)=singlets(i)
+      enddo
+      pos=pos+1
+      order(pos,1,iproc)=aq(3)
+      if (pos.ne.n) then
+         write (*,*) 'Three-line canonical colour order has wrong size',pos,n
+         stop 1
+      endif
+    end subroutine canonicalize_three_line_order
+
     subroutine fill_alternative_quark_order(iproc)
       implicit none
       integer,intent(in) :: iproc
-      integer :: i
+      integer :: i,ncolored
       integer,dimension(3) :: q,aq
+      integer,dimension(n) :: colored_positions,colored_order,alternative
       q=0
       aq=0
+      ncolored=0
+      colored_positions=0
+      colored_order=0
+      alternative=0
       do i=1,n
+         if (pm%is_singlet(this%processes(order(i,1,iproc),iproc))) cycle
+         ncolored=ncolored+1
+         colored_positions(ncolored)=i
+         colored_order(ncolored)=order(i,1,iproc)
          if (is_quark_from_order(order(i,1,iproc),iproc)) then
             if (q(1).eq.0) then
-               q(1)=i
+               q(1)=ncolored
             elseif (q(2).eq.0) then
-               q(2)=i
+               q(2)=ncolored
             elseif (q(3).eq.0) then
-               q(3)=i
+               q(3)=ncolored
             endif
          endif
          if (is_antiquark_from_order(order(i,1,iproc),iproc)) then
             if (aq(1).eq.0) then
-               aq(1)=i
+               aq(1)=ncolored
             elseif (aq(2).eq.0) then
-               aq(2)=i
+               aq(2)=ncolored
             elseif (aq(3).eq.0) then
-               aq(3)=i
+               aq(3)=ncolored
             endif
          endif
       enddo
       if (aq(1).ne.q(2)-1) then
          write (*,*) 'Second quark should come right after first anti-quark in colour order'
+         write (*,*) q,aq,ncolored,colored_order(1:ncolored)
          stop 1
       endif
       if (aq(2).ne.q(3)-1) then
          write (*,*) 'Third quark should come right after second anti-quark in colour order'
+         write (*,*) q,aq,ncolored,colored_order(1:ncolored)
          stop 1
       endif
-      if (aq(3).ne.n) then
-         write (*,*) 'there are more particles after final anti-quark'
+      if (aq(3).ne.ncolored) then
+         write (*,*) 'there are more coloured particles after final anti-quark'
          stop 1
       endif
-      order(:,2,iproc)=[order(q(2):aq(2),1,iproc),order(q(1):aq(1),1,iproc),order(q(3):aq(3),1,iproc)]
+      alternative(1:ncolored)=[colored_order(q(2):aq(2)),&
+           colored_order(q(1):aq(1)),colored_order(q(3):aq(3))]
+      order(:,2,iproc)=order(:,1,iproc)
+      do i=1,ncolored
+         order(colored_positions(i),2,iproc)=alternative(i)
+      enddo
     end subroutine fill_alternative_quark_order
     
     subroutine set_max_cur()
@@ -1120,21 +1371,55 @@ contains
       ! are made up of only gluons).
       implicit none
       logical,dimension(8) :: vertex_sign
+      logical :: lepton_sign
       integer :: i,ctype,ichir,nperm
       integer,dimension(0:isize) :: singlet_mv
       type(current),dimension(8) :: new_currents
+      ! External spinors are Grassmann odd.  The numerical wavefunctions used
+      ! below commute, so restore the sign needed to put the leptons contained
+      ! in the two child currents into one fixed (external-leg) order.
+      if (interaction_list_local(this%n_vert)%type.eq.22) then
+         ! The antilepton-lepton rule evaluates its spinor chain in the
+         ! opposite order; use that same order for the Grassmann factors.
+         lepton_sign=lepton_reordering_is_odd(ic2,ic1)
+      else
+         lepton_sign=lepton_reordering_is_odd(ic1,ic2)
+      endif
       if (.not.use_symmetry .or. this%imode.eq.1 .or. this%imode.eq.3) then
          new_currents(1)=combine_currents(ic1,ic2,ctype,ichir,singlet_mv,0)
          interaction_list_local(this%n_vert)%singlet_mv(0:isize)=singlet_mv(0:isize)
-         call add_current(.false.,new_currents(1))
+         call add_current(lepton_sign,new_currents(1))
          return
       endif
       ! Need to consider all the possible permutations
       call check_all_permutations(ctype,ichir,nperm,new_currents,vertex_sign)
       do i=1,nperm
-         call add_current(vertex_sign(i),new_currents(i))
+         call add_current(vertex_sign(i) .neqv. lepton_sign,new_currents(i))
       enddo
     end subroutine add_all_currents
+
+    logical function lepton_reordering_is_odd(current1,current2)
+      ! Return the parity of the permutation which changes
+      !
+      !   (leptons in current1), (leptons in current2)
+      !
+      ! into ascending external-leg order.  Applying this at every recursive
+      ! merge gives all diagrams the same external-fermion convention, including
+      ! diagrams with different pairings of identical leptons.
+      implicit none
+      integer,intent(in) :: current1,current2
+      integer :: i,j,ncross
+      ncross=0
+      do i=1,n
+         if (.not.btest(current_list_local(current1)%bin,i-1)) cycle
+         if (.not.pm%is_lepton_any(this%processes(i,1))) cycle
+         do j=1,i-1
+            if (.not.btest(current_list_local(current2)%bin,j-1)) cycle
+            if (pm%is_lepton_any(this%processes(j,1))) ncross=ncross+1
+         enddo
+      enddo
+      lepton_reordering_is_odd=mod(ncross,2).eq.1
+    end function lepton_reordering_is_odd
 
     subroutine check_all_permutations(ctype,ichir,nperm,new_currents,vertex_sign)
       ! If a current only contains (external) gluons, we can use symmetry to
@@ -1251,9 +1536,7 @@ contains
             if (new_current%chirality.ne.current_list_local(ic)%chirality) cycle
             if (new_current%bin.ne.current_list_local(ic)%bin) cycle
             if (new_current%ext_cur.ne.current_list_local(ic)%ext_cur) cycle
-            current_list_local(ic)%n_vert=current_list_local(ic)%n_vert+1
-            current_list_local(ic)%vertices(current_list_local(ic)%n_vert)=this%n_vert
-            current_list_local(ic)%vertex_sign(current_list_local(ic)%n_vert)=vertex_sign
+            call append_current_vertex(ic,this%n_vert,vertex_sign)
             return
          enddo
          ! Need a new current
@@ -1263,13 +1546,13 @@ contains
          current_list_local(this%n_cur)%mass=pm%get_mass(new_current%type)
          current_list_local(this%n_cur)%width=pm%get_width(new_current%type)
          
-         if (pm%is_gluon(new_current%type)) then
+         if (pm%is_colour_flow_vector(new_current%type)) then
             allocate(current_list_local(this%n_cur)%vertices(5*(isize-1)))
             allocate(current_list_local(this%n_cur)%vertex_sign(5*(isize-1)))
-         elseif (pm%is_tensor(new_current%type)) then
+         elseif (pm%is_auxiliary_tensor(new_current%type)) then
             allocate(current_list_local(this%n_cur)%vertices(2*(isize-1)))
             allocate(current_list_local(this%n_cur)%vertex_sign(2*(isize-1)))
-         elseif (pm%is_massiveboson(new_current%type)) then
+         elseif (pm%is_massive_vector(new_current%type)) then
             allocate(current_list_local(this%n_cur)%vertices(5*(isize-1)))
             allocate(current_list_local(this%n_cur)%vertex_sign(5*(isize-1)))
          else
@@ -1298,13 +1581,13 @@ contains
                     current_list_local(ic)%spin(1:isize)
                stop 1
             endif
-            if (pm%is_gluon(new_current%type)) then
+            if (pm%is_colour_flow_vector(new_current%type)) then
                allocate(current_list_local(ic)%vertices(5*(isize-1)))
                allocate(current_list_local(ic)%vertex_sign(5*(isize-1)))
-            elseif (pm%is_tensor(new_current%type)) then
+            elseif (pm%is_auxiliary_tensor(new_current%type)) then
                allocate(current_list_local(ic)%vertices(isize-1))
                allocate(current_list_local(ic)%vertex_sign(isize-1))
-            elseif (pm%is_massiveboson(new_current%type)) then
+            elseif (pm%is_massive_vector(new_current%type)) then
                allocate(current_list_local(this%n_cur)%vertices(5*(isize-1)))
                allocate(current_list_local(this%n_cur)%vertex_sign(5*(isize-1)))
             else
@@ -1314,11 +1597,36 @@ contains
             current_list_local(ic)%n_vert=0
          endif
          ! add the vertex to the current
-         current_list_local(ic)%n_vert=current_list_local(ic)%n_vert+1
-         current_list_local(ic)%vertices(current_list_local(ic)%n_vert)=this%n_vert
-         current_list_local(ic)%vertex_sign(current_list_local(ic)%n_vert)=vertex_sign
+         call append_current_vertex(ic,this%n_vert,vertex_sign)
       endif
     end subroutine add_current
+
+    subroutine append_current_vertex(ic,iv,vertex_sign)
+      implicit none
+      integer,intent(in) :: ic,iv
+      logical,intent(in) :: vertex_sign
+      integer :: old_capacity,new_capacity
+      integer,dimension(:),allocatable :: vertices
+      logical,dimension(:),allocatable :: vertex_signs
+
+      if (.not.allocated(current_list_local(ic)%vertices)) then
+         allocate(current_list_local(ic)%vertices(1))
+         allocate(current_list_local(ic)%vertex_sign(1))
+      elseif (current_list_local(ic)%n_vert.eq.size(current_list_local(ic)%vertices)) then
+         old_capacity=size(current_list_local(ic)%vertices)
+         new_capacity=max(1,2*old_capacity)
+         allocate(vertices(new_capacity),vertex_signs(new_capacity))
+         vertices(1:current_list_local(ic)%n_vert)=&
+              current_list_local(ic)%vertices(1:current_list_local(ic)%n_vert)
+         vertex_signs(1:current_list_local(ic)%n_vert)=&
+              current_list_local(ic)%vertex_sign(1:current_list_local(ic)%n_vert)
+         call move_alloc(vertices,current_list_local(ic)%vertices)
+         call move_alloc(vertex_signs,current_list_local(ic)%vertex_sign)
+      endif
+      current_list_local(ic)%n_vert=current_list_local(ic)%n_vert+1
+      current_list_local(ic)%vertices(current_list_local(ic)%n_vert)=iv
+      current_list_local(ic)%vertex_sign(current_list_local(ic)%n_vert)=vertex_sign
+    end subroutine append_current_vertex
 
     subroutine create_current_dict()
       ! Create a dictionary that uniquely gives every current a label. This
@@ -1778,7 +2086,8 @@ contains
     if (.not. allocated(this%current_list(1)%val_c) .and. .not.allocated(this%current_list(1)%val_r)) then
        do ic=1,this%n_cur
           if (use_real_gluons .and. &
-               (pm%is_gluon(this%current_list(ic)%type) .or. pm%is_tensor6(this%current_list(ic)%type))) then
+               (pm%is_colour_flow_vector(this%current_list(ic)%type) .or. &
+               pm%is_auxiliary_tensor(this%current_list(ic)%type))) then
              dim=current_dim(ic)
              allocate(this%current_list(ic)%val_r(1:dim))
           else
@@ -1816,34 +2125,34 @@ contains
                 ih_in=this%current_list(ic)%spin(1)
              endif
              pp_loc=this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin))
-             if (pm%is_gluon(this%current_list(ic)%type) .or. pm%is_photon(this%current_list(ic)%type)) then
+             if (pm%is_colour_flow_vector(this%current_list(ic)%type) .or. pm%is_photon(this%current_list(ic)%type)) then
                 if (use_real_gluons) then
-                   call ext_gluon_real(pp_loc, &
+                   call ext_massless_vector_real(pp_loc, &
                         ih_in,ifinal,this%current_list(ic)%val_r(1:4))
                 else
-                   call ext_gluon_cmplx(pp_loc, &
+                   call ext_massless_vector_cmplx(pp_loc, &
                         ih_in,ifinal,this%current_list(ic)%val_c(1:4))
                 endif
              elseif (pm%is_quark(this%current_list(ic)%type) .or. &
                   pm%is_lepton(this%current_list(ic)%type)) then
                 if (this%current_list(ic)%chirality.ne.0) then
-                   call ext_quark_weyl(pp_loc, &
+                   call ext_fermion_outflow_weyl(pp_loc, &
                         ih_in,ifinal,this%current_list(ic)%val_c(1:2),this%current_list(ic)%chirality)
                 else
-                   call ext_quark(pp_loc, &
+                   call ext_fermion_outflow(pp_loc, &
                         ih_in,ifinal,this%current_list(ic)%val_c(1:4),this%current_list(ic)%mass)
                 endif
              elseif (pm%is_antiquark(this%current_list(ic)%type) .or. &
                   pm%is_antilepton(this%current_list(ic)%type)) then
                 if (this%current_list(ic)%chirality.ne.0) then
-                   call ext_antiquark_weyl(pp_loc, &
+                   call ext_fermion_inflow_weyl(pp_loc, &
                         ih_in,ifinal,this%current_list(ic)%val_c(1:2),this%current_list(ic)%chirality)
                 else
-                   call ext_antiquark(pp_loc, &
+                   call ext_fermion_inflow(pp_loc, &
                         ih_in,ifinal,this%current_list(ic)%val_c(1:4),this%current_list(ic)%mass)
                 endif
-             elseif (pm%is_massiveboson(this%current_list(ic)%type)) then
-                call ext_gluon_mass(pp_loc, &
+             elseif (pm%is_massive_vector(this%current_list(ic)%type)) then
+                call ext_massive_vector(pp_loc, &
                      ih_in,ifinal,this%current_list(ic)%val_c(1:4),this%current_list(ic)%mass)
              elseif (pm%is_higgs(this%current_list(ic)%type)) then
                 call ext_scalar(pp_loc, &
@@ -1882,33 +2191,33 @@ contains
              endif
           elseif(this%interaction_list(iv)%type.eq.1) then
              if (use_real_gluons) then
-                call TwoGluonToTensor_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:4),&
+                call TwoGluonToAuxTensor_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:4),&
                      this%current_list(this%interaction_list(iv)%currents(2))%val_r(1:4),&
                      this%interaction_list(iv)%val_r(1:6))
              else
-                call TwoGluonToTensor(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                call TwoGluonToAuxTensor(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                      this%interaction_list(iv)%val_c(1:6))
              endif
 
           elseif(this%interaction_list(iv)%type.eq.2) then
              if (use_real_gluons) then
-                call TensorGluontoGluon_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:6),&
+                call AuxTensorGluonToGluon_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:6),&
                      this%current_list(this%interaction_list(iv)%currents(2))%val_r(1:4),&
                      this%interaction_list(iv)%val_r(1:4))
              else
-                call TensorGluontoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:6),&
+                call AuxTensorGluonToGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:6),&
                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                      this%interaction_list(iv)%val_c(1:4))
              endif
 
           elseif(this%interaction_list(iv)%type.eq.3) then
              if (use_real_gluons) then
-                call GluonTensortoGluon_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:4),&
+                call GluonAuxTensorToGluon_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:4),&
                                              this%current_list(this%interaction_list(iv)%currents(2))%val_r(1:6),&
                                              this%interaction_list(iv)%val_r(1:4))
              else
-                call GluonTensortoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                call GluonAuxTensorToGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                         this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:6),&
                                         this%interaction_list(iv)%val_c(1:4))
              endif
@@ -1919,16 +2228,16 @@ contains
                    write (*,*) 'Weyl fermions with real gluons are not implemented'
                    stop 1
                 endif
-                call GluonQuarktoQuark_weyl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
+                call ColourFlowVectorQuarkToQuark_weyl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
                                             this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
                                             this%interaction_list(iv)%val_c(1),&
                                             this%interaction_list(iv)%chirality)
              elseif (use_real_gluons) then
-                call GluonQuarktoQuark_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:4),&
+                call ColourFlowVectorQuarkToQuark_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:4),&
                                             this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                             this%interaction_list(iv)%val_c(1:4))
              else
-                call GluonQuarktoQuark(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                call ColourFlowVectorQuarkToQuark(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                        this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                        this%interaction_list(iv)%val_c(1:4))
              endif
@@ -1939,16 +2248,19 @@ contains
                    write (*,*) 'Weyl fermions with real gluons are not implemented'
                    stop 1
                 endif
-                call GluonAquarktoAquark_weyl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
+                call ColourFlowVectorAntiquarkToAntiquark_weyl(&
+                     this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
                                               this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
                                               this%interaction_list(iv)%val_c(1),&
                                               this%interaction_list(iv)%chirality)
              elseif (use_real_gluons) then
-                call GluonAquarktoAquark_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:4),&
+                call ColourFlowVectorAntiquarkToAntiquark_real(&
+                     this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:4),&
                                               this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                               this%interaction_list(iv)%val_c(1:4))
              else
-                 call GluonAquarktoAquark(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                 call ColourFlowVectorAntiquarkToAntiquark(&
+                      this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                          this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                          this%interaction_list(iv)%val_c(1:4))
              endif
@@ -1958,16 +2270,16 @@ contains
                    write (*,*) 'Weyl fermions with real gluons are not implemented'
                    stop 1
                 endif
-                call QuarkGluontoQuark_weyl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
+                call QuarkColourFlowVectorToQuark_weyl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
                                             this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
                                             this%interaction_list(iv)%val_c(1),&
                                             this%interaction_list(iv)%chirality)
              elseif (use_real_gluons) then
-                call QuarkGluontoQuark_real(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                call QuarkColourFlowVectorToQuark_real(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                             this%current_list(this%interaction_list(iv)%currents(2))%val_r(1:4),&
                                             this%interaction_list(iv)%val_c(1:4))
              else
-                call QuarkGluontoQuark(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                call QuarkColourFlowVectorToQuark(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                        this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                        this%interaction_list(iv)%val_c(1:4))
              endif
@@ -1977,16 +2289,19 @@ contains
                    write (*,*) 'Weyl fermions with real gluons are not implemented'
                    stop 1
                 endif
-                call AquarkGluontoAquark_weyl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
+                call AntiquarkColourFlowVectorToAntiquark_weyl(&
+                     this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
                                               this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
                                               this%interaction_list(iv)%val_c(1),&
                                               this%interaction_list(iv)%chirality)
              elseif (use_real_gluons) then
-                call AquarkGluontoAquark_real(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                call AntiquarkColourFlowVectorToAntiquark_real(&
+                     this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                               this%current_list(this%interaction_list(iv)%currents(2))%val_r(1:4),&
                                               this%interaction_list(iv)%val_c(1:4))
              else
-                call AquarkGluontoAquark(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                call AntiquarkColourFlowVectorToAntiquark(&
+                     this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                          this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                          this%interaction_list(iv)%val_c(1:4))
              endif
@@ -1994,14 +2309,16 @@ contains
           elseif(this%interaction_list(iv)%type.eq.8) then
              if (this%current_list(this%interaction_list(iv)%currents(1))%chirality.ne.0 .or. &
                  this%current_list(this%interaction_list(iv)%currents(2))%chirality.ne.0) then
-                call QuarkAquarktoGluon_weyl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
+                call QuarkAntiquarkToColourFlowU1Vector_weyl(&
+                     this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
                                              this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
                                              this%interaction_list(iv)%val_c(1:4),&
                                              this%interaction_list(iv)%coupl(1:2),&
                                              this%current_list(this%interaction_list(iv)%currents(1))%chirality,&
                                              this%current_list(this%interaction_list(iv)%currents(2))%chirality)
              else
-                call QuarkAquarktoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                call QuarkAntiquarkToColourFlowU1Vector(&
+                     this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                         this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                         this%interaction_list(iv)%val_c(1:4),&
                                         this%interaction_list(iv)%coupl(1:2))
@@ -2010,47 +2327,67 @@ contains
           elseif(this%interaction_list(iv)%type.eq.9) then
              if (this%current_list(this%interaction_list(iv)%currents(1))%chirality.ne.0 .or. &
                  this%current_list(this%interaction_list(iv)%currents(2))%chirality.ne.0) then
-                call AquarkQuarktoGluon_weyl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
+                call AntiquarkQuarkToGluon_weyl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
                                              this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
                                              this%interaction_list(iv)%val_c(1:4),&
                                              this%current_list(this%interaction_list(iv)%currents(1))%chirality,&
                                              this%current_list(this%interaction_list(iv)%currents(2))%chirality)
              else
-                call AquarkQuarktoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                call AntiquarkQuarkToGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                         this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                         this%interaction_list(iv)%val_c(1:4))
              endif
 
           elseif(this%interaction_list(iv)%type.eq.10) then
              if (this%interaction_list(iv)%chirality.ne.0) then
-                call QuarkGluontoQuark_coupl_weyl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
+                call FermionVectorToFermion_weyl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
                                                   this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
                                                   this%interaction_list(iv)%val_c(1),&
                                                   this%interaction_list(iv)%coupl(1:2),&
                                                   this%interaction_list(iv)%chirality)
              else
-                call QuarkGluontoQuark_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
-                                             this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
-                                             this%interaction_list(iv)%val_c(1:4),&
-                                             this%interaction_list(iv)%coupl(1:2))
+                if (this%current_list(this%interaction_list(iv)%currents(1))%chirality.ne.0) then
+                   call FermionVectorToFermion_mixed(&
+                        this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
+                        this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                        this%interaction_list(iv)%val_c(1:4),&
+                        this%interaction_list(iv)%coupl(1:2),&
+                        this%current_list(this%interaction_list(iv)%currents(1))%chirality)
+                else
+                   call FermionVectorToFermion(&
+                        this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                        this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                        this%interaction_list(iv)%val_c(1:4),&
+                        this%interaction_list(iv)%coupl(1:2))
+                endif
              endif
           elseif(this%interaction_list(iv)%type.eq.11) then
              if (this%interaction_list(iv)%chirality.ne.0) then
-                call AquarkGluontoAquark_coupl_weyl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
+                call AntifermionVectorToAntifermion_weyl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
                                                     this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
                                                     this%interaction_list(iv)%val_c(1),&
                                                     this%interaction_list(iv)%coupl(1:2),&
                                                     this%interaction_list(iv)%chirality)
              else
-                call AquarkGluontoAquark_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
-                                               this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
-                                               this%interaction_list(iv)%val_c(1:4),&
-                                               this%interaction_list(iv)%coupl(1:2))
+                if (this%current_list(this%interaction_list(iv)%currents(1))%chirality.ne.0) then
+                   call AntifermionVectorToAntifermion_mixed(&
+                        this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
+                        this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                        this%interaction_list(iv)%val_c(1:4),&
+                        this%interaction_list(iv)%coupl(1:2),&
+                        this%current_list(this%interaction_list(iv)%currents(1))%chirality)
+                else
+                   call AntifermionVectorToAntifermion(&
+                        this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                        this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                        this%interaction_list(iv)%val_c(1:4),&
+                        this%interaction_list(iv)%coupl(1:2))
+                endif
              endif
           elseif (this%interaction_list(iv)%type.eq.12) then
              pp1_loc=this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin))
              pp2_loc=this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin))
-             call threeGluon_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+             call VectorVectorToVector(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                        pp1_loc,&
                        this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                        pp2_loc,&
@@ -2058,49 +2395,49 @@ contains
                        this%interaction_list(iv)%coupl(1:2))
 
           elseif(this%interaction_list(iv)%type.eq.13) then
-             call TwoGluonToTensor_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+             call VectorVectorToAuxTensor(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                          this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                          this%interaction_list(iv)%val_c(1:6),&
                                          this%interaction_list(iv)%coupl(1:2))
 
           elseif(this%interaction_list(iv)%type.eq.14) then
-             call TensorGluontoGluon_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:6),&
+             call AuxTensorVectorToVector(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:6),&
                                            this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                            this%interaction_list(iv)%val_c(1:4),&
                                            this%interaction_list(iv)%coupl(1:2))
 
           elseif(this%interaction_list(iv)%type.eq.15) then
-             call GluonTensortoGluon_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+             call VectorAuxTensorToVector(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                            this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:6),&
                                            this%interaction_list(iv)%val_c(1:4),&
                                            this%interaction_list(iv)%coupl(1:2))
 
           elseif(this%interaction_list(iv)%type.eq.16) then
-             call QuarkScalartoQuark(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+             call FermionScalarToFermion(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
                                      this%interaction_list(iv)%val_c(1:4),&
                                      this%interaction_list(iv)%coupl(1:2))
 
           elseif(this%interaction_list(iv)%type.eq.17) then
-             call GluonGluontoScalar(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+             call VectorVectorToScalar(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                      this%interaction_list(iv)%val_c(1),&
                                      this%interaction_list(iv)%coupl(1:2))
 
           elseif(this%interaction_list(iv)%type.eq.18) then
-             call ScalarGluontoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
+             call ScalarVectorToVector(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
                                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                      this%interaction_list(iv)%val_c(1:4),&
                                      this%interaction_list(iv)%coupl)
 
           elseif(this%interaction_list(iv)%type.eq.19) then
-             call GluonScalartoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+             call VectorScalarToVector(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
                                      this%interaction_list(iv)%val_c(1:4),&
                                      this%interaction_list(iv)%coupl)
 
           elseif(this%interaction_list(iv)%type.eq.20) then
-             call ScalarScalartoScalar(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
+             call ScalarScalarToScalar(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
                                        this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
                                        this%interaction_list(iv)%val_c(1),&
                                        this%interaction_list(iv)%coupl(1:2))
@@ -2109,14 +2446,14 @@ contains
           elseif(this%interaction_list(iv)%type.eq.21) then
              if (this%current_list(this%interaction_list(iv)%currents(1))%chirality.ne.0 .or. &
                  this%current_list(this%interaction_list(iv)%currents(2))%chirality.ne.0) then
-                call LeptonAleptontoGluon_weyl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
+                call LeptonAntileptonToVector_weyl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
                                                this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
                                                this%interaction_list(iv)%val_c(1:4),&
                                                this%interaction_list(iv)%coupl(1:2),&
                                                this%current_list(this%interaction_list(iv)%currents(1))%chirality,&
                                                this%current_list(this%interaction_list(iv)%currents(2))%chirality)
              else
-                call LeptonAleptontoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
+                call LeptonAntileptonToVector(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
                                           this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
                                           this%interaction_list(iv)%val_c(1:4),&
                                           this%interaction_list(iv)%coupl(1:2))
@@ -2125,14 +2462,14 @@ contains
           elseif(this%interaction_list(iv)%type.eq.22) then
              if (this%current_list(this%interaction_list(iv)%currents(1))%chirality.ne.0 .or. &
                  this%current_list(this%interaction_list(iv)%currents(2))%chirality.ne.0) then
-                call AleptonLeptontoGluon_weyl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
+                call AntileptonLeptonToVector_weyl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
                                                this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
                                                this%interaction_list(iv)%val_c(1:4),&
                                                this%interaction_list(iv)%coupl(1:2),&
                                                this%current_list(this%interaction_list(iv)%currents(1))%chirality,&
                                                this%current_list(this%interaction_list(iv)%currents(2))%chirality)
              else
-                call  AleptonLeptontoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
+                call  AntileptonLeptonToVector(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
                                           this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
                                           this%interaction_list(iv)%val_c(1:4),&
                                           this%interaction_list(iv)%coupl(1:2))
@@ -2140,29 +2477,49 @@ contains
 
           elseif(this%interaction_list(iv)%type.eq.23) then
              if (this%interaction_list(iv)%chirality.ne.0) then
-                call GluonQuarktoQuark_coupl_weyl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
+                call VectorFermionToFermion_weyl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
                                                   this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
                                                   this%interaction_list(iv)%val_c(1),&
                                                   this%interaction_list(iv)%coupl(1:2),&
                                                   this%interaction_list(iv)%chirality)
              else
-                call  GluonQuarktoQuark_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
-                                          this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
-                                          this%interaction_list(iv)%val_c(1:4),&
-                                          this%interaction_list(iv)%coupl(1:2))
+                if (this%current_list(this%interaction_list(iv)%currents(2))%chirality.ne.0) then
+                   call VectorFermionToFermion_mixed(&
+                        this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                        this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
+                        this%interaction_list(iv)%val_c(1:4),&
+                        this%interaction_list(iv)%coupl(1:2),&
+                        this%current_list(this%interaction_list(iv)%currents(2))%chirality)
+                else
+                   call VectorFermionToFermion(&
+                        this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                        this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                        this%interaction_list(iv)%val_c(1:4),&
+                        this%interaction_list(iv)%coupl(1:2))
+                endif
              endif
           elseif(this%interaction_list(iv)%type.eq.24) then
              if (this%interaction_list(iv)%chirality.ne.0) then
-                call GluonAquarktoAquark_coupl_weyl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
+                call VectorAntifermionToAntifermion_weyl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
                                                     this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
                                                     this%interaction_list(iv)%val_c(1),&
                                                     this%interaction_list(iv)%coupl(1:2),&
                                                     this%interaction_list(iv)%chirality)
              else
-                call  GluonAquarktoAquark_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
-                                           this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
-                                           this%interaction_list(iv)%val_c(1:4),&
-                                           this%interaction_list(iv)%coupl(1:2))
+                if (this%current_list(this%interaction_list(iv)%currents(2))%chirality.ne.0) then
+                   call VectorAntifermionToAntifermion_mixed(&
+                        this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                        this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
+                        this%interaction_list(iv)%val_c(1:4),&
+                        this%interaction_list(iv)%coupl(1:2),&
+                        this%current_list(this%interaction_list(iv)%currents(2))%chirality)
+                else
+                   call VectorAntifermionToAntifermion(&
+                        this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                        this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                        this%interaction_list(iv)%val_c(1:4),&
+                        this%interaction_list(iv)%coupl(1:2))
+                endif
              endif
 
           else
@@ -2173,14 +2530,14 @@ contains
 
        ! compute the currents by combining the interactions
        do ic=this%n_cur_start(isize),this%n_cur_end(isize)
-          if (pm%is_gluon(this%current_list(ic)%type) .or. pm%is_photon(this%current_list(ic)%type)) then
+          if (pm%is_colour_flow_vector(this%current_list(ic)%type) .or. pm%is_photon(this%current_list(ic)%type)) then
              call combine_interactions(4)
-             ! a gluon current
+             ! a massless-vector current
              if (isize.ne.n-1)  then
-                call include_gluon_propagator()
+                call include_massless_vector_propagator()
              endif
           elseif (pm%is_quark(this%current_list(ic)%type).or.pm%is_lepton(this%current_list(ic)%type)) then
-             ! a quark current
+             ! a fermion current
              if (this%current_list(ic)%chirality.ne.0) then
                 call combine_interactions(2)
              else
@@ -2188,16 +2545,16 @@ contains
              endif
              if (isize.ne.n-1)  then
                 if (this%current_list(ic)%chirality.ne.0) then
-                   call include_quark_propagator_weyl()
+                   call include_fermion_propagator_weyl()
                 else
-                   call include_quark_propagator()
+                   call include_fermion_propagator()
                 endif
              endif
-          elseif (pm%is_tensor6(this%current_list(ic)%type)) then
+          elseif (pm%is_auxiliary_tensor(this%current_list(ic)%type)) then
              ! the non-propagating tensor current
              call combine_interactions(6)
           elseif (pm%is_antiquark(this%current_list(ic)%type).or.pm%is_antilepton(this%current_list(ic)%type)) then
-             ! an anti-quark current
+             ! an antifermion current
              if (this%current_list(ic)%chirality.ne.0) then
                 call combine_interactions(2)
              else
@@ -2205,16 +2562,16 @@ contains
              endif
              if (isize.ne.n-1)  then
                 if (this%current_list(ic)%chirality.ne.0) then
-                   call include_aquark_propagator_weyl()
+                   call include_antifermion_propagator_weyl()
                 else
-                   call include_aquark_propagator()
+                   call include_antifermion_propagator()
                 endif
              endif
-          elseif (pm%is_massiveboson(this%current_list(ic)%type)) then
+          elseif (pm%is_massive_vector(this%current_list(ic)%type)) then
              call combine_interactions(4)
              ! a massive vector boson current
              if (isize.ne.n-1)  then
-                call include_gluon_propagator_mass()
+                call include_massive_vector_propagator()
              endif
           elseif (pm%is_higgs(this%current_list(ic)%type)) then
              ! a scalar current
@@ -2222,7 +2579,7 @@ contains
              if (isize.ne.n-1)  then
                 call include_scalar_propagator()
              endif
-          elseif (pm%is_higgsor(this%current_list(ic)%type)) then
+          elseif (pm%is_auxiliary_scalar(this%current_list(ic)%type)) then
              ! a non-propagating scalar current
              call combine_interactions(1)
 
@@ -2326,6 +2683,18 @@ contains
                   else
                      if (.not.this%same_flav(iproc)) then
                         this%amps(iamp)=contract_currents(iamp)
+                        ! Fortran does not require short-circuit evaluation of
+                        ! .and.; keep the allocation test separate from the
+                        ! array reference (zero-sized partner maps are valid).
+                        if (allocated(this%three_line_partner_curr2amp)) then
+                           if (iamp.le.size(this%three_line_partner_curr2amp,2)) then
+                              if (this%three_line_partner_curr2amp(1,iamp).ne.0) then
+                                 this%amps(iamp)=this%amps(iamp)+contract_current_pair(&
+                                      this%three_line_partner_curr2amp(1,iamp),&
+                                      this%three_line_partner_curr2amp(2,iamp))
+                              endif
+                           endif
+                        endif
                      endif
                   endif
                enddo
@@ -2357,12 +2726,16 @@ contains
       integer :: ic1,ic2
       ic1=this%curr2amp(1,iamp)
       ic2=this%curr2amp(2,iamp)
-      if (this%current_list(ic1)%chirality.ne.0 .and. this%current_list(ic2)%chirality.ne.0) then
-         contract_currents=sum(this%current_list(ic1)%val_c(1:2)*this%current_list(ic2)%val_c(1:2))
-      else
-         contract_currents=sum(this%current_list(ic1)%val_c(1:4)*this%current_list(ic2)%val_c(1:4))
-      endif
+      contract_currents=contract_current_pair(ic1,ic2)
     end function contract_currents
+
+    complex(kind=8) function contract_current_pair(ic1,ic2)
+      implicit none
+      integer,intent(in) :: ic1,ic2
+      contract_current_pair=ContractFermionCurrents(&
+           this%current_list(ic1)%val_c,this%current_list(ic1)%chirality,&
+           this%current_list(ic2)%val_c,this%current_list(ic2)%chirality)
+    end function contract_current_pair
 
     complex (kind=8) function apply_operation(iamp,idau)
       implicit none
@@ -2376,7 +2749,9 @@ contains
     subroutine combine_interactions(dim)
       implicit none
       integer :: dim,iv
-      if (use_real_gluons .and. (pm%is_gluon(this%current_list(ic)%type).or.pm%is_tensor_g(this%current_list(ic)%type))) then
+      if (use_real_gluons .and. &
+           (pm%is_colour_flow_vector(this%current_list(ic)%type).or. &
+           pm%is_gluon_aux_tensor(this%current_list(ic)%type))) then
          this%current_list(ic)%val_r(1:dim)=0d0
          do iv=1,this%current_list(ic)%n_vert
             if (this%current_list(ic)%vertex_sign(iv))then
@@ -2401,64 +2776,64 @@ contains
          enddo
       endif
     end subroutine combine_interactions
-    subroutine include_gluon_propagator()
+    subroutine include_massless_vector_propagator()
       implicit none
       real(kind=8),dimension(0:3) :: pp_loc
       pp_loc=this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin))
       if (use_real_gluons) then
-         call GluonPropagator_real(this%current_list(ic)%val_r, &
+         call MasslessVectorPropagator_real(this%current_list(ic)%val_r, &
               pp_loc)
       else
-         call GluonPropagator(this%current_list(ic)%val_c, &
+         call MasslessVectorPropagator(this%current_list(ic)%val_c, &
               pp_loc)
       endif
-    end subroutine include_gluon_propagator
+    end subroutine include_massless_vector_propagator
 
-    subroutine include_gluon_propagator_mass()
+    subroutine include_massive_vector_propagator()
       implicit none
       real(kind=8),dimension(0:3) :: pp_loc
       pp_loc=this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin))
-      call GluonPropagator_mass(this%current_list(ic)%val_c, &
+      call MassiveVectorPropagator(this%current_list(ic)%val_c, &
            pp_loc,&
            this%current_list(ic)%mass,this%current_list(ic)%width)
-    end subroutine include_gluon_propagator_mass
+    end subroutine include_massive_vector_propagator
 
-    subroutine include_quark_propagator()
+    subroutine include_fermion_propagator()
       implicit none
       real(kind=8),dimension(0:3) :: pp_loc
       pp_loc=this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin))
-      call QuarkPropagator(this%current_list(ic)%val_c, &
+      call FermionPropagator(this%current_list(ic)%val_c, &
            pp_loc, &
            this%current_list(ic)%mass,&
            this%current_list(ic)%width)
-    end subroutine include_quark_propagator
+    end subroutine include_fermion_propagator
 
-    subroutine include_quark_propagator_weyl()
+    subroutine include_fermion_propagator_weyl()
       implicit none
       real(kind=8),dimension(0:3) :: pp_loc
       pp_loc=this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin))
-      call QuarkPropagator_weyl(this%current_list(ic)%val_c, &
+      call FermionPropagator_weyl(this%current_list(ic)%val_c, &
            pp_loc, &
            this%current_list(ic)%chirality)
-    end subroutine include_quark_propagator_weyl
+    end subroutine include_fermion_propagator_weyl
 
-    subroutine include_aquark_propagator()
+    subroutine include_antifermion_propagator()
       implicit none
       real(kind=8),dimension(0:3) :: pp_loc
       pp_loc=this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin))
-      call AquarkPropagator(this%current_list(ic)%val_c, &
+      call AntifermionPropagator(this%current_list(ic)%val_c, &
            pp_loc,&
            this%current_list(ic)%mass,&
            this%current_list(ic)%width)
-    end subroutine include_aquark_propagator
-    subroutine include_aquark_propagator_weyl()
+    end subroutine include_antifermion_propagator
+    subroutine include_antifermion_propagator_weyl()
       implicit none
       real(kind=8),dimension(0:3) :: pp_loc
       pp_loc=this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin))
-      call AquarkPropagator_weyl(this%current_list(ic)%val_c, &
+      call AntifermionPropagator_weyl(this%current_list(ic)%val_c, &
            pp_loc,&
            this%current_list(ic)%chirality)
-    end subroutine include_aquark_propagator_weyl
+    end subroutine include_antifermion_propagator_weyl
     subroutine include_scalar_propagator()
       implicit none
       real(kind=8),dimension(0:3) :: pp_loc
@@ -2499,6 +2874,16 @@ contains
     part(1:n)=this%processes(1:n,1)
     ioff=this%iproc_start(iproc)-1
     nOrd=n-this%n_sing(iproc)
+
+    if (this%n_qqbar(iproc).eq.3) then
+       if (col_acc.eq.0) then
+          call init_three_quark_line_lc_diagonal()
+       else
+          call init_three_quark_line_colour_matrix()
+       endif
+       write (99,*) '... colour matrix initialised'
+       return
+    endif
 
     allocate(n_vals(1:3))
     allocate(diff_vals(max_vals,1:3))
@@ -2646,6 +3031,396 @@ contains
 
     write (99,*) '... colour matrix initialised'
   contains
+    subroutine init_three_quark_line_lc_diagonal()
+      ! At leading colour the physical three-line basis is diagonal with one
+      ! common coefficient. Store only those rows rather than materialising
+      ! the quadratic NLC/full-colour Gram matrix.
+      implicit none
+      integer :: row,nrows
+      integer,dimension(:),allocatable :: flow_sign
+      integer,dimension(:,:),allocatable :: endpoints,ngluons
+      integer,dimension(:,:,:),allocatable :: gluons
+      real(kind=8),dimension(3) :: three_line_col_fac
+
+      nrows=this%nColOrd
+      if (this%n_amps.ne.nrows) then
+         write (*,*) 'Three-line colour basis does not match generated amplitudes',&
+              this%n_amps,nrows
+         stop 1
+      endif
+      allocate(endpoints(3,nrows))
+      allocate(ngluons(3,nrows))
+      allocate(gluons(nOrd,3,nrows))
+      allocate(flow_sign(nrows))
+      call build_three_line_flow_metadata(endpoints,ngluons,gluons,flow_sign)
+      call compute_three_line_color_factor(1,1,endpoints,ngluons,gluons,&
+           flow_sign,three_line_col_fac)
+      if (three_line_col_fac(1).eq.0d0) then
+         write (*,*) 'Three-line leading-colour diagonal is zero'
+         stop 1
+      endif
+
+      allocate(this%n_col_vals(3))
+      this%n_col_vals=(/1,0,0/)
+      allocate(this%diff_col_vals(1,3))
+      this%diff_col_vals=0d0
+      this%diff_col_vals(1,1)=three_line_col_fac(1)
+      allocate(this%i_col_i(1,3))
+      this%i_col_i=0
+      this%i_col_i(1,1)=1
+      allocate(this%row_index(0:nrows,1,3))
+      this%row_index=0
+      allocate(this%col_index(nrows+1))
+      this%col_index=0
+      do row=1,nrows
+         this%col_index(row+1)=row
+         this%row_index(row,1,1)=row
+      enddo
+    end subroutine init_three_quark_line_lc_diagonal
+
+    subroutine init_three_quark_line_colour_matrix()
+      ! Sew each pair of open fundamental-string flows into closed traces and
+      ! let color_algebra perform the exact SU(Nc) reduction.
+      implicit none
+      integer :: row,col,iacc_local,ival_local,nrows,max_pairs,max_nvals,total_entries
+      integer :: offset
+      integer,dimension(:),allocatable :: flow_sign,nvalues
+      integer,dimension(:,:),allocatable :: endpoints,ngluons,counts,cursor
+      integer,dimension(:,:,:),allocatable :: gluons
+      real(kind=8),dimension(:,:,:),allocatable :: factors
+      real(kind=8),dimension(:,:),allocatable :: values
+      real(kind=8),dimension(3) :: three_line_col_fac
+
+      nrows=this%nColOrd
+      if (int(nrows,kind=8).gt.max_three_line_color_orders) then
+         write (*,*) 'Three-line colour matrix exceeds supported size',&
+              nrows,max_three_line_color_orders
+         stop 1
+      endif
+      if (this%n_amps.ne.nrows) then
+         write (*,*) 'Three-line colour basis does not match generated amplitudes',&
+              this%n_amps,nrows
+         stop 1
+      endif
+
+      allocate(endpoints(3,nrows))
+      allocate(ngluons(3,nrows))
+      allocate(gluons(nOrd,3,nrows))
+      allocate(flow_sign(nrows))
+      call build_three_line_flow_metadata(endpoints,ngluons,gluons,flow_sign)
+
+      allocate(factors(nrows,nrows,3))
+      factors=0d0
+      do row=1,nrows
+         if (use_symm_cm) then
+            col=row
+         else
+            col=1
+         endif
+         do while (col.le.nrows)
+            call compute_three_line_color_factor(row,col,endpoints,ngluons,&
+                 gluons,flow_sign,three_line_col_fac)
+            if (use_symm_cm .and. row.ne.col) &
+                 three_line_col_fac=2d0*three_line_col_fac
+            factors(row,col,1:3)=three_line_col_fac(1:3)
+            col=col+1
+         enddo
+      enddo
+
+      if (use_symm_cm) then
+         max_pairs=nrows*(nrows+1)/2
+      else
+         max_pairs=nrows*nrows
+      endif
+      allocate(nvalues(3))
+      allocate(values(max_pairs,3))
+      allocate(counts(max_pairs,3))
+      nvalues=0
+      values=0d0
+      counts=0
+      do row=1,nrows
+         if (use_symm_cm) then
+            col=row
+         else
+            col=1
+         endif
+         do while (col.le.nrows)
+            do iacc_local=1,3
+               if (factors(row,col,iacc_local).eq.0d0) cycle
+               do ival_local=1,nvalues(iacc_local)
+                  if (factors(row,col,iacc_local).eq.values(ival_local,iacc_local)) exit
+               enddo
+               if (ival_local.eq.nvalues(iacc_local)+1) then
+                  nvalues(iacc_local)=ival_local
+                  values(ival_local,iacc_local)=factors(row,col,iacc_local)
+               endif
+               counts(ival_local,iacc_local)=counts(ival_local,iacc_local)+1
+            enddo
+            col=col+1
+         enddo
+      enddo
+
+      max_nvals=maxval(nvalues)
+      allocate(this%n_col_vals(3))
+      this%n_col_vals=nvalues
+      allocate(this%diff_col_vals(max_nvals,3))
+      allocate(this%i_col_i(max_nvals,3))
+      allocate(this%row_index(0:nrows,max_nvals,3))
+      this%diff_col_vals=0d0
+      this%i_col_i=0
+      this%row_index=0
+      do iacc_local=1,3
+         this%diff_col_vals(1:nvalues(iacc_local),iacc_local)=&
+              values(1:nvalues(iacc_local),iacc_local)
+      enddo
+
+      total_entries=1+sum(counts)
+      allocate(this%col_index(total_entries))
+      this%col_index=0
+      offset=1
+      do iacc_local=1,3
+         do ival_local=1,nvalues(iacc_local)
+            this%i_col_i(ival_local,iacc_local)=offset
+            offset=offset+counts(ival_local,iacc_local)
+         enddo
+      enddo
+
+      allocate(cursor(max_nvals,3))
+      cursor=0
+      do row=1,nrows
+         if (use_symm_cm) then
+            col=row
+         else
+            col=1
+         endif
+         do while (col.le.nrows)
+            do iacc_local=1,3
+               if (factors(row,col,iacc_local).eq.0d0) cycle
+               do ival_local=1,nvalues(iacc_local)
+                  if (factors(row,col,iacc_local).eq.values(ival_local,iacc_local)) exit
+               enddo
+               cursor(ival_local,iacc_local)=cursor(ival_local,iacc_local)+1
+               this%col_index(this%i_col_i(ival_local,iacc_local)+&
+                    cursor(ival_local,iacc_local))=col
+            enddo
+            col=col+1
+         enddo
+         do iacc_local=1,3
+            this%row_index(row,1:nvalues(iacc_local),iacc_local)=&
+                 cursor(1:nvalues(iacc_local),iacc_local)
+         enddo
+      enddo
+    end subroutine init_three_quark_line_colour_matrix
+
+    subroutine build_three_line_flow_metadata(endpoints,ngluons,gluons,flow_sign)
+      implicit none
+      integer,dimension(3,this%nColOrd),intent(out) :: endpoints,ngluons
+      integer,dimension(nOrd,3,this%nColOrd),intent(out) :: gluons
+      integer,dimension(this%nColOrd),intent(out) :: flow_sign
+      integer :: row,line,qrank,arank,i,j,inversions
+      integer,dimension(3) :: ref_q,ref_aq,row_q,row_aq,row_ngluons
+      integer,dimension(nOrd,3) :: row_gluons
+
+      endpoints=0
+      ngluons=0
+      gluons=0
+      call parse_three_line_word(this%perm(1:nOrd,ioff+1),ref_q,ref_aq,&
+           row_ngluons,row_gluons)
+      do row=1,this%nColOrd
+         call parse_three_line_word(this%perm(1:nOrd,ioff+row),row_q,row_aq,&
+              row_ngluons,row_gluons)
+         do line=1,3
+            qrank=0
+            arank=0
+            do i=1,3
+               if (row_q(line).eq.ref_q(i)) qrank=i
+               if (row_aq(line).eq.ref_aq(i)) arank=i
+            enddo
+            if (qrank.eq.0 .or. arank.eq.0) then
+               write (*,*) 'Inconsistent external labels in three-line colour flow',row
+               stop 1
+            endif
+            endpoints(qrank,row)=arank
+            ngluons(qrank,row)=row_ngluons(line)
+            if (row_ngluons(line).gt.0) then
+               gluons(1:row_ngluons(line),qrank,row)=&
+                    row_gluons(1:row_ngluons(line),line)
+            endif
+         enddo
+         inversions=0
+         do i=1,2
+            do j=i+1,3
+               if (endpoints(i,row).gt.endpoints(j,row)) inversions=inversions+1
+            enddo
+         enddo
+         if (mod(inversions,2).eq.0) then
+            flow_sign(row)=1
+         else
+            flow_sign(row)=-1
+         endif
+      enddo
+    end subroutine build_three_line_flow_metadata
+
+    subroutine parse_three_line_word(word,q_labels,aq_labels,line_ngluons,line_gluons)
+      implicit none
+      integer,dimension(nOrd),intent(in) :: word
+      integer,dimension(3),intent(out) :: q_labels,aq_labels,line_ngluons
+      integer,dimension(nOrd,3),intent(out) :: line_gluons
+      integer :: pos,label,line
+
+      q_labels=0
+      aq_labels=0
+      line_ngluons=0
+      line_gluons=0
+      line=0
+      do pos=1,nOrd
+         label=word(pos)
+         if (label_is_quark(label)) then
+            if (line.ne.0) then
+               if (aq_labels(line).eq.0) then
+                  write (*,*) 'Adjacent quarks in three-line colour word',word
+                  stop 1
+               endif
+            endif
+            line=line+1
+            if (line.gt.3) then
+               write (*,*) 'Too many quark strings in three-line colour word',word
+               stop 1
+            endif
+            q_labels(line)=label
+         elseif (label_is_antiquark(label)) then
+            if (line.eq.0) then
+               write (*,*) 'Unmatched antiquark in three-line colour word',word
+               stop 1
+            endif
+            if (q_labels(line).eq.0 .or. aq_labels(line).ne.0) then
+               write (*,*) 'Unmatched antiquark in three-line colour word',word
+               stop 1
+            endif
+            aq_labels(line)=label
+         elseif (abs(part(label)).eq.21) then
+            if (line.eq.0) then
+               write (*,*) 'Gluon outside an open quark string',word
+               stop 1
+            endif
+            if (aq_labels(line).ne.0) then
+               write (*,*) 'Gluon outside an open quark string',word
+               stop 1
+            endif
+            line_ngluons(line)=line_ngluons(line)+1
+            line_gluons(line_ngluons(line),line)=label
+         else
+            write (*,*) 'Unknown coloured label in three-line colour word',label,word
+            stop 1
+         endif
+      enddo
+      if (line.ne.3 .or. any(q_labels.eq.0) .or. any(aq_labels.eq.0)) then
+         write (*,*) 'Incomplete three-line colour word',word
+         stop 1
+      endif
+    end subroutine parse_three_line_word
+
+    logical function label_is_quark(label)
+      implicit none
+      integer,intent(in) :: label
+      label_is_quark=(label.le.2 .and. part(label).le.-1 .and. part(label).ge.-6) .or. &
+           (label.gt.2 .and. part(label).ge.1 .and. part(label).le.6)
+    end function label_is_quark
+
+    logical function label_is_antiquark(label)
+      implicit none
+      integer,intent(in) :: label
+      label_is_antiquark=(label.le.2 .and. part(label).ge.1 .and. part(label).le.6) .or. &
+           (label.gt.2 .and. part(label).le.-1 .and. part(label).ge.-6)
+    end function label_is_antiquark
+
+    subroutine compute_three_line_color_factor(row,col,endpoints,ngluons,&
+         gluons,flow_sign,three_line_col_fac)
+      implicit none
+      integer,intent(in) :: row,col
+      integer,dimension(3,this%nColOrd),intent(in) :: endpoints,ngluons
+      integer,dimension(nOrd,3,this%nColOrd),intent(in) :: gluons
+      integer,dimension(this%nColOrd),intent(in) :: flow_sign
+      real(kind=8),dimension(3),intent(out) :: three_line_col_fac
+      integer :: q,qnext,anti,start,line,nloops,pos,power,leading_power,max_power,sgn
+      integer,dimension(3) :: trace_len
+      integer,dimension(2*nOrd,3) :: trace_word
+      logical,dimension(3) :: visited
+      real(kind=16) :: exact
+
+      trace_len=0
+      trace_word=0
+      visited=.false.
+      nloops=0
+      do start=1,3
+         if (visited(start)) cycle
+         nloops=nloops+1
+         q=start
+         do
+            if (visited(q)) then
+               if (q.eq.start) exit
+               write (*,*) 'Malformed three-line colour-flow cycle',row,col
+               stop 1
+            endif
+            visited(q)=.true.
+            do pos=1,ngluons(q,row)
+               trace_len(nloops)=trace_len(nloops)+1
+               trace_word(trace_len(nloops),nloops)=gluons(pos,q,row)
+            enddo
+            anti=endpoints(q,row)
+            qnext=0
+            do line=1,3
+               if (endpoints(line,col).eq.anti) then
+                  qnext=line
+                  exit
+               endif
+            enddo
+            if (qnext.eq.0) then
+               write (*,*) 'Cannot sew three-line colour-flow endpoints',row,col,anti
+               stop 1
+            endif
+            do pos=ngluons(qnext,col),1,-1
+               trace_len(nloops)=trace_len(nloops)+1
+               trace_word(trace_len(nloops),nloops)=gluons(pos,qnext,col)
+            enddo
+            q=qnext
+         enddo
+      enddo
+
+      call Tr_allocate(nOrd)
+      Tr=0
+      coef=0d0
+      coef_Nc=0
+      Tr(0,0,0)=1
+      Tr(0,0,1)=nloops
+      do line=1,nloops
+         Tr(0,line,1)=trace_len(line)
+         if (trace_len(line).gt.0) then
+            Tr(1:trace_len(line),line,1)=trace_word(1:trace_len(line),line)
+         endif
+      enddo
+      sgn=flow_sign(row)*flow_sign(col)
+      coef(1)=dble(sgn)
+      coef_Nc(0,1)=sgn
+      call Tr_full_simplify(exact)
+
+      leading_power=nOrd-3
+      three_line_col_fac=0d0
+      if (leading_power.ge.-nOrd .and. leading_power.le.nOrd) then
+         three_line_col_fac(1)=dble(coef_Nc(leading_power,0))*3d0**leading_power
+      endif
+      max_power=-nOrd-1
+      do power=nOrd,-nOrd,-1
+         if (coef_Nc(power,0).ne.0) then
+            max_power=power
+            exit
+         endif
+      enddo
+      if (max_power.ge.leading_power-2) three_line_col_fac(2)=dble(exact)
+      three_line_col_fac(3)=dble(exact)
+      call Tr_deallocate
+    end subroutine compute_three_line_color_factor
+
     subroutine get_unique_row(iunique,irow,gi,ui)
       ! get a new row in the colour matrix corresponding to 'iunique'
       implicit none
@@ -3181,14 +3956,17 @@ contains
     integer,dimension(n),intent(in)::hel
     character(len=170) :: line,tmp
     integer :: ip,ibin,i,isize,ih_in,ifinal,ic,iv,iamp,iproc,itype,j,ii,jj,idau,vkey
+    integer :: max_current_vertices
     integer :: chir1,chir2,chiri
     integer,dimension(0:24,0:8) :: icount
-    integer,dimension(150,11) :: icount_type
+    integer,dimension(:,:),allocatable :: icount_type
     integer,dimension(:,:),allocatable :: curs
     integer,dimension(:),allocatable :: pp
     real(kind=8),dimension(:),allocatable :: m,w
     integer,dimension(this%n_vert,0:24,0:8) :: cur1,cur2,int1,pp1,pp2
     real(kind=8),dimension(2,this%n_vert,0:24,0:8) :: coupl
+    max_current_vertices=max(1,maxval(this%current_list(:)%n_vert))
+    allocate(icount_type(max_current_vertices,11))
     write(tmp,*) igroup
     write(line,*) iint
     line='Library/amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib.data'
@@ -3272,9 +4050,9 @@ contains
              else
                 ih_in=this%current_list(ic)%spin(1)
              endif
-             if (pm%is_gluon(this%current_list(ic)%type) .or. pm%is_photon(this%current_list(ic)%type)) then
+             if (pm%is_colour_flow_vector(this%current_list(ic)%type) .or. pm%is_photon(this%current_list(ic)%type)) then
                 write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin)
-                line='call ext_gluon_cmplx(pp(0,'//trim(adjustl(tmp))//'),'
+                line='call ext_massless_vector_cmplx(pp(0,'//trim(adjustl(tmp))//'),'
                 write(tmp,*) ih_in
                 line=trim(adjustl(line))//trim(adjustl(tmp))//','
                 write(tmp,*) ifinal
@@ -3285,9 +4063,9 @@ contains
                   pm%is_lepton(this%current_list(ic)%type)) then
                 write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin)
                 if (this%current_list(ic)%chirality.ne.0) then
-                   line='call ext_quark_weyl(pp(0,'//trim(adjustl(tmp))//'),'
+                   line='call ext_fermion_outflow_weyl(pp(0,'//trim(adjustl(tmp))//'),'
                 else
-                   line='call ext_quark(pp(0,'//trim(adjustl(tmp))//'),'
+                   line='call ext_fermion_outflow(pp(0,'//trim(adjustl(tmp))//'),'
                 endif
                 write(tmp,*) ih_in
                 line=trim(adjustl(line))//trim(adjustl(tmp))//','
@@ -3308,9 +4086,9 @@ contains
                   pm%is_antilepton(this%current_list(ic)%type)) then
                 write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin)
                 if (this%current_list(ic)%chirality.ne.0) then
-                   line='call ext_antiquark_weyl(pp(0,'//trim(adjustl(tmp))//'),'
+                   line='call ext_fermion_inflow_weyl(pp(0,'//trim(adjustl(tmp))//'),'
                 else
-                   line='call ext_antiquark(pp(0,'//trim(adjustl(tmp))//'),'
+                   line='call ext_fermion_inflow(pp(0,'//trim(adjustl(tmp))//'),'
                 endif
                 write(tmp,*) ih_in
                 line=trim(adjustl(line))//trim(adjustl(tmp))//','
@@ -3327,9 +4105,9 @@ contains
                    line=trim(adjustl(line))//trim(adjustl(tmp))
                    line=trim(adjustl(line))//')'
                 endif
-             elseif (pm%is_massiveboson(this%current_list(ic)%type)) then
+             elseif (pm%is_massive_vector(this%current_list(ic)%type)) then
                 write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin)
-                line='call ext_gluon_mass(pp(0,'//trim(adjustl(tmp))//'),'
+                line='call ext_massive_vector(pp(0,'//trim(adjustl(tmp))//'),'
                 write(tmp,*) ih_in
                 line=trim(adjustl(line))//trim(adjustl(tmp))//','
                 write(tmp,*) ifinal
@@ -3382,9 +4160,22 @@ contains
                 chir2=this%current_list(this%interaction_list(iv)%currents(2))%chirality
                 chiri=this%interaction_list(iv)%chirality
                 vkey=4
-                if (itype.eq.4 .or. itype.eq.5 .or. itype.eq.6 .or. itype.eq.7 .or. &
-                    itype.eq.10 .or. itype.eq.11 .or. itype.eq.23 .or. itype.eq.24) then
+                if (itype.eq.4 .or. itype.eq.5 .or. itype.eq.6 .or. itype.eq.7) then
                    vkey=chiri+4
+                elseif (itype.eq.10 .or. itype.eq.11 .or. itype.eq.23 .or. itype.eq.24) then
+                   if (chiri.ne.0) then
+                      ! A compact result uses the Weyl rule and is keyed by
+                      ! its result chirality (vkey 3 or 5).
+                      vkey=chiri+4
+                   elseif (itype.eq.10 .or. itype.eq.11) then
+                      ! A full result may still have a compact first child.
+                      ! Keep the child chirality in the generated vertex key:
+                      ! -1,0,+1 map to vkey 0,4,8.
+                      vkey=4*(chir1+1)
+                   else
+                      ! Types 23 and 24 have the fermion as their second child.
+                      vkey=4*(chir2+1)
+                   endif
                 elseif (itype.eq.8 .or. itype.eq.9 .or. itype.eq.21 .or. itype.eq.22) then
                    vkey=(chir1+1)*3+(chir2+1)
                 endif
@@ -3555,49 +4346,57 @@ contains
           if (itype.eq.0) then
              line='call threeGluon(val_c(1,cur1(i)),pp(0,pp1(i)),val_c(1,cur2(i)),pp(0,pp2(i)),int_c(1,int1(i)))'
           elseif(itype.eq.1) then
-             line='call TwoGluonToTensor(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
+             line='call TwoGluonToAuxTensor(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
           elseif(itype.eq.2) then
-             line='call TensorGluontoGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
+             line='call AuxTensorGluonToGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
           elseif(itype.eq.3) then
-             line='call GluonTensortoGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
+             line='call GluonAuxTensorToGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
           elseif(itype.eq.4) then
              if (vkey.eq.4) then
-                line='call GluonQuarktoQuark(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
+                line='call ColourFlowVectorQuarkToQuark(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
              else
                 write(tmp,*) vkey-4
-                line='call GluonQuarktoQuark_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'// &
+                line='call ColourFlowVectorQuarkToQuark_weyl('// &
+                     'val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'// &
                      trim(adjustl(tmp))//')'
              endif
           elseif(itype.eq.5) then
              if (vkey.eq.4) then
-                line='call GluonAQuarktoAQuark(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
+                line='call ColourFlowVectorAntiquarkToAntiquark('// &
+                     'val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
              else
                 write(tmp,*) vkey-4
-                line='call GluonAQuarktoAQuark_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'// &
+                line='call ColourFlowVectorAntiquarkToAntiquark_weyl('// &
+                     'val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'// &
                      trim(adjustl(tmp))//')'
              endif
           elseif(itype.eq.6) then
              if (vkey.eq.4) then
-                line='call QuarkGluontoQuark(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
+                line='call QuarkColourFlowVectorToQuark(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
              else
                 write(tmp,*) vkey-4
-                line='call QuarkGluontoQuark_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'// &
+                line='call QuarkColourFlowVectorToQuark_weyl('// &
+                     'val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'// &
                      trim(adjustl(tmp))//')'
              endif
           elseif(itype.eq.7) then
              if (vkey.eq.4) then
-                line='call AQuarkGluontoAQuark(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
+                line='call AntiquarkColourFlowVectorToAntiquark('// &
+                     'val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
              else
                 write(tmp,*) vkey-4
-                line='call AQuarkGluontoAQuark_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'// &
+                line='call AntiquarkColourFlowVectorToAntiquark_weyl('// &
+                     'val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'// &
                      trim(adjustl(tmp))//')'
              endif
           elseif(itype.eq.8) then
              if (vkey.eq.4) then
-                write(iunit,'(6x,a)') 'call QuarkAquarktoGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(iunit,'(6x,a)') 'call QuarkAntiquarkToColourFlowU1Vector('// &
+                     'val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
                 write(iunit,'(8x,a)') '[coupl(2*i-1),coupl(2*i)])'
              else
-                write(iunit,'(6x,a)') 'call QuarkAquarktoGluon_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(iunit,'(6x,a)') 'call QuarkAntiquarkToColourFlowU1Vector_weyl('// &
+                     'val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
                 write(tmp,*) vkey/3-1
                 line='[coupl(2*i-1),coupl(2*i)],'//trim(adjustl(tmp))//','
                 write(tmp,*) mod(vkey,3)-1
@@ -3607,9 +4406,9 @@ contains
              line=''
           elseif(itype.eq.9) then
              if (vkey.eq.4) then
-                line='call AquarkQuarktoGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
+                line='call AntiquarkQuarkToGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
              else
-                write(iunit,'(6x,a)') 'call AquarkQuarktoGluon_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(iunit,'(6x,a)') 'call AntiquarkQuarkToGluon_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
                 write(tmp,*) vkey/3-1
                 line=trim(adjustl(tmp))//','
                 write(tmp,*) mod(vkey,3)-1
@@ -3618,60 +4417,75 @@ contains
                 line=''
              endif
           elseif(itype.eq.10) then
-             if (vkey.eq.4) then
-                write(iunit,'(6x,a)') 'call QuarkGluontoQuark_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
-                write(iunit,'(8x,a)') '[coupl(2*i-1),coupl(2*i)])'
-             else
-                write(iunit,'(6x,a)') 'call QuarkGluontoQuark_coupl_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+             if (vkey.eq.3 .or. vkey.eq.5) then
+                write(iunit,'(6x,a)') 'call FermionVectorToFermion_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
                 write(tmp,*) vkey-4
                 line='[coupl(2*i-1),coupl(2*i)],'//trim(adjustl(tmp))//')'
                 write(iunit,'(8x,a)') trim(adjustl(line))
+             elseif (vkey.eq.0 .or. vkey.eq.8) then
+                write(iunit,'(6x,a)') 'call FermionVectorToFermion_mixed(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(tmp,*) vkey/4-1
+                line='[coupl(2*i-1),coupl(2*i)],'//trim(adjustl(tmp))//')'
+                write(iunit,'(8x,a)') trim(adjustl(line))
+             else
+                write(iunit,'(6x,a)') 'call FermionVectorToFermion(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(iunit,'(8x,a)') '[coupl(2*i-1),coupl(2*i)])'
              endif
              line=''
           elseif(itype.eq.11) then
-             if (vkey.eq.4) then
-                write(iunit,'(6x,a)') 'call AQuarkGluontoAQuark_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
-                write(iunit,'(8x,a)') '[coupl(2*i-1),coupl(2*i)])'
-             else
-                write(iunit,'(6x,a)') 'call AQuarkGluontoAQuark_coupl_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+             if (vkey.eq.3 .or. vkey.eq.5) then
+                write(iunit,'(6x,a)') 'call AntifermionVectorToAntifermion_weyl( &'
+                write(iunit,'(8x,a)') 'val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
                 write(tmp,*) vkey-4
                 line='[coupl(2*i-1),coupl(2*i)],'//trim(adjustl(tmp))//')'
                 write(iunit,'(8x,a)') trim(adjustl(line))
+             elseif (vkey.eq.0 .or. vkey.eq.8) then
+                write(iunit,'(6x,a)') 'call AntifermionVectorToAntifermion_mixed( &'
+                write(iunit,'(8x,a)') 'val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(tmp,*) vkey/4-1
+                line='[coupl(2*i-1),coupl(2*i)],'//trim(adjustl(tmp))//')'
+                write(iunit,'(8x,a)') trim(adjustl(line))
+             else
+                write(iunit,'(6x,a)') 'call AntifermionVectorToAntifermion( &'
+                write(iunit,'(8x,a)') 'val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(iunit,'(8x,a)') '[coupl(2*i-1),coupl(2*i)])'
              endif
              line=''
           elseif(itype.eq.12) then
-             line='call threeGluon_coupl(val_c(1,cur1(i)),pp(0,pp1(i)),val_c(1,cur2(i)),'//&
-                  'pp(0,pp2(i)),int_c(1,int1(i)),[coupl(2*i-1),coupl(2*i)])'
+             write(iunit,'(6x,a)') 'call VectorVectorToVector( &'
+             write(iunit,'(8x,a)') 'val_c(1,cur1(i)),pp(0,pp1(i)),val_c(1,cur2(i)),pp(0,pp2(i)), &'
+             write(iunit,'(8x,a)') 'int_c(1,int1(i)),[coupl(2*i-1),coupl(2*i)])'
+             line=''
           elseif(itype.eq.13) then
-             line='call TwoGluontoTensor_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
+             line='call VectorVectorToAuxTensor(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
                   '[coupl(2*i-1),coupl(2*i)])'
           elseif(itype.eq.14) then
-             line='call TensorGluontoGluon_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
+             line='call AuxTensorVectorToVector(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
                   '[coupl(2*i-1),coupl(2*i)])'
           elseif(itype.eq.15) then
-             line='call GluonTensortoGluon_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
+             line='call VectorAuxTensorToVector(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
                   '[coupl(2*i-1),coupl(2*i)])'
           elseif(itype.eq.16) then
-             line='call QuarkScalartoQuark(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
+             line='call FermionScalarToFermion(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
                   '[coupl(2*i-1),coupl(2*i)])'
           elseif(itype.eq.17) then
-             line='call GluonGluontoScalar(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
+             line='call VectorVectorToScalar(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
                   '[coupl(2*i-1),coupl(2*i)])'
           elseif(itype.eq.18) then
-             line='call ScalarGluontoGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
+             line='call ScalarVectorToVector(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
                   '[coupl(2*i-1),coupl(2*i)])'
           elseif(itype.eq.19) then
-             line='call GluonScalartoGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
+             line='call VectorScalarToVector(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
                   '[coupl(2*i-1),coupl(2*i)])'
           elseif(itype.eq.20) then
-             line='call ScalarScalartoScalar(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
+             line='call ScalarScalarToScalar(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
                   '[coupl(2*i-1),coupl(2*i)])'
           elseif(itype.eq.21) then
              if (vkey.eq.4) then
-                write(iunit,'(6x,a)') 'call LeptonAleptontoGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(iunit,'(6x,a)') 'call LeptonAntileptonToVector(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
                 write(iunit,'(8x,a)') '[coupl(2*i-1),coupl(2*i)])'
              else
-                write(iunit,'(6x,a)') 'call LeptonAleptontoGluon_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(iunit,'(6x,a)') 'call LeptonAntileptonToVector_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
                 write(tmp,*) vkey/3-1
                 line='[coupl(2*i-1),coupl(2*i)],'//trim(adjustl(tmp))//','
                 write(tmp,*) mod(vkey,3)-1
@@ -3681,10 +4495,10 @@ contains
              line=''
           elseif(itype.eq.22) then
              if (vkey.eq.4) then
-                write(iunit,'(6x,a)') 'call AleptonLeptontoGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(iunit,'(6x,a)') 'call AntileptonLeptonToVector(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
                 write(iunit,'(8x,a)') '[coupl(2*i-1),coupl(2*i)])'
              else
-                write(iunit,'(6x,a)') 'call AleptonLeptontoGluon_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(iunit,'(6x,a)') 'call AntileptonLeptonToVector_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
                 write(tmp,*) vkey/3-1
                 line='[coupl(2*i-1),coupl(2*i)],'//trim(adjustl(tmp))//','
                 write(tmp,*) mod(vkey,3)-1
@@ -3693,25 +4507,38 @@ contains
              endif
              line=''
           elseif(itype.eq.23) then
-             if (vkey.eq.4) then
-                write(iunit,'(6x,a)') 'call GluonQuarktoQuark_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
-                write(iunit,'(8x,a)') '[coupl(2*i-1),coupl(2*i)])'
-             else
-                write(iunit,'(6x,a)') 'call GluonQuarktoQuark_coupl_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+             if (vkey.eq.3 .or. vkey.eq.5) then
+                write(iunit,'(6x,a)') 'call VectorFermionToFermion_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
                 write(tmp,*) vkey-4
                 line='[coupl(2*i-1),coupl(2*i)],'//trim(adjustl(tmp))//')'
                 write(iunit,'(8x,a)') trim(adjustl(line))
+             elseif (vkey.eq.0 .or. vkey.eq.8) then
+                write(iunit,'(6x,a)') 'call VectorFermionToFermion_mixed(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(tmp,*) vkey/4-1
+                line='[coupl(2*i-1),coupl(2*i)],'//trim(adjustl(tmp))//')'
+                write(iunit,'(8x,a)') trim(adjustl(line))
+             else
+                write(iunit,'(6x,a)') 'call VectorFermionToFermion(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(iunit,'(8x,a)') '[coupl(2*i-1),coupl(2*i)])'
              endif
              line=''
           elseif(itype.eq.24) then
-             if (vkey.eq.4) then
-                write(iunit,'(6x,a)') 'call GluonAquarktoAquark_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
-                write(iunit,'(8x,a)') '[coupl(2*i-1),coupl(2*i)])'
-             else
-                write(iunit,'(6x,a)') 'call GluonAquarktoAquark_coupl_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+             if (vkey.eq.3 .or. vkey.eq.5) then
+                write(iunit,'(6x,a)') 'call VectorAntifermionToAntifermion_weyl( &'
+                write(iunit,'(8x,a)') 'val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
                 write(tmp,*) vkey-4
                 line='[coupl(2*i-1),coupl(2*i)],'//trim(adjustl(tmp))//')'
                 write(iunit,'(8x,a)') trim(adjustl(line))
+             elseif (vkey.eq.0 .or. vkey.eq.8) then
+                write(iunit,'(6x,a)') 'call VectorAntifermionToAntifermion_mixed( &'
+                write(iunit,'(8x,a)') 'val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(tmp,*) vkey/4-1
+                line='[coupl(2*i-1),coupl(2*i)],'//trim(adjustl(tmp))//')'
+                write(iunit,'(8x,a)') trim(adjustl(line))
+             else
+                write(iunit,'(6x,a)') 'call VectorAntifermionToAntifermion( &'
+                write(iunit,'(8x,a)') 'val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(iunit,'(8x,a)') '[coupl(2*i-1),coupl(2*i)])'
              endif
              line=''
           endif
@@ -3744,7 +4571,7 @@ contains
 
        icount_type=0
        do ic=this%n_cur_start(isize),this%n_cur_end(isize)
-          if (pm%is_gluon(this%current_list(ic)%type).or. &
+          if (pm%is_colour_flow_vector(this%current_list(ic)%type).or. &
                pm%is_photon(this%current_list(ic)%type)) then
              itype=1
           elseif (pm%is_quark(this%current_list(ic)%type).or. &
@@ -3769,26 +4596,22 @@ contains
              else
                 itype=3
              endif
-          elseif (pm%is_massiveboson(this%current_list(ic)%type)) then
+          elseif (pm%is_massive_vector(this%current_list(ic)%type)) then
              itype=4
           elseif (pm%is_higgs(this%current_list(ic)%type)) then
              itype=5
-          elseif (pm%is_tensor(this%current_list(ic)%type)) then
+          elseif (pm%is_auxiliary_tensor(this%current_list(ic)%type)) then
              itype=6
-          elseif (pm%is_higgsor(this%current_list(ic)%type)) then
+          elseif (pm%is_auxiliary_scalar(this%current_list(ic)%type)) then
              itype=7
           else
              write (*,*) 'not found:',this%current_list(ic)%type
              stop 1
           endif
-          if (this%current_list(ic)%n_vert.gt.150) then ! just use some large number here and below
-             write (*,*) 'Too many n_vert in creating library',this%current_list(ic)%n_vert,ic
-             stop 1
-          endif
           icount_type(this%current_list(ic)%n_vert,itype)=icount_type(this%current_list(ic)%n_vert,itype)+1
        enddo
 
-       do i=1,150
+       do i=1,max_current_vertices
           do j=1,11
              if (icount_type(i,j).eq.0) cycle
              write(tmp,*) isize
@@ -3805,7 +4628,7 @@ contains
        write(iunit,'(a)') ''
 
        
-       do i=1,150
+       do i=1,max_current_vertices
           do j=1,11
              if (icount_type(i,j).eq.0) cycle
 
@@ -3816,7 +4639,7 @@ contains
              curs=0
              ii=0
              do ic=this%n_cur_start(isize),this%n_cur_end(isize)
-                if (pm%is_gluon(this%current_list(ic)%type).or. &
+                if (pm%is_colour_flow_vector(this%current_list(ic)%type).or. &
                      pm%is_photon(this%current_list(ic)%type)) then
                    itype=1
                 elseif (pm%is_quark(this%current_list(ic)%type).or.&
@@ -3841,13 +4664,13 @@ contains
                    else
                       itype=3
                    endif
-                elseif (pm%is_massiveboson(this%current_list(ic)%type)) then
+                elseif (pm%is_massive_vector(this%current_list(ic)%type)) then
                    itype=4
                 elseif (pm%is_higgs(this%current_list(ic)%type)) then
                    itype=5
-                elseif (pm%is_tensor(this%current_list(ic)%type)) then
+                elseif (pm%is_auxiliary_tensor(this%current_list(ic)%type)) then
                    itype=6
-                elseif (pm%is_higgsor(this%current_list(ic)%type)) then
+                elseif (pm%is_auxiliary_scalar(this%current_list(ic)%type)) then
                    itype=7
                 else
                    write (*,*) 'not found',this%current_list(ic)%type
@@ -3856,7 +4679,11 @@ contains
                 if (itype.ne.j) cycle
                 if (this%current_list(ic)%n_vert.ne.i) cycle
                 ii=ii+1
-                curs(1:i,ii)=this%current_list(ic)%vertices(1:i)
+                ! A negative label tells the generated library to subtract
+                ! this interaction when assembling the current.
+                curs(1:i,ii)=merge(-this%current_list(ic)%vertices(1:i),&
+                     this%current_list(ic)%vertices(1:i),&
+                     this%current_list(ic)%vertex_sign(1:i))
                 curs(0,ii)=ic
                 pp(ii)=this%pp_bin_to_i(this%current_list(ic)%bin)
                 m(ii)=this%current_list(ic)%mass
@@ -3965,32 +4792,36 @@ contains
              write(iunit,'(4x,a)') 'do i=1,'//trim(adjustl(tmp))
              write(tmp,*) i
              if (j.eq.6) then
-                write(iunit,'(6x,a)') 'val_c(1:6,int1(0,i))=sum(int_c(1:6,int1(1:'//trim(adjustl(tmp))//',i)),dim=2)'
+                write(iunit,'(6x,a)') 'val_c(1:6,int1(0,i))=sum(int_c(1:6,abs(int1(1:'//trim(adjustl(tmp))//&
+                     ',i)))*spread(sign(1,int1(1:'//trim(adjustl(tmp))//',i)),1,6),dim=2)'
              elseif (j.eq.5 .or. j.eq.7) then
-                write(iunit,'(6x,a)') 'val_c(1,int1(0,i))=sum(int_c(1,int1(1:'//trim(adjustl(tmp))//',i)),dim=2)'
+                write(iunit,'(6x,a)') 'val_c(1,int1(0,i))=sum(int_c(1,abs(int1(1:'//trim(adjustl(tmp))//&
+                     ',i)))*sign(1,int1(1:'//trim(adjustl(tmp))//',i)))'
              elseif (j.ge.8 .and. j.le.11) then
-                write(iunit,'(6x,a)') 'val_c(1:2,int1(0,i))=sum(int_c(1:2,int1(1:'//trim(adjustl(tmp))//',i)),dim=2)'
+                write(iunit,'(6x,a)') 'val_c(1:2,int1(0,i))=sum(int_c(1:2,abs(int1(1:'//trim(adjustl(tmp))//&
+                     ',i)))*spread(sign(1,int1(1:'//trim(adjustl(tmp))//',i)),1,2),dim=2)'
              else
-                write(iunit,'(6x,a)') 'val_c(1:4,int1(0,i))=sum(int_c(1:4,int1(1:'//trim(adjustl(tmp))//',i)),dim=2)'
+                write(iunit,'(6x,a)') 'val_c(1:4,int1(0,i))=sum(int_c(1:4,abs(int1(1:'//trim(adjustl(tmp))//&
+                     ',i)))*spread(sign(1,int1(1:'//trim(adjustl(tmp))//',i)),1,4),dim=2)'
              endif
              if (j.eq.1 .and. isize.ne.n-1) then
-                write(iunit,'(6x,a)') 'call GluonPropagator(val_c(1,int1(0,i)),pp(0,pp1(i)))'
+                write(iunit,'(6x,a)') 'call MasslessVectorPropagator(val_c(1,int1(0,i)),pp(0,pp1(i)))'
              elseif(j.eq.2 .and. isize.ne.n-1) then
-                write(iunit,'(6x,a)') 'call QuarkPropagator(val_c(1,int1(0,i)),pp(0,pp1(i)),m(i),w(i))'
+                write(iunit,'(6x,a)') 'call FermionPropagator(val_c(1,int1(0,i)),pp(0,pp1(i)),m(i),w(i))'
              elseif(j.eq.3 .and. isize.ne.n-1) then
-                write(iunit,'(6x,a)') 'call AquarkPropagator(val_c(1,int1(0,i)),pp(0,pp1(i)),m(i),w(i))'
+                write(iunit,'(6x,a)') 'call AntifermionPropagator(val_c(1,int1(0,i)),pp(0,pp1(i)),m(i),w(i))'
              elseif(j.eq.4 .and. isize.ne.n-1) then
-                write(iunit,'(6x,a)') 'call GluonPropagator_mass(val_c(1,int1(0,i)),pp(0,pp1(i)),m(i),w(i))'
+                write(iunit,'(6x,a)') 'call MassiveVectorPropagator(val_c(1,int1(0,i)),pp(0,pp1(i)),m(i),w(i))'
              elseif(j.eq.5 .and. isize.ne.n-1) then
                 write(iunit,'(6x,a)') 'call ScalarPropagator(val_c(1,int1(0,i)),pp(0,pp1(i)),m(i),w(i))'
              elseif(j.eq.8 .and. isize.ne.n-1) then
-                write(iunit,'(6x,a)') 'call QuarkPropagator_weyl(val_c(1,int1(0,i)),pp(0,pp1(i)),1)'
+                write(iunit,'(6x,a)') 'call FermionPropagator_weyl(val_c(1,int1(0,i)),pp(0,pp1(i)),1)'
              elseif(j.eq.9 .and. isize.ne.n-1) then
-                write(iunit,'(6x,a)') 'call QuarkPropagator_weyl(val_c(1,int1(0,i)),pp(0,pp1(i)),-1)'
+                write(iunit,'(6x,a)') 'call FermionPropagator_weyl(val_c(1,int1(0,i)),pp(0,pp1(i)),-1)'
              elseif(j.eq.10 .and. isize.ne.n-1) then
-                write(iunit,'(6x,a)') 'call AquarkPropagator_weyl(val_c(1,int1(0,i)),pp(0,pp1(i)),1)'
+                write(iunit,'(6x,a)') 'call AntifermionPropagator_weyl(val_c(1,int1(0,i)),pp(0,pp1(i)),1)'
              elseif(j.eq.11 .and. isize.ne.n-1) then
-                write(iunit,'(6x,a)') 'call AquarkPropagator_weyl(val_c(1,int1(0,i)),pp(0,pp1(i)),-1)'
+                write(iunit,'(6x,a)') 'call AntifermionPropagator_weyl(val_c(1,int1(0,i)),pp(0,pp1(i)),-1)'
              endif
              write(iunit,'(4x,a)') 'enddo'
              write(tmp,*) isize
@@ -4021,20 +4852,15 @@ contains
        do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
           if (.not.this%same_flav(iproc)) then
              write(tmp,*) iamp
-             if (this%current_list(this%curr2amp(1,iamp))%chirality.ne.0 .and. &
-                 this%current_list(this%curr2amp(2,iamp))%chirality.ne.0) then
-                line='amps('//trim(adjustl(tmp))//')=sum(val_c(1:2,'
-                write(tmp,*) this%curr2amp(1,iamp)
-                line=trim(adjustl(line))//trim(adjustl(tmp))//')*val_c(1:2,'
-                write(tmp,*) this%curr2amp(2,iamp)
-                line=trim(adjustl(line))//trim(adjustl(tmp))//'))'
-             else
-                line='amps('//trim(adjustl(tmp))//')=sum(val_c(1:4,'
-                write(tmp,*) this%curr2amp(1,iamp)
-                line=trim(adjustl(line))//trim(adjustl(tmp))//')*val_c(1:4,'
-                write(tmp,*) this%curr2amp(2,iamp)
-                line=trim(adjustl(line))//trim(adjustl(tmp))//'))'
-             endif
+             line='amps('//trim(adjustl(tmp))//')=ContractFermionCurrents('
+             write(tmp,*) this%curr2amp(1,iamp)
+             line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'),'
+             write(tmp,*) this%current_list(this%curr2amp(1,iamp))%chirality
+             line=trim(adjustl(line))//trim(adjustl(tmp))//',val_c(1,'
+             write(tmp,*) this%curr2amp(2,iamp)
+             line=trim(adjustl(line))//trim(adjustl(tmp))//'),'
+             write(tmp,*) this%current_list(this%curr2amp(2,iamp))%chirality
+             line=trim(adjustl(line))//trim(adjustl(tmp))//')'
              write(iunit,'(4x,a)') trim(adjustl(line))
           endif
        enddo
@@ -4085,6 +4911,7 @@ contains
     write(line,*) iint
     write(iunit,'(a)') 'end module amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib'
     close(iunit)
+    deallocate(icount_type)
   end subroutine create_library
 
 
@@ -4283,6 +5110,16 @@ contains
           endif
        enddo
     enddo
+    if (allocated(this%three_line_partner_curr2amp)) then
+       do iamp=1,this%n_amps
+          do i=1,2
+             if (this%three_line_partner_curr2amp(i,iamp).ne.0) then
+                this%three_line_partner_curr2amp(i,iamp)=&
+                     where_to_cur(this%three_line_partner_curr2amp(i,iamp))
+             endif
+          enddo
+       enddo
+    endif
     do iamp=1,this%n_amps
        if (.not.this%include_amp(iamp)) cycle
        do i=1,2
@@ -4495,6 +5332,8 @@ contains
     if (allocated(amp%n_qqbar)) deallocate(amp%n_qqbar)
     if (allocated(amp%perm)) deallocate(amp%perm)
     if (allocated(amp%curr2amp)) deallocate(amp%curr2amp)
+    if (allocated(amp%three_line_partner_curr2amp)) &
+         deallocate(amp%three_line_partner_curr2amp)
     if (allocated(amp%i_col_i)) deallocate(amp%i_col_i)
     if (allocated(amp%processes)) deallocate(amp%processes)
     if (allocated(amp%same_flavour_sum)) deallocate(amp%same_flavour_sum)

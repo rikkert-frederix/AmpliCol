@@ -44,10 +44,7 @@ will use a 5 Flavour scheme, (both proton 'p' and jet 'j' will include
 the 5 lightest quarks (and the gluon)). Furthermore, flavour
 configurations with three or more quark lines are not included by
 default, but can be included by providing the '--include_3qqbar'
-option. If these are included, the performance of the event generation
-is significantly reduced. Furthermore, these contributions will only
-be calculated at leading-ccolour accuracy (i.e., the reweighting code,
-see below, will skip these contributions).
+option.
 
 
 
@@ -63,12 +60,18 @@ It requires 'LHAPDF' as an external dependency, for which it is
 expected that the correct link commands are provided through
 `lhapdf-config --ldflags`, see the makefile lines 98-99.
 
-There is currently no "run_card" or "process_card" to set input
-parameters. All parameteres are hard-coded in the fortran code
----mostly in 'common.f03' (e.g., collision energy, PDFset to use,
-generation cuts, and renormalisation/factorisation scale choice are
-all in common.f03). Changing any of these parameters requires
-recompiling amplicol_generate.
+Physics and run parameters are read from the Fortran namelist
+'run_card.dat'. It contains the particle masses and nominal widths,
+couplings, collider energy, scale choice, PDF setup, and generation
+cuts. A different card can be selected with '--input=FILE' (or
+'--card=FILE'); changing these values does not require recompilation.
+
+By default, the effective width of every massive particle requested in
+the physical final state is set to zero globally before any subprocess
+amplitude is built. This prevents an on-shell external state from also
+carrying a finite width in another subprocess. Set
+'ignore_final_state_width_fix=.true.' in the input card to retain the
+configured nominal width instead.
 
 The possible arguments when running the event generation code are:
 
@@ -81,6 +84,7 @@ Usage: amplicol_generate <arguments>'. Possible arguments are
   --process=[X],    -p=[X]  : Born process specified in file [X] (default is './processes.txt').
   --real-process=[X]         : Real-emission process file; integrates B + R-sum(D) in one run.
   --dim-reg=[hv|fdh]         : Dimensional scheme for integrated dipoles (default: hv).
+  --input=[X], --card=[X]   : Physics/run input card (default is './run_card.dat').
   --nevents=[X],    -n=[X]  : Number of unweighted events to generate (default is 10000).
   --phasespace=[X], -ps=[X] : Phase-space parametrisation to use -- 1=gen23 (default), 2=HAAG, 3=pT-based, 4=t-channel.
   --seed=[X],       -s=[X]  : The random number seed to use (default is read from randinit file).
@@ -249,9 +253,9 @@ non-negligible, so only relevant when generating many events. The
 usage in this case would be:
 
 make amplicol_generate
-./amplicol_generate --library=create --process=processes.txt
+./amplicol_generate --library=create --process=processes.txt --input=run_card.dat
 make amplicol_generate_library
-./amplicol_generate --library=use --nevents=1000000 --seed=101
+./amplicol_generate --library=use --nevents=1000000 --seed=101 --input=run_card.dat
 
 It might be needed to include the "-mcmodel=large" compilation flag
 when the process library is large, see also lines 5-6 of the
@@ -259,6 +263,12 @@ makefile. Using this option requires a 'make clean' first, before
 recompiling the amplicol_generate code. (This also means re-creating
 the process library, since a make clean removes all of the process
 library source code).
+
+Masses, effective widths, and weak-coupling parameters are compiled
+into an amplitude library. AmpliCol records these values and rejects an
+incompatible input card when '--library=use' is requested; recreate the
+library with the new card in that case. Collider, cut, scale and PDF
+settings may be changed without recreating the amplitude library.
 
 
 3. Reweighting
@@ -289,6 +299,7 @@ Possible arguments are
   --help,   -h      : Show this message.
   --unwgt           : Unweight the reweight events.
   --remove_comments : Remove comment lines in the final LHEF.
+  --input=[X]       : Physics/run input card (default is './run_card.dat').
 *****************************
 
 By default, the code reweights all events and update the event weights

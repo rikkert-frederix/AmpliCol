@@ -1,6 +1,8 @@
 module FeynmanRules
+! Generic rules are named for their Lorentz fields.  Rules with explicit
+! quark/gluon names below are the fixed-normalization QCD colour-flow kernels.
 contains
-  subroutine ext_gluon_real(p,ihel,ifinal,wf)
+  subroutine ext_massless_vector_real(p,ihel,ifinal,wf)
     implicit none
     integer ihel,ifinal
     real(kind=8), dimension(0:3) :: p
@@ -8,16 +10,16 @@ contains
     complex(kind=8),dimension(4) :: wf0,wf1
     complex(kind=8),parameter :: cImag=(0d0,1d0)
     real(kind=8),parameter :: sqh=sqrt(0.5d0)
-    call ext_gluon_cmplx(p, 1,ifinal,wf1)
-    call ext_gluon_cmplx(p,-1,ifinal,wf0)
+    call ext_massless_vector_cmplx(p, 1,ifinal,wf1)
+    call ext_massless_vector_cmplx(p,-1,ifinal,wf0)
     if (ihel.eq.1) then
        wf(1:4)=dble(cImag*(wf1(1:4)+wf0(1:4)))*sqh
     elseif (ihel.eq.-1) then
        wf(1:4)=-dble(wf1(1:4)-wf0(1:4))*sqh
     endif
-  end subroutine ext_gluon_real
-  subroutine ext_gluon_cmplx(p,ihel,idum,wf)
-    ! External gluon wavefunction. From HELAS.
+  end subroutine ext_massless_vector_real
+  subroutine ext_massless_vector_cmplx(p,ihel,idum,wf)
+    ! External massless-vector wavefunction. From HELAS.
     implicit none
     integer :: ihel,idum
     real(kind=8), dimension(0:3) :: p
@@ -26,7 +28,7 @@ contains
     complex(kind=8),parameter :: cZero=(0d0,0d0)
     real(kind=8) :: hel,pp,pt,pzpt
     if (p(0).eq.0d0) then
-       write (*,*) 'Cannot generate external gluon with zero energy'
+       write (*,*) 'Cannot generate an external massless vector with zero energy'
        write (*,*) p
        stop 1
     elseif (p(0).gt.0d0) then
@@ -58,10 +60,10 @@ contains
           wf(3) = dcmplx( rZero , -sign(sqh,p(3)) )
        endif
     endif
-  end subroutine ext_gluon_cmplx
+  end subroutine ext_massless_vector_cmplx
 
 
-  subroutine ext_gluon_mass(p,nhel,nsv,wf,vmass)
+  subroutine ext_massive_vector(p,nhel,nsv,wf,vmass)
     implicit none
     real(kind=8),dimension(0:3) :: p(0:3)
     complex(kind=8),dimension(4) :: wf
@@ -108,11 +110,11 @@ contains
           wf(3) = dcmplx( rZero , nsv*sign(sqh,p(3)) )
        endif
     endif
-  end subroutine ext_gluon_mass
+  end subroutine ext_massive_vector
 
-  subroutine ext_quark(p,nhel,idum,wf,fmass)
-    ! flowing-out fermion number, i.e., final state quark (p(0)>0) or initial
-    ! state anti-quark (p(0)<0)
+  subroutine ext_fermion_outflow(p,nhel,idum,wf,fmass)
+    ! Flowing-out fermion number: final-state fermion (p(0)>0) or
+    ! initial-state antifermion (p(0)<0).
     implicit none
     integer :: nhel,idum
     real(kind=8), dimension(0:3) :: p
@@ -227,12 +229,12 @@ contains
           wf(4) = sfomeg(1)*chi(ip)
        endif
     endif
-  end subroutine ext_quark
+  end subroutine ext_fermion_outflow
 
 
-  subroutine ext_antiquark(p,nhel,idum,wf,fmass)
-    ! flowing-in fermion number, i.e., final state anti-quark (p(0)>0), or
-    ! initial state quark (p(0)<0)
+  subroutine ext_fermion_inflow(p,nhel,idum,wf,fmass)
+    ! Flowing-in fermion number: final-state antifermion (p(0)>0) or
+    ! initial-state fermion (p(0)<0).
     implicit none
     integer :: nhel,idum
     real(kind=8), dimension(0:3) :: p
@@ -347,9 +349,9 @@ contains
           wf(4) = sfomeg(2)*chi(ip)
        endif
     endif
-  end subroutine ext_antiquark
+  end subroutine ext_fermion_inflow
 
-  subroutine ext_quark_weyl(p,nhel,idum,wf,chirality)
+  subroutine ext_fermion_outflow_weyl(p,nhel,idum,wf,chirality)
     implicit none
     integer :: nhel,idum,chirality
     real(kind=8), dimension(0:3) :: p
@@ -396,9 +398,9 @@ contains
           wf(2)=chi(1)
        endif
     endif
-  end subroutine ext_quark_weyl
+  end subroutine ext_fermion_outflow_weyl
 
-  subroutine ext_antiquark_weyl(p,nhel,idum,wf,chirality)
+  subroutine ext_fermion_inflow_weyl(p,nhel,idum,wf,chirality)
     implicit none
     integer :: nhel,idum,chirality
     real(kind=8), dimension(0:3) :: p
@@ -445,7 +447,7 @@ contains
           wf(1:2)=chi(1:2)
        endif
     endif
-  end subroutine ext_antiquark_weyl
+  end subroutine ext_fermion_inflow_weyl
 
   subroutine ext_scalar(p,idum,wf)
     implicit none
@@ -491,7 +493,7 @@ contains
     TMP3 = (wf2(1)*wf3(1)-wf2(2)*wf3(2)-wf2(3)*wf3(3)-wf2(4)*wf3(4))
     wf(1:4) = prefact*(2d0*wf2(1:4)*TMP2-wf1(1:4)*TMP3-wf3(1:4)*TMP1)
   end subroutine FourGluon
-  subroutine TwoGluontoTensor(wfg1,wfg2,wfT)
+  subroutine TwoGluonToAuxTensor(wfg1,wfg2,wfT)
     ! This vertex includes the all factors such that the tensor "propagator"
     ! is simply the identity
     implicit none
@@ -505,8 +507,8 @@ contains
     wfT(4)=(wfg1(2)*wfg2(3)-wfg1(3)*wfg2(2))! * prefact
     wfT(5)=(wfg1(2)*wfg2(4)-wfg1(4)*wfg2(2))! * prefact
     wfT(6)=(wfg1(3)*wfg2(4)-wfg1(4)*wfg2(3))! * prefact
-  end subroutine TwoGluontoTensor
-  subroutine TwoGluontoTensor_real(wfg1,wfg2,wfT)
+  end subroutine TwoGluonToAuxTensor
+  subroutine TwoGluonToAuxTensor_real(wfg1,wfg2,wfT)
     ! This vertex includes the all factors such that the tensor "propagator"
     ! is simply the identity
     implicit none
@@ -518,8 +520,8 @@ contains
     wfT(4)=(wfg1(2)*wfg2(3)-wfg1(3)*wfg2(2))
     wfT(5)=(wfg1(2)*wfg2(4)-wfg1(4)*wfg2(2))
     wfT(6)=(wfg1(3)*wfg2(4)-wfg1(4)*wfg2(3))
-  end subroutine TwoGluontoTensor_real
-  subroutine TensorGluontoGluon(wfT1,wfg2,wfg)
+  end subroutine TwoGluonToAuxTensor_real
+  subroutine AuxTensorGluonToGluon(wfT1,wfg2,wfg)
     implicit none
     complex(kind=8),dimension(4) :: wfg2,wfg
     complex(kind=8),dimension(6) :: wfT1
@@ -528,8 +530,8 @@ contains
     wfg(2)=(wfT1(1)*wfg2(1)+wfT1(4)*wfg2(3)+wfT1(5)*wfg2(4))*prefact
     wfg(3)=(wfT1(2)*wfg2(1)-wfT1(4)*wfg2(2)+wfT1(6)*wfg2(4))*prefact
     wfg(4)=(wfT1(3)*wfg2(1)-wfT1(5)*wfg2(2)-wfT1(6)*wfg2(3))*prefact
-  end subroutine TensorGluontoGluon
-  subroutine TensorGluontoGluon_real(wfT1,wfg2,wfg)
+  end subroutine AuxTensorGluonToGluon
+  subroutine AuxTensorGluonToGluon_real(wfT1,wfg2,wfg)
     implicit none
     real(kind=8),dimension(4) :: wfg2,wfg
     real(kind=8),dimension(6) :: wfT1
@@ -538,8 +540,8 @@ contains
     wfg(2)=(wfT1(1)*wfg2(1)+wfT1(4)*wfg2(3)+wfT1(5)*wfg2(4))*prefact
     wfg(3)=(wfT1(2)*wfg2(1)-wfT1(4)*wfg2(2)+wfT1(6)*wfg2(4))*prefact
     wfg(4)=(wfT1(3)*wfg2(1)-wfT1(5)*wfg2(2)-wfT1(6)*wfg2(3))*prefact
-  end subroutine TensorGluontoGluon_Real
-  subroutine GluonTensortoGluon(wfg1,wfT2,wfg)
+  end subroutine AuxTensorGluonToGluon_real
+  subroutine GluonAuxTensorToGluon(wfg1,wfT2,wfg)
     implicit none 
     complex(kind=8),dimension(4) :: wfg1,wfg
     complex(kind=8),dimension(6) :: wfT2
@@ -548,8 +550,8 @@ contains
     wfg(2)=(-wfg1(1)*wfT2(1)-wfg1(3)*wfT2(4)-wfg1(4)*wfT2(5))*prefact
     wfg(3)=(-wfg1(1)*wfT2(2)+wfg1(2)*wfT2(4)-wfg1(4)*wfT2(6))*prefact
     wfg(4)=(-wfg1(1)*wfT2(3)+wfg1(2)*wfT2(5)+wfg1(3)*wfT2(6))*prefact
-  end subroutine GluonTensortoGluon
-  subroutine GluonTensortoGluon_real(wfg1,wfT2,wfg)
+  end subroutine GluonAuxTensorToGluon
+  subroutine GluonAuxTensorToGluon_real(wfg1,wfT2,wfg)
     implicit none 
     real(kind=8),dimension(4) :: wfg1,wfg
     real(kind=8),dimension(6) :: wfT2
@@ -558,9 +560,9 @@ contains
     wfg(2)=(-wfg1(1)*wfT2(1)-wfg1(3)*wfT2(4)-wfg1(4)*wfT2(5))*prefact
     wfg(3)=(-wfg1(1)*wfT2(2)+wfg1(2)*wfT2(4)-wfg1(4)*wfT2(6))*prefact
     wfg(4)=(-wfg1(1)*wfT2(3)+wfg1(2)*wfT2(5)+wfg1(3)*wfT2(6))*prefact
-  end subroutine GluonTensortoGluon_Real
+  end subroutine GluonAuxTensorToGluon_real
 
-  subroutine QuarkGluontoQuark(wfq1,wfg2,wfq) 
+  subroutine QuarkColourFlowVectorToQuark(wfq1,wfg2,wfq)
     implicit none
     complex(kind=8),dimension(4) :: wfq1,wfg2,wfq
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
@@ -573,9 +575,9 @@ contains
     wfq(2)=prefact*(TMP2*wfq1(4)+TMP4*wfq1(3)) 
     wfq(3)=prefact*(TMP2*wfq1(1)-TMP3*wfq1(2))  
     wfq(4)=prefact*(TMP1*wfq1(2)-TMP4*wfq1(1))  
-  end subroutine QuarkGluontoQuark
+  end subroutine QuarkColourFlowVectorToQuark
 
-  subroutine QuarkGluontoQuark_real(wfq1,wfg2,wfq)
+  subroutine QuarkColourFlowVectorToQuark_real(wfq1,wfg2,wfq)
     implicit none
     complex(kind=8),dimension(4) :: wfq1,wfq
     real(kind=8),dimension(4) :: wfg2
@@ -590,9 +592,9 @@ contains
     wfq(2)=prefact*(TMP2*wfq1(4)+TMP4*wfq1(3)) !sl2
     wfq(3)=prefact*(TMP2*wfq1(1)-TMP3*wfq1(2)) !sr1
     wfq(4)=prefact*(TMP1*wfq1(2)-TMP4*wfq1(1)) !sr2
-  end subroutine QuarkGluontoQuark_real
+  end subroutine QuarkColourFlowVectorToQuark_real
 
-  subroutine GluonQuarktoQuark(wfg1,wfq2,wfq) 
+  subroutine ColourFlowVectorQuarkToQuark(wfg1,wfq2,wfq)
     implicit none
     complex(kind=8),dimension(4) :: wfg1,wfq2,wfq
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
@@ -605,9 +607,9 @@ contains
     wfq(2)=prefact*(TMP2*wfq2(4)+TMP4*wfq2(3)) ! sl2
     wfq(3)=prefact*(TMP2*wfq2(1)-TMP3*wfq2(2)) ! sr1
     wfq(4)=prefact*(TMP1*wfq2(2)-TMP4*wfq2(1)) ! sr2
-  end subroutine GluonQuarktoQuark
+  end subroutine ColourFlowVectorQuarkToQuark
 
-  subroutine GluonQuarktoQuark_real(wfg1,wfq2,wfq) 
+  subroutine ColourFlowVectorQuarkToQuark_real(wfg1,wfq2,wfq)
     implicit none
     complex(kind=8),dimension(4) :: wfq2,wfq
     real(kind=8),dimension(4) :: wfg1
@@ -622,9 +624,9 @@ contains
     wfq(2)=prefact*(TMP2*wfq2(4)+TMP4*wfq2(3)) ! sl2
     wfq(3)=prefact*(TMP2*wfq2(1)-TMP3*wfq2(2)) ! sr1
     wfq(4)=prefact*(TMP1*wfq2(2)-TMP4*wfq2(1)) ! sr2
-  end subroutine GluonQuarktoQuark_real
+  end subroutine ColourFlowVectorQuarkToQuark_real
 
-  subroutine GluonQuarktoQuark_coupl(wfg1,wfq2,wfq,coupl)
+  subroutine VectorFermionToFermion(wfg1,wfq2,wfq,coupl)
     implicit none
     complex(kind=8),dimension(4) :: wfg1,wfq2,wfq
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
@@ -640,9 +642,9 @@ contains
     ! R
     wfq(3)=prefact*(TMP2*wfq2(1)-TMP3*wfq2(2))*coupl(2) ! sr1
     wfq(4)=prefact*(TMP1*wfq2(2)-TMP4*wfq2(1))*coupl(2) ! sr2
-  end subroutine GluonQuarktoQuark_coupl
+  end subroutine VectorFermionToFermion
 
-  subroutine GluonAquarktoAquark_coupl(wfg1,wfq2,wfq,coupl)
+  subroutine VectorAntifermionToAntifermion(wfg1,wfq2,wfq,coupl)
     implicit none
     complex(kind=8),dimension(4) :: wfg1,wfq2,wfq
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
@@ -658,9 +660,9 @@ contains
     ! R
     wfq(3)=prefact*(TMP1*wfq2(1)+TMP4*wfq2(2))*coupl(1) !sl1
     wfq(4)=prefact*(TMP2*wfq2(2)+TMP3*wfq2(1))*coupl(1) !sl2
-  end subroutine GluonAquarktoAquark_coupl
+  end subroutine VectorAntifermionToAntifermion
 
-  subroutine AquarkGluontoAquark(wfq1,wfg2,wfq) 
+  subroutine AntiquarkColourFlowVectorToAntiquark(wfq1,wfg2,wfq)
     implicit none
     complex(kind=8),dimension(4) :: wfq1,wfg2,wfq
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
@@ -673,9 +675,9 @@ contains
     wfq(2)=prefact*(TMP1*wfq1(4)-TMP3*wfq1(3)) !sr2
     wfq(3)=prefact*(TMP1*wfq1(1)+TMP4*wfq1(2)) !sl1
     wfq(4)=prefact*(TMP2*wfq1(2)+TMP3*wfq1(1)) !sl2
-  end subroutine AquarkGluontoAquark
+  end subroutine AntiquarkColourFlowVectorToAntiquark
 
-  subroutine GluonAquarktoAquark(wfg1,wfq2,wfq) 
+  subroutine ColourFlowVectorAntiquarkToAntiquark(wfg1,wfq2,wfq)
     implicit none
     complex(kind=8),dimension(4) :: wfg1,wfq2,wfq
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
@@ -688,9 +690,9 @@ contains
     wfq(2)=prefact*(TMP1*wfq2(4)-TMP3*wfq2(3)) !sr2
     wfq(3)=prefact*(TMP1*wfq2(1)+TMP4*wfq2(2)) !sl1
     wfq(4)=prefact*(TMP2*wfq2(2)+TMP3*wfq2(1)) !sl2
-  end subroutine GluonAquarktoAquark
+  end subroutine ColourFlowVectorAntiquarkToAntiquark
 
-  subroutine QuarkAquarktoGluon(wfq1,wfq2,wfg,coupl) 
+  subroutine QuarkAntiquarkToColourFlowU1Vector(wfq1,wfq2,wfg,coupl)
     implicit none
     complex(kind=8),dimension(4) :: wfq1,wfq2,wfg
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
@@ -704,8 +706,8 @@ contains
     wfg(2)=( TMP4 + TMP3 )*prefact*coupl(1)
     wfg(3)=(-TMP4 + TMP3 )*cImag*prefact*coupl(1)
     wfg(4)=(-TMP1 + TMP2 )*prefact*coupl(1)
-  end subroutine QuarkAquarktoGluon
-  subroutine AquarkQuarktoGluon(wfq1,wfq2,wfg) 
+  end subroutine QuarkAntiquarkToColourFlowU1Vector
+  subroutine AntiquarkQuarkToGluon(wfq1,wfq2,wfg)
     implicit none
     complex(kind=8),dimension(4) :: wfq1,wfq2,wfg
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
@@ -718,10 +720,10 @@ contains
     wfg(2)=( TMP4 + TMP3 )*prefact
     wfg(3)=(-TMP4 + TMP3 )*cImag*prefact
     wfg(4)=(-TMP1 + TMP2 )*prefact
-  end subroutine AquarkQuarktoGluon
+  end subroutine AntiquarkQuarkToGluon
 
-  subroutine ThreeGluon_coupl(wf1,pwf1,wf2,pwf2,wf,coupl)
-    ! Colour-ordered three-gluon interaction
+  subroutine VectorVectorToVector(wf1,pwf1,wf2,pwf2,wf,coupl)
+    ! Yang-Mills three-vector interaction with an explicit model coupling.
     implicit none
     complex(kind=8),dimension(4) :: wf1,wf2,wf
     real(kind=8),dimension(0:3) :: pwf1,pwf2
@@ -733,9 +735,9 @@ contains
     TMP3 = wf2(1)*(-2d0*pwf1(0)-pwf2(0))-wf2(2)*(-2d0*pwf1(1)-pwf2(1))-wf2(3)*(-2d0*pwf1(2)-pwf2(2))-wf2(4)*(-2d0*pwf1(3)-pwf2(3))
     TMP4 = prefact*coupl(1)
     wf(1:4) = TMP4*(TMP1*(pwf1(0:3)-pwf2(0:3))+TMP2*wf2(1:4)+TMP3*wf1(1:4))
-  end subroutine ThreeGluon_Coupl
+  end subroutine VectorVectorToVector
 
-  subroutine QuarkGluontoQuark_coupl(wfq1,wfg2,wfq,coupl) ! from fvoxxx.f
+  subroutine FermionVectorToFermion(wfq1,wfg2,wfq,coupl) ! from fvoxxx.f
     implicit none
     complex(kind=8),dimension(4) :: wfq1,wfg2,wfq
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
@@ -751,9 +753,9 @@ contains
     TMP5=prefact*coupl(2) ! R
     wfq(3)=TMP5*(TMP2*wfq1(1)-TMP3*wfq1(2))
     wfq(4)=TMP5*(TMP1*wfq1(2)-TMP4*wfq1(1))
-  end subroutine QuarkGluontoQuark_coupl
+  end subroutine FermionVectorToFermion
 
-  subroutine QuarkGluontoQuark_weyl(wfq1,wfg2,wfq,chirality)
+  subroutine QuarkColourFlowVectorToQuark_weyl(wfq1,wfg2,wfq,chirality)
     implicit none
     integer,intent(in) :: chirality
     complex(kind=8),dimension(*) :: wfq1,wfq
@@ -771,11 +773,11 @@ contains
        wfq(1)=prefact*(TMP1*wfq1(1)+TMP3*wfq1(2))
        wfq(2)=prefact*(TMP2*wfq1(2)+TMP4*wfq1(1))
     else
-       call QuarkGluontoQuark(wfq1,wfg2,wfq)
+       call QuarkColourFlowVectorToQuark(wfq1,wfg2,wfq)
     endif
-  end subroutine QuarkGluontoQuark_weyl
+  end subroutine QuarkColourFlowVectorToQuark_weyl
 
-  subroutine GluonQuarktoQuark_weyl(wfg1,wfq2,wfq,chirality)
+  subroutine ColourFlowVectorQuarkToQuark_weyl(wfg1,wfq2,wfq,chirality)
     implicit none
     integer,intent(in) :: chirality
     complex(kind=8),dimension(4) :: wfg1
@@ -793,11 +795,11 @@ contains
        wfq(1)=prefact*(TMP1*wfq2(1)+TMP3*wfq2(2))
        wfq(2)=prefact*(TMP2*wfq2(2)+TMP4*wfq2(1))
     else
-       call GluonQuarktoQuark(wfg1,wfq2,wfq)
+       call ColourFlowVectorQuarkToQuark(wfg1,wfq2,wfq)
     endif
-  end subroutine GluonQuarktoQuark_weyl
+  end subroutine ColourFlowVectorQuarkToQuark_weyl
 
-  subroutine QuarkGluontoQuark_coupl_weyl(wfq1,wfg2,wfq,coupl,chirality)
+  subroutine FermionVectorToFermion_weyl(wfq1,wfg2,wfq,coupl,chirality)
     implicit none
     integer,intent(in) :: chirality
     complex(kind=8),dimension(*) :: wfq1,wfq
@@ -818,11 +820,11 @@ contains
        wfq(1)=TMP5*(TMP1*wfq1(1)+TMP3*wfq1(2))
        wfq(2)=TMP5*(TMP2*wfq1(2)+TMP4*wfq1(1))
     else
-       call QuarkGluontoQuark_coupl(wfq1,wfg2,wfq,coupl)
+       call FermionVectorToFermion(wfq1,wfg2,wfq,coupl)
     endif
-  end subroutine QuarkGluontoQuark_coupl_weyl
+  end subroutine FermionVectorToFermion_weyl
 
-  subroutine GluonQuarktoQuark_coupl_weyl(wfg1,wfq2,wfq,coupl,chirality)
+  subroutine VectorFermionToFermion_weyl(wfg1,wfq2,wfq,coupl,chirality)
     implicit none
     integer,intent(in) :: chirality
     complex(kind=8),dimension(4) :: wfg1
@@ -843,11 +845,11 @@ contains
        wfq(1)=TMP5*(TMP1*wfq2(1)+TMP3*wfq2(2))
        wfq(2)=TMP5*(TMP2*wfq2(2)+TMP4*wfq2(1))
     else
-       call GluonQuarktoQuark_coupl(wfg1,wfq2,wfq,coupl)
+       call VectorFermionToFermion(wfg1,wfq2,wfq,coupl)
     endif
-  end subroutine GluonQuarktoQuark_coupl_weyl
+  end subroutine VectorFermionToFermion_weyl
 
-  subroutine AquarkGluontoAquark_coupl(wfq1,wfg2,wfq,coupl) 
+  subroutine AntifermionVectorToAntifermion(wfq1,wfg2,wfq,coupl)
     implicit none
     complex(kind=8),dimension(4) :: wfq1,wfg2,wfq
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
@@ -863,9 +865,9 @@ contains
     TMP5=prefact*coupl(1)
     wfq(3)=TMP5*(TMP1*wfq1(1)+TMP4*wfq1(2)) !sl1
     wfq(4)=TMP5*(TMP2*wfq1(2)+TMP3*wfq1(1)) !sl2
-  end subroutine AquarkGluontoAquark_coupl
+  end subroutine AntifermionVectorToAntifermion
 
-  subroutine AquarkGluontoAquark_weyl(wfq1,wfg2,wfq,chirality)
+  subroutine AntiquarkColourFlowVectorToAntiquark_weyl(wfq1,wfg2,wfq,chirality)
     implicit none
     integer,intent(in) :: chirality
     complex(kind=8),dimension(*) :: wfq1,wfq
@@ -883,11 +885,11 @@ contains
        wfq(1)=prefact*(TMP2*wfq1(1)-TMP4*wfq1(2))
        wfq(2)=prefact*(TMP1*wfq1(2)-TMP3*wfq1(1))
     else
-       call AquarkGluontoAquark(wfq1,wfg2,wfq)
+       call AntiquarkColourFlowVectorToAntiquark(wfq1,wfg2,wfq)
     endif
-  end subroutine AquarkGluontoAquark_weyl
+  end subroutine AntiquarkColourFlowVectorToAntiquark_weyl
 
-  subroutine GluonAquarktoAquark_weyl(wfg1,wfq2,wfq,chirality)
+  subroutine ColourFlowVectorAntiquarkToAntiquark_weyl(wfg1,wfq2,wfq,chirality)
     implicit none
     integer,intent(in) :: chirality
     complex(kind=8),dimension(4) :: wfg1
@@ -905,11 +907,11 @@ contains
        wfq(1)=prefact*(TMP2*wfq2(1)-TMP4*wfq2(2))
        wfq(2)=prefact*(TMP1*wfq2(2)-TMP3*wfq2(1))
     else
-       call GluonAquarktoAquark(wfg1,wfq2,wfq)
+       call ColourFlowVectorAntiquarkToAntiquark(wfg1,wfq2,wfq)
     endif
-  end subroutine GluonAquarktoAquark_weyl
+  end subroutine ColourFlowVectorAntiquarkToAntiquark_weyl
 
-  subroutine AquarkGluontoAquark_coupl_weyl(wfq1,wfg2,wfq,coupl,chirality)
+  subroutine AntifermionVectorToAntifermion_weyl(wfq1,wfg2,wfq,coupl,chirality)
     implicit none
     integer,intent(in) :: chirality
     complex(kind=8),dimension(*) :: wfq1,wfq
@@ -930,11 +932,11 @@ contains
        wfq(1)=TMP5*(TMP2*wfq1(1)-TMP4*wfq1(2))
        wfq(2)=TMP5*(TMP1*wfq1(2)-TMP3*wfq1(1))
     else
-       call AquarkGluontoAquark_coupl(wfq1,wfg2,wfq,coupl)
+       call AntifermionVectorToAntifermion(wfq1,wfg2,wfq,coupl)
     endif
-  end subroutine AquarkGluontoAquark_coupl_weyl
+  end subroutine AntifermionVectorToAntifermion_weyl
 
-  subroutine GluonAquarktoAquark_coupl_weyl(wfg1,wfq2,wfq,coupl,chirality)
+  subroutine VectorAntifermionToAntifermion_weyl(wfg1,wfq2,wfq,coupl,chirality)
     implicit none
     integer,intent(in) :: chirality
     complex(kind=8),dimension(4) :: wfg1
@@ -955,13 +957,122 @@ contains
        wfq(1)=TMP5*(TMP2*wfq2(1)-TMP4*wfq2(2))
        wfq(2)=TMP5*(TMP1*wfq2(2)-TMP3*wfq2(1))
     else
-       call GluonAquarktoAquark_coupl(wfg1,wfq2,wfq,coupl)
+       call VectorAntifermionToAntifermion(wfg1,wfq2,wfq,coupl)
     endif
-  end subroutine GluonAquarktoAquark_coupl_weyl
+  end subroutine VectorAntifermionToAntifermion_weyl
 
-  subroutine TwoGluontoTensor_coupl(wfg1,wfg2,wfT,coupl)
-    ! This vertex includes the all factors such that the tensor "propagator"
-    ! is simply the identity
+  subroutine WeylToDirac(wf_weyl,chirality,wf_dirac)
+    ! Embed a compact massless-fermion current in the four-component
+    ! representation used by the massive-fermion Feynman rules.  This is
+    ! needed when a flavour-changing vector vertex connects a massless and
+    ! a massive fermion, for example b-W-t.
+    implicit none
+    integer,intent(in) :: chirality
+    complex(kind=8),dimension(*),intent(in) :: wf_weyl
+    complex(kind=8),dimension(4),intent(out) :: wf_dirac
+
+    wf_dirac=(0d0,0d0)
+    if (chirality.eq.1) then
+       wf_dirac(1:2)=wf_weyl(1:2)
+    elseif (chirality.eq.-1) then
+       wf_dirac(3:4)=wf_weyl(1:2)
+    elseif (chirality.eq.0) then
+       wf_dirac(1:4)=wf_weyl(1:4)
+    else
+       write (*,*) 'Invalid Weyl chirality in WeylToDirac',chirality
+       stop 1
+    endif
+  end subroutine WeylToDirac
+
+  subroutine FermionVectorToFermion_mixed(wfq1,wfg2,wfq,coupl,chirality)
+    implicit none
+    integer,intent(in) :: chirality
+    complex(kind=8),dimension(*),intent(in) :: wfq1
+    complex(kind=8),dimension(4),intent(in) :: wfg2
+    complex(kind=8),dimension(4),intent(out) :: wfq
+    real(kind=8),dimension(2),intent(in) :: coupl
+    complex(kind=8),dimension(4) :: wfq1_dirac
+
+    call WeylToDirac(wfq1,chirality,wfq1_dirac)
+    call FermionVectorToFermion(wfq1_dirac,wfg2,wfq,coupl)
+  end subroutine FermionVectorToFermion_mixed
+
+  subroutine AntifermionVectorToAntifermion_mixed(wfq1,wfg2,wfq,coupl,chirality)
+    implicit none
+    integer,intent(in) :: chirality
+    complex(kind=8),dimension(*),intent(in) :: wfq1
+    complex(kind=8),dimension(4),intent(in) :: wfg2
+    complex(kind=8),dimension(4),intent(out) :: wfq
+    real(kind=8),dimension(2),intent(in) :: coupl
+    complex(kind=8),dimension(4) :: wfq1_dirac
+
+    call WeylToDirac(wfq1,chirality,wfq1_dirac)
+    call AntifermionVectorToAntifermion(wfq1_dirac,wfg2,wfq,coupl)
+  end subroutine AntifermionVectorToAntifermion_mixed
+
+  subroutine VectorFermionToFermion_mixed(wfg1,wfq2,wfq,coupl,chirality)
+    implicit none
+    integer,intent(in) :: chirality
+    complex(kind=8),dimension(4),intent(in) :: wfg1
+    complex(kind=8),dimension(*),intent(in) :: wfq2
+    complex(kind=8),dimension(4),intent(out) :: wfq
+    real(kind=8),dimension(2),intent(in) :: coupl
+    complex(kind=8),dimension(4) :: wfq2_dirac
+
+    call WeylToDirac(wfq2,chirality,wfq2_dirac)
+    call VectorFermionToFermion(wfg1,wfq2_dirac,wfq,coupl)
+  end subroutine VectorFermionToFermion_mixed
+
+  subroutine VectorAntifermionToAntifermion_mixed(wfg1,wfq2,wfq,coupl,chirality)
+    implicit none
+    integer,intent(in) :: chirality
+    complex(kind=8),dimension(4),intent(in) :: wfg1
+    complex(kind=8),dimension(*),intent(in) :: wfq2
+    complex(kind=8),dimension(4),intent(out) :: wfq
+    real(kind=8),dimension(2),intent(in) :: coupl
+    complex(kind=8),dimension(4) :: wfq2_dirac
+
+    call WeylToDirac(wfq2,chirality,wfq2_dirac)
+    call VectorAntifermionToAntifermion(wfg1,wfq2_dirac,wfq,coupl)
+  end subroutine VectorAntifermionToAntifermion_mixed
+
+  complex(kind=8) function ContractFermionCurrents(wf_terminal,chirality_terminal, &
+       wf_external,chirality_external)
+    ! The terminal current has not received a fermion propagator.  Its compact
+    ! Weyl representation therefore occupies the opposite Dirac block from a
+    ! propagated/external compact current of the same chirality.
+    implicit none
+    integer,intent(in) :: chirality_terminal,chirality_external
+    complex(kind=8),dimension(*),intent(in) :: wf_terminal,wf_external
+
+    if (chirality_terminal.ne.0 .and. chirality_external.ne.0) then
+       ContractFermionCurrents=sum(wf_terminal(1:2)*wf_external(1:2))
+    elseif (chirality_terminal.eq.0 .and. chirality_external.eq.0) then
+       ContractFermionCurrents=sum(wf_terminal(1:4)*wf_external(1:4))
+    elseif (chirality_terminal.eq.0) then
+       if (chirality_external.eq.1) then
+          ContractFermionCurrents=sum(wf_terminal(1:2)*wf_external(1:2))
+       elseif (chirality_external.eq.-1) then
+          ContractFermionCurrents=sum(wf_terminal(3:4)*wf_external(1:2))
+       else
+          write (*,*) 'Invalid external chirality in ContractFermionCurrents',chirality_external
+          stop 1
+       endif
+    else
+       if (chirality_terminal.eq.1) then
+          ContractFermionCurrents=sum(wf_terminal(1:2)*wf_external(3:4))
+       elseif (chirality_terminal.eq.-1) then
+          ContractFermionCurrents=sum(wf_terminal(1:2)*wf_external(1:2))
+       else
+          write (*,*) 'Invalid terminal chirality in ContractFermionCurrents',chirality_terminal
+          stop 1
+       endif
+    endif
+  end function ContractFermionCurrents
+
+  subroutine VectorVectorToAuxTensor(wfg1,wfg2,wfT,coupl)
+    ! This vertex includes all factors needed to make the non-propagating
+    ! auxiliary-tensor connection the identity.
     implicit none
     complex(kind=8),dimension(4) :: wfg1,wfg2
     complex(kind=8),dimension(6) :: wfT
@@ -973,9 +1084,9 @@ contains
     wfT(4)=(wfg1(2)*wfg2(3)-wfg1(3)*wfg2(2))*coupl(1)
     wfT(5)=(wfg1(2)*wfg2(4)-wfg1(4)*wfg2(2))*coupl(1)
     wfT(6)=(wfg1(3)*wfg2(4)-wfg1(4)*wfg2(3))*coupl(1)
-  end subroutine TwoGluontoTensor_coupl
+  end subroutine VectorVectorToAuxTensor
 
-  subroutine TensorGluontoGluon_coupl(wfT1,wfg2,wfg,coupl)
+  subroutine AuxTensorVectorToVector(wfT1,wfg2,wfg,coupl)
     implicit none
     complex(kind=8),dimension(4) :: wfg2,wfg
     complex(kind=8),dimension(6) :: wfT1
@@ -985,9 +1096,9 @@ contains
     wfg(2)=(wfT1(1)*wfg2(1)+wfT1(4)*wfg2(3)+wfT1(5)*wfg2(4))*prefact*coupl(1)
     wfg(3)=(wfT1(2)*wfg2(1)-wfT1(4)*wfg2(2)+wfT1(6)*wfg2(4))*prefact*coupl(1)
     wfg(4)=(wfT1(3)*wfg2(1)-wfT1(5)*wfg2(2)-wfT1(6)*wfg2(3))*prefact*coupl(1)
-  end subroutine TensorGluontoGluon_coupl
+  end subroutine AuxTensorVectorToVector
 
-  subroutine GluonTensortoGluon_coupl(wfg1,wfT2,wfg,coupl)
+  subroutine VectorAuxTensorToVector(wfg1,wfT2,wfg,coupl)
     implicit none 
     complex(kind=8),dimension(4) :: wfg1,wfg
     complex(kind=8),dimension(6) :: wfT2
@@ -997,19 +1108,19 @@ contains
     wfg(2)=(-wfg1(1)*wfT2(1)-wfg1(3)*wfT2(4)-wfg1(4)*wfT2(5))*prefact*coupl(1)
     wfg(3)=(-wfg1(1)*wfT2(2)+wfg1(2)*wfT2(4)-wfg1(4)*wfT2(6))*prefact*coupl(1)
     wfg(4)=(-wfg1(1)*wfT2(3)+wfg1(2)*wfT2(5)+wfg1(3)*wfT2(6))*prefact*coupl(1)
-  end subroutine GluonTensortoGluon_coupl
+  end subroutine VectorAuxTensorToVector
 
 
-  subroutine QuarkScalartoQuark(wfq1,wfs2,wfq,coupl)
+  subroutine FermionScalarToFermion(wfq1,wfs2,wfq,coupl)
     implicit none
     complex(kind=8),dimension(4) :: wfq1,wfq
     complex(kind=8),dimension(1) :: wfs2
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
     real(kind=8),dimension(2) :: coupl
     wfq(1:4)=-prefact*coupl(1)*wfs2(1)*wfq1(1:4)
-  end subroutine QuarkScalartoQuark
+  end subroutine FermionScalarToFermion
 
-  subroutine GluonGluontoScalar(wfg1,wfg2,wfs,coupl)
+  subroutine VectorVectorToScalar(wfg1,wfg2,wfs,coupl)
     implicit none
     complex(kind=8),dimension(4) :: wfg1,wfg2
     complex(kind=8),dimension(1) :: wfs
@@ -1018,27 +1129,27 @@ contains
     complex(kind=8) :: TMP
     TMP = wfg1(1)*wfg2(1)-wfg1(2)*wfg2(2)-wfg1(3)*wfg2(3)-wfg1(4)*wfg2(4)
     wfs(1)= prefact*coupl(1)*TMP
-  end subroutine GluonGluontoScalar
+  end subroutine VectorVectorToScalar
 
-  subroutine ScalarGluontoGluon(wfs1,wfg2,wfg,coupl)
+  subroutine ScalarVectorToVector(wfs1,wfg2,wfg,coupl)
     implicit none
     complex(kind=8),dimension(4) :: wfg2,wfg
     complex(kind=8),dimension(1) :: wfs1
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
     real(kind=8),dimension(2) :: coupl
     wfg(1:4)= prefact*coupl(1)*wfs1(1)*(wfg2(1:4))
-  end subroutine ScalarGluontoGluon
+  end subroutine ScalarVectorToVector
 
-  subroutine GluonScalartoGluon(wfg1,wfs2,wfg,coupl)
+  subroutine VectorScalarToVector(wfg1,wfs2,wfg,coupl)
     implicit none
     complex(kind=8),dimension(4) :: wfg1,wfg
     complex(kind=8),dimension(1) :: wfs2
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
     real(kind=8),dimension(2) :: coupl
     wfg(1:4)= prefact*coupl(1)*wfs2(1)*(wfg1(1:4))
-  end subroutine GluonScalartoGluon
+  end subroutine VectorScalarToVector
 
-  subroutine ScalarScalartoScalar(wfs1,wfs2,wfs,coupl)
+  subroutine ScalarScalarToScalar(wfs1,wfs2,wfs,coupl)
     implicit none
     complex(kind=8),dimension(1) :: wfs1,wfs2,wfs
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
@@ -1047,9 +1158,9 @@ contains
     TMP=(1d0,0d0)
     if (coupl(2).eq.-10d0) TMP=(0d0,1d0)
     wfs(1)= prefact*TMP*coupl(1)*wfs1(1)*wfs2(1)
-  end subroutine ScalarScalartoScalar
+  end subroutine ScalarScalarToScalar
 
-  subroutine LeptonAleptontoGluon(wfq1,wfq2,wfg,coupl)
+  subroutine LeptonAntileptonToVector(wfq1,wfq2,wfg,coupl)
     implicit none
     complex(kind=8),dimension(4) :: wfq1,wfq2,wfg,wfg_temp
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
@@ -1067,9 +1178,9 @@ contains
     wfg(4)=( wfq1(1)*wfq2(3)-wfq1(2)*wfq2(4) )*prefact*coupl(2)
     ! add
     wfg(1:4)=wfg(1:4)+wfg_temp(1:4)
-  end subroutine LeptonAleptontoGluon
+  end subroutine LeptonAntileptonToVector
 
-  subroutine AleptonLeptontoGluon(wfq1,wfq2,wfg,coupl)
+  subroutine AntileptonLeptonToVector(wfq1,wfq2,wfg,coupl)
     implicit none
     complex(kind=8),dimension(4) :: wfq1,wfq2,wfg,wfg_temp
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
@@ -1087,9 +1198,9 @@ contains
     wfg(4)=( wfq2(1)*wfq1(3)-wfq2(2)*wfq1(4) )*prefact*coupl(2)
     ! add
     wfg(1:4)=wfg(1:4)+wfg_temp(1:4)
-  end subroutine AleptonLeptontoGluon
+  end subroutine AntileptonLeptonToVector
 
-  subroutine QuarkAquarktoGluon_weyl(wfq1,wfq2,wfg,coupl,chirality1,chirality2)
+  subroutine QuarkAntiquarkToColourFlowU1Vector_weyl(wfq1,wfq2,wfg,coupl,chirality1,chirality2)
     implicit none
     integer,intent(in) :: chirality1,chirality2
     complex(kind=8),dimension(*) :: wfq1,wfq2
@@ -1114,7 +1225,7 @@ contains
     elseif (chirality1.ne.0 .and. chirality2.ne.0) then
        return
     elseif (chirality1.eq.0 .and. chirality2.eq.0) then
-       call QuarkAquarktoGluon(wfq1,wfq2,wfg,coupl)
+       call QuarkAntiquarkToColourFlowU1Vector(wfq1,wfq2,wfg,coupl)
        return
     endif
 
@@ -1140,9 +1251,9 @@ contains
     wfg(2)=( TMP4 + TMP3 )*TMP5
     wfg(3)=(-TMP4 + TMP3 )*cImag*TMP5
     wfg(4)=(-TMP1 + TMP2 )*TMP5
-  end subroutine QuarkAquarktoGluon_weyl
+  end subroutine QuarkAntiquarkToColourFlowU1Vector_weyl
 
-  subroutine AquarkQuarktoGluon_weyl(wfq1,wfq2,wfg,chirality1,chirality2)
+  subroutine AntiquarkQuarkToGluon_weyl(wfq1,wfq2,wfg,chirality1,chirality2)
     implicit none
     integer,intent(in) :: chirality1,chirality2
     complex(kind=8),dimension(*) :: wfq1,wfq2
@@ -1165,7 +1276,7 @@ contains
     elseif (chirality1.ne.0 .and. chirality2.ne.0) then
        return
     elseif (chirality1.eq.0 .and. chirality2.eq.0) then
-       call AquarkQuarktoGluon(wfq1,wfq2,wfg)
+       call AntiquarkQuarkToGluon(wfq1,wfq2,wfg)
        return
     endif
 
@@ -1191,9 +1302,9 @@ contains
     wfg(2)=( TMP4 + TMP3 )*prefact
     wfg(3)=(-TMP4 + TMP3 )*cImag*prefact
     wfg(4)=(-TMP1 + TMP2 )*prefact
-  end subroutine AquarkQuarktoGluon_weyl
+  end subroutine AntiquarkQuarkToGluon_weyl
 
-  subroutine LeptonAleptontoGluon_weyl(wfq1,wfq2,wfg,coupl,chirality1,chirality2)
+  subroutine LeptonAntileptonToVector_weyl(wfq1,wfq2,wfg,coupl,chirality1,chirality2)
     implicit none
     integer,intent(in) :: chirality1,chirality2
     complex(kind=8),dimension(*) :: wfq1,wfq2
@@ -1219,7 +1330,7 @@ contains
     elseif (chirality1.ne.0 .and. chirality2.ne.0) then
        return
     elseif (chirality1.eq.0 .and. chirality2.eq.0) then
-       call LeptonAleptontoGluon(wfq1,wfq2,wfg,coupl)
+       call LeptonAntileptonToVector(wfq1,wfq2,wfg,coupl)
        return
     endif
 
@@ -1241,9 +1352,9 @@ contains
     wfg(2)=prefact*(coupl(1)*(-l4*a1-l3*a2)+coupl(2)*(l1*a4+l2*a3))
     wfg(3)=cImag*prefact*(coupl(1)*(-l4*a1+l3*a2)+coupl(2)*(-l1*a4+l2*a3))
     wfg(4)=prefact*(coupl(1)*(-l3*a1+l4*a2)+coupl(2)*(l1*a3-l2*a4))
-  end subroutine LeptonAleptontoGluon_weyl
+  end subroutine LeptonAntileptonToVector_weyl
 
-  subroutine AleptonLeptontoGluon_weyl(wfq1,wfq2,wfg,coupl,chirality1,chirality2)
+  subroutine AntileptonLeptonToVector_weyl(wfq1,wfq2,wfg,coupl,chirality1,chirality2)
     implicit none
     integer,intent(in) :: chirality1,chirality2
     complex(kind=8),dimension(*) :: wfq1,wfq2
@@ -1269,7 +1380,7 @@ contains
     elseif (chirality1.ne.0 .and. chirality2.ne.0) then
        return
     elseif (chirality1.eq.0 .and. chirality2.eq.0) then
-       call AleptonLeptontoGluon(wfq1,wfq2,wfg,coupl)
+       call AntileptonLeptonToVector(wfq1,wfq2,wfg,coupl)
        return
     endif
 
@@ -1291,7 +1402,7 @@ contains
     wfg(2)=prefact*(coupl(1)*(-l4*a1-l3*a2)+coupl(2)*(l1*a4+l2*a3))
     wfg(3)=cImag*prefact*(coupl(1)*(-l4*a1+l3*a2)+coupl(2)*(-l1*a4+l2*a3))
     wfg(4)=prefact*(coupl(1)*(-l3*a1+l4*a2)+coupl(2)*(l1*a3-l2*a4))
-  end subroutine AleptonLeptontoGluon_weyl
+  end subroutine AntileptonLeptonToVector_weyl
   
   subroutine massless_propagator_denominator(p,denominator,valid)
     ! Avoid evaluating an exactly singular or underflowing massless
@@ -1313,7 +1424,7 @@ contains
     valid=.true.
   end subroutine massless_propagator_denominator
 
-  subroutine GluonPropagator(wfg,p)
+  subroutine MasslessVectorPropagator(wfg,p)
     implicit none
     complex(kind=8),dimension(1:4),intent(inout) :: wfg
     real(kind=8),dimension(0:3),intent(in) :: p
@@ -1328,9 +1439,9 @@ contains
     endif
     propagator=-cImag/denominator
     wfg(1:4)=wfg(1:4)*propagator
-  end subroutine GluonPropagator
+  end subroutine MasslessVectorPropagator
 
-  subroutine GluonPropagator_real(wfg,p)
+  subroutine MasslessVectorPropagator_real(wfg,p)
     implicit none
     real(kind=8),dimension(1:4),intent(inout) :: wfg
     real(kind=8),dimension(0:3),intent(in) :: p
@@ -1343,9 +1454,9 @@ contains
     endif
     propagator=1d0/denominator
     wfg(1:4)=wfg(1:4)*propagator
-  end subroutine GluonPropagator_Real
+  end subroutine MasslessVectorPropagator_real
 
-  subroutine GluonPropagator_mass(wfg,p,vm,vw)
+  subroutine MassiveVectorPropagator(wfg,p,vm,vw)
     implicit none
     complex(kind=8),dimension(1:4),intent(inout) :: wfg
     real(kind=8),dimension(0:3),intent(in) :: p
@@ -1359,9 +1470,9 @@ contains
     wfg(2)=(wfg(2)-p(1)*TMP)*propagator
     wfg(3)=(wfg(3)-p(2)*TMP)*propagator
     wfg(4)=(wfg(4)-p(3)*TMP)*propagator
-  end subroutine GluonPropagator_mass
+  end subroutine MassiveVectorPropagator
 
-  subroutine QuarkPropagator(wfq,p,fm,fw)
+  subroutine FermionPropagator(wfq,p,fm,fw)
     implicit none
     complex(kind=8),dimension(1:4),intent(inout) :: wfq
     real(kind=8),dimension(0:3),intent(in) :: p
@@ -1390,9 +1501,9 @@ contains
     wfq(2)=(tmp_p(2)*tmp_val(4)+tmp_p(4)*tmp_val(3)+fm*tmp_val(2))*prefact
     wfq(3)=(tmp_p(2)*tmp_val(1)-tmp_p(3)*tmp_val(2)+fm*tmp_val(3))*prefact
     wfq(4)=(tmp_p(1)*tmp_val(2)-tmp_p(4)*tmp_val(1)+fm*tmp_val(4))*prefact
-  end subroutine QuarkPropagator
+  end subroutine FermionPropagator
 
-  subroutine QuarkPropagator_weyl(wfq,p,chirality)
+  subroutine FermionPropagator_weyl(wfq,p,chirality)
     implicit none
     integer,intent(in) :: chirality
     complex(kind=8),dimension(*) :: wfq
@@ -1420,12 +1531,12 @@ contains
        wfq(1)=(tmp2*val1-tmp3*val2)*prefact
        wfq(2)=(tmp1*val2-tmp4*val1)*prefact
     else
-       write (*,*) 'QuarkPropagator_weyl called with zero chirality'
+       write (*,*) 'FermionPropagator_weyl called with zero chirality'
        stop 1
     endif
-  end subroutine QuarkPropagator_weyl
+  end subroutine FermionPropagator_weyl
 
-  subroutine AquarkPropagator(wfq,p,fm,fw)
+  subroutine AntifermionPropagator(wfq,p,fm,fw)
     implicit none
     complex(kind=8),dimension(1:4),intent(inout) :: wfq
     real(kind=8),dimension(0:3),intent(in) :: p
@@ -1454,9 +1565,9 @@ contains
     wfq(2)=(tmp_p(1)*tmp_val(4)-tmp_p(3)*tmp_val(3)+fm*tmp_val(2))*prefact
     wfq(3)=(tmp_p(1)*tmp_val(1)+tmp_p(4)*tmp_val(2)+fm*tmp_val(3))*prefact
     wfq(4)=(tmp_p(2)*tmp_val(2)+tmp_p(3)*tmp_val(1)+fm*tmp_val(4))*prefact
-  end subroutine AquarkPropagator
+  end subroutine AntifermionPropagator
 
-  subroutine AquarkPropagator_weyl(wfq,p,chirality)
+  subroutine AntifermionPropagator_weyl(wfq,p,chirality)
     implicit none
     integer,intent(in) :: chirality
     complex(kind=8),dimension(*) :: wfq
@@ -1484,10 +1595,10 @@ contains
        wfq(1)=(tmp1*val1+tmp4*val2)*prefact
        wfq(2)=(tmp2*val2+tmp3*val1)*prefact
     else
-       write (*,*) 'AquarkPropagator_weyl called with zero chirality'
+       write (*,*) 'AntifermionPropagator_weyl called with zero chirality'
        stop 1
     endif
-  end subroutine AquarkPropagator_weyl
+  end subroutine AntifermionPropagator_weyl
 
   subroutine ScalarPropagator(wfs,p,sm,sw)
     implicit none
