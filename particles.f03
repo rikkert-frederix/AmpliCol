@@ -39,9 +39,9 @@ module particles
           &,get_charge,get_isospin_l,get_isospin_r,get_hypercharge_l&
           &,get_hypercharge_r,get_color_rep,get_color_dim&
           &,is_antiquark,is_lepton,is_antilepton,is_lepton_any,&
-          &is_gluon,is_tensor_g,is_tensor_z,is_tensor_w&
-          &,is_tensor6,is_tensor,is_singlet,is_photon,is_massiveboson&
-          &,is_higgs,is_jet,is_higgsor,is_fermion,is_massless_fermion&
+          &is_gluon,is_colour_flow_vector,is_gluon_aux_tensor,is_z_aux_tensor&
+          &,is_w_aux_tensor,is_auxiliary_tensor,is_singlet,is_photon&
+          &,is_massive_vector,is_higgs,is_jet,is_auxiliary_scalar,is_fermion,is_massless_fermion&
           &,is_chiral_eligible,set_width,apply_final_state_widths&
           &,model_signature
      procedure,public :: get_colour_rep => get_color_rep
@@ -246,10 +246,10 @@ contains
     ! gluon
     call append_particle(this,l,21,0d0,0d0,2,21,4,0d0,[0d0,0d0],[0d0,0d0],8)
 
-    ! gluon-U1
+    ! Auxiliary colour-flow U(1) vector
     call append_particle(this,l,99,0d0,0d0,-1,99,4,0d0,[0d0,0d0],[0d0,0d0],1)
 
-    ! tensor (non-propagator auxiliary particle to decompose 4-gluon interaction)
+    ! Gluon auxiliary tensor (non-propagating field for the four-gluon interaction)
     call append_particle(this,l,-21,0d0,0d0,-1,-21,6,0d0,[0d0,0d0],[0d0,0d0],8)
 
     ! photon
@@ -259,7 +259,7 @@ contains
     call append_particle(this,l,23,zmass_local,zwidth_local,3,23,4,0d0,&
          [0d0,0d0],[0d0,0d0],1)
 
-    ! Ztensor (non-propagator auxiliary particle to decompose 4-Wboson interaction)
+    ! Neutral auxiliary tensor (non-propagating field for four-vector interactions)
     call append_particle(this,l,-23,0d0,0d0,-1,-23,6,0d0,[0d0,0d0],[0d0,0d0],1)
 
     ! W-boson
@@ -270,14 +270,14 @@ contains
     call append_particle(this,l,25,hmass_local,hwidth_local,1,25,1,0d0,&
          [-0.5d0,-0.5d0],[1d0,1d0],1)
 
-    ! Higgs"or"A (non-propagator scalar auxiliary particle to decompose 4-boson interactions)
+    ! Auxiliary scalar A (non-propagating field for four-boson interactions)
     call append_particle(this,l,125,0d0,0d0,-1,125,1,0d0,[0d0,0d0],[0d0,0d0],1)
-    ! Higgs"or"B (non-propagator scalar auxiliary particle to decompose 4-boson interactions)
+    ! Auxiliary scalar B (non-propagating field for four-boson interactions)
     call append_particle(this,l,126,0d0,0d0,-1,126,1,0d0,[0d0,0d0],[0d0,0d0],1)
-    ! Higgs"or"C (non-propagator scalar auxiliary particle to decompose 4-boson interactions)
+    ! Auxiliary scalar C (non-propagating field for four-boson interactions)
     call append_particle(this,l,127,0d0,0d0,-1,127,1,0d0,[0d0,0d0],[0d0,0d0],1)
 
-    ! Wtensor (non-propagator auxiliary particle to decompose 4-boson interactions)
+    ! Charged auxiliary tensor (non-propagating field for four-vector interactions)
     call append_particle(this,l,26,0d0,0d0,-1,-26,6,1d0,[1d0,1d0],[0d0,0d0],1)
 
     ! charged leptons
@@ -322,7 +322,7 @@ contains
     do i=1,6
        call append_vertex(this,l,6,[i,21,i],[1d0,0d0])
     enddo
-    ! antiquark-gluon to quark vertices
+    ! Antiquark-gluon to antiquark vertices
     do i=1,6
        call append_vertex(this,l,7,[-i,21,-i],[1d0,0d0])
     enddo
@@ -330,23 +330,23 @@ contains
     do i=1,6
        call append_vertex(this,l,9,[-i,i,21],[1d0,0d0])
     enddo
-    ! quark-antiquark to gluonU1 vertices
+    ! Quark-antiquark to auxiliary colour-flow U(1) vector vertices
     do i=1,6
        call append_vertex(this,l,8,[i,-i,99],[1d0/3d0,0d0])  ! 1/N_C coupling
     enddo
-    ! gluonU1-quark to quark vertices
+    ! Auxiliary colour-flow U(1) vector-quark to quark vertices
     do i=1,6
        call append_vertex(this,l,4,[99,i,i],[1d0,0d0])
     enddo
-    ! gluonU1-antiquark to antiquark vertices
+    ! Auxiliary colour-flow U(1) vector-antiquark to antiquark vertices
     do i=1,6
        call append_vertex(this,l,5,[99,-i,-i],[1d0,0d0])
     enddo
-    ! quark-gluonU1 to quark vertices
+    ! Quark-auxiliary colour-flow U(1) vector to quark vertices
     do i=1,6
        call append_vertex(this,l,6,[i,99,i],[1d0,0d0])
     enddo
-    ! antiquark-gluonU1 to quark vertices
+    ! Antiquark-auxiliary colour-flow U(1) vector to antiquark vertices
     do i=1,6
        call append_vertex(this,l,7,[-i,99,-i],[1d0,0d0])
     enddo
@@ -402,53 +402,53 @@ contains
     call append_vertex(this,l,12,[23,-24,-24],[neutral_gauge_coupling(),0d0])
 
 
-    ! Wboson-Wboson to Ztensor
+    ! W-boson-W-boson to neutral auxiliary tensor
     call append_vertex(this,l,13,[24,-24,-23],[weak_coupling(),0d0]) !!
     call append_vertex(this,l,13,[-24,24,-23],[-weak_coupling(),0d0]) !!
-    ! Ztensor-Wboson to Wboson
+    ! Neutral auxiliary tensor-W-boson to W-boson
     call append_vertex(this,l,14,[-23,24,24],[weak_coupling(),0d0]) !!
     call append_vertex(this,l,14,[-23,-24,-24],[-weak_coupling(),0d0]) !!
-    ! Wboson-Ztensor to Wboson
+    ! W-boson-neutral auxiliary tensor to W-boson
     call append_vertex(this,l,15,[24,-23,24],[-weak_coupling(),0d0]) !!
     call append_vertex(this,l,15,[-24,-23,-24],[weak_coupling(),0d0]) !!
 
 
-    ! Wboson-photon to Wtensor
+    ! W-boson-photon to charged auxiliary tensor
     call append_vertex(this,l,13,[24,22,26],[this%get_charge(24),0d0])
     call append_vertex(this,l,13,[-24,22,-26],[-this%get_charge(-24),0d0])
-    ! photon-Wboson to Wtensor
+    ! Photon-W-boson to charged auxiliary tensor
     call append_vertex(this,l,13,[22,24,26],[-this%get_charge(24),0d0])
     call append_vertex(this,l,13,[22,-24,-26],[this%get_charge(-24),0d0])
-    ! Wboson-Zboson to Wtensor
+    ! W-boson-Z-boson to charged auxiliary tensor
     call append_vertex(this,l,13,[24,23,26],[neutral_gauge_coupling(),0d0]) !!
     call append_vertex(this,l,13,[-24,23,-26],[neutral_gauge_coupling(),0d0]) !!
-    ! Zboson-Wboson to Wtensor
+    ! Z-boson-W-boson to charged auxiliary tensor
     call append_vertex(this,l,13,[23,24,26],[-neutral_gauge_coupling(),0d0]) !!
     call append_vertex(this,l,13,[23,-24,-26],[-neutral_gauge_coupling(),0d0]) !!
 
 
-    ! Wtensor-photon to Wboson
+    ! Charged auxiliary tensor-photon to W-boson
     call append_vertex(this,l,14,[26,22,24],[this%get_charge(26),0d0])
     call append_vertex(this,l,14,[-26,22,-24],[-this%get_charge(-26),0d0])
-    ! Wtensor-Wboson to photon
+    ! Charged auxiliary tensor-W-boson to photon
     call append_vertex(this,l,14,[26,-24,22],[-this%get_charge(26),0d0])
     call append_vertex(this,l,14,[-26,24,22],[this%get_charge(-26),0d0])
-    ! Wtensor-Zboson to Wboson
+    ! Charged auxiliary tensor-Z-boson to W-boson
     call append_vertex(this,l,14,[26,23,24],[neutral_gauge_coupling(),0d0])
     call append_vertex(this,l,14,[-26,23,-24],[neutral_gauge_coupling(),0d0])
-    ! Wtensor-Wboson to Zboson
+    ! Charged auxiliary tensor-W-boson to Z-boson
     call append_vertex(this,l,14,[26,-24,23],[-neutral_gauge_coupling(),0d0]) !!
     call append_vertex(this,l,14,[-26,24,23],[-neutral_gauge_coupling(),0d0]) !!
-    ! photon-Wtensor to Wboson
+    ! Photon-charged auxiliary tensor to W-boson
     call append_vertex(this,l,15,[22,26,24],[-this%get_charge(26),0d0])
     call append_vertex(this,l,15,[22,-26,-24],[this%get_charge(-26),0d0])
-    ! Wboson-Wtensor to photon
+    ! W-boson-charged auxiliary tensor to photon
     call append_vertex(this,l,15,[24,-26,22],[this%get_charge(24),0d0])
     call append_vertex(this,l,15,[-24,26,22],[-this%get_charge(-24),0d0])
-    ! Zboson-Wtensor to Wboson
+    ! Z-boson-charged auxiliary tensor to W-boson
     call append_vertex(this,l,15,[23,26,24],[-neutral_gauge_coupling(),0d0])
     call append_vertex(this,l,15,[23,-26,-24],[-neutral_gauge_coupling(),0d0])
-    ! Wboson-Wtensor to Zboson
+    ! W-boson-charged auxiliary tensor to Z-boson
     call append_vertex(this,l,15,[24,-26,23],[neutral_gauge_coupling(),0d0]) !!
     call append_vertex(this,l,15,[-24,26,23],[neutral_gauge_coupling(),0d0]) !!
 
@@ -480,49 +480,49 @@ contains
     ! Higgs-Higgs to Higgs
     call append_vertex(this,l,20,[25,25,25],higgs_self_coupling(this)) !!
 
-    ! Wboson-Wboson to HiggsorC
+    ! W-boson-W-boson to auxiliary scalar C
     call append_vertex(this,l,17,[24,-24,127],[1d0/2d0*weak_coupling_squared(),0d0]) !!
     call append_vertex(this,l,17,[-24,24,127],[1d0/2d0*weak_coupling_squared(),0d0]) !!
-    !! Zboson-Zboson to HiggsorC
+    ! Z-boson-Z-boson to auxiliary scalar C
     call append_vertex(this,l,17,[23,23,127],[1d0/2d0*weak_coupling_squared()/weak_cosine_squared(),0d0]) !!
-    ! HiggsorA-Higgs to Higgs
+    ! Auxiliary scalar A-Higgs to Higgs
     call append_vertex(this,l,20,[125,25,25],[1d0,0d0]) !!
-    ! Higgs-HiggsorA to Higgs
+    ! Higgs-auxiliary scalar A to Higgs
     call append_vertex(this,l,20,[25,125,25],[1d0,0d0]) !!
-    ! Higgs-Higgs to HiggsorA
+    ! Higgs-Higgs to auxiliary scalar A
     call append_vertex(this,l,20,[25,25,125],[(-3d0/4d0)*weak_coupling_squared()*this%get_mass(25)**2/this%get_mass(24)**2,0d0]) !!
-    ! HiggsorC-Higgs to Higgs
+    ! Auxiliary scalar C-Higgs to Higgs
     call append_vertex(this,l,20,[127,25,25],[1d0,0d0]) !!
-    ! Higgs-HiggsorC to Higgs
+    ! Higgs-auxiliary scalar C to Higgs
     call append_vertex(this,l,20,[25,127,25],[1d0,0d0]) !!
-    ! Higgs-Higgs to HiggsorB
+    ! Higgs-Higgs to auxiliary scalar B
     call append_vertex(this,l,20,[25,25,126],[1d0,-10d0]) !!
 
-    ! HiggsorB-Zboson to Zboson
+    ! Auxiliary scalar B-Z-boson to Z-boson
     call append_vertex(this,l,18,[126,23,23],[-1d0/2d0*weak_coupling_squared()/weak_cosine_squared(),0d0]) !!
-    ! Zboson-HiggsorB to Zboson
+    ! Z-boson-auxiliary scalar B to Z-boson
     call append_vertex(this,l,19,[23,126,23],[-1d0/2d0*weak_coupling_squared()/weak_cosine_squared(),0d0]) !!
 
-    ! HiggsorB-Wboson to Wboson
+    ! Auxiliary scalar B-W-boson to W-boson
     call append_vertex(this,l,18,[126,24,24],[-1d0/2d0*weak_coupling_squared(),0d0]) !!
     call append_vertex(this,l,18,[126,-24,-24],[-1d0/2d0*weak_coupling_squared(),0d0]) !!
-    ! Wboson-HiggsorB to Wboson
+    ! W-boson-auxiliary scalar B to W-boson
     call append_vertex(this,l,19,[24,126,24],[-1d0/2d0*weak_coupling_squared(),0d0]) !!
     call append_vertex(this,l,19,[-24,126,-24],[-1d0/2d0*weak_coupling_squared(),0d0]) !!
 
-    ! lepton-alepton to photon
+    ! Lepton-antilepton to photon
     do i=1,3
     call append_vertex(this,l,21,[11+(2*i-2),-(11+(2*i-2)),22],photon_fermion_coupling(this,11+(2*i-2)))
     enddo
-    ! alepton-lepton to photon
+    ! Antilepton-lepton to photon
     do i=1,3
     call append_vertex(this,l,22,[-(11+(2*i-2)),11+(2*i-2),22],photon_fermion_coupling(this,-(11+(2*i-2))))
     enddo
-    ! lepton-alepton to Zboson
+    ! Lepton-antilepton to Z-boson
     do i=1,3
     call append_vertex(this,l,21,[(11+(2*i-2)),-(11+(2*i-2)),23],z_fermion_coupling(this,11+(2*i-2)))
     enddo
-    ! alepton-lepton to Zboson
+    ! Antilepton-lepton to Z-boson
     do i=1,3
     call append_vertex(this,l,22,[-(11+(2*i-2)),(11+(2*i-2)),23],z_fermion_coupling(this,-(11+(2*i-2))))
     enddo
@@ -837,44 +837,45 @@ contains
     implicit none
     class(physics_model) :: this
     integer :: iPDG
-    is_gluon=iPDG.eq.21 .or. iPDG.eq.99
+    is_gluon=iPDG.eq.21
   end function is_gluon
+  logical function is_colour_flow_vector(this,iPDG)
+    implicit none
+    class(physics_model) :: this
+    integer :: iPDG
+    is_colour_flow_vector=iPDG.eq.21 .or. iPDG.eq.99
+  end function is_colour_flow_vector
   logical function is_scalar(this,iPDG)
     implicit none
     class(physics_model) :: this
     integer :: iPDG
     is_scalar=abs(iPDG).eq.25.or.abs(iPDG).eq.125.or.abs(iPDG).eq.126.or.abs(iPDG).eq.127
   end function is_scalar
-  logical function is_tensor_g(this,iPDG)
+  logical function is_gluon_aux_tensor(this,iPDG)
     implicit none
     class(physics_model) :: this
     integer :: iPDG
-    is_tensor_g=iPDG.eq.-21
-  end function is_tensor_g
-  logical function is_tensor_z(this,iPDG)
+    is_gluon_aux_tensor=iPDG.eq.-21
+  end function is_gluon_aux_tensor
+  logical function is_z_aux_tensor(this,iPDG)
     implicit none
     class(physics_model) :: this
     integer :: iPDG
-    is_tensor_z=iPDG.eq.-23
-  end function is_tensor_z
-  logical function is_tensor_w(this,iPDG)
+    is_z_aux_tensor=iPDG.eq.-23
+  end function is_z_aux_tensor
+  logical function is_w_aux_tensor(this,iPDG)
     implicit none
     class(physics_model) :: this
     integer :: iPDG
-    is_tensor_w=abs(iPDG).eq.26
-  end function is_tensor_w
-  logical function is_tensor6(this,iPDG)
+    is_w_aux_tensor=abs(iPDG).eq.26
+  end function is_w_aux_tensor
+  logical function is_auxiliary_tensor(this,iPDG)
     implicit none
     class(physics_model) :: this
     integer :: iPDG
-    is_tensor6=this%is_tensor_g(iPDG) .or. this%is_tensor_z(iPDG) .or. this%is_tensor_w(iPDG)
-  end function is_tensor6
-  logical function is_tensor(this,iPDG)
-    implicit none
-    class(physics_model) :: this
-    integer :: iPDG
-    is_tensor=this%is_tensor_g(iPDG) .or. this%is_tensor_z(iPDG) .or. this%is_tensor_w(iPDG)
-  end function is_tensor
+    is_auxiliary_tensor=this%is_gluon_aux_tensor(iPDG) .or. &
+         this%is_z_aux_tensor(iPDG) .or. this%is_w_aux_tensor(iPDG)
+  end function is_auxiliary_tensor
   logical function is_singlet(this,iPDG)
     implicit none
     class(physics_model) :: this
@@ -887,24 +888,24 @@ contains
     integer :: iPDG
     is_photon=iPDG.eq.22
   end function is_photon
-  logical function is_massiveboson(this,iPDG)
+  logical function is_massive_vector(this,iPDG)
     implicit none
     class(physics_model) :: this
     integer :: iPDG
-    is_massiveboson=iPDG.eq.23 .or. abs(iPDG).eq.24
-  end function is_massiveboson
+    is_massive_vector=iPDG.eq.23 .or. abs(iPDG).eq.24
+  end function is_massive_vector
   logical function is_higgs(this,iPDG)
     implicit none
     class(physics_model) :: this
     integer :: iPDG
     is_higgs=iPDG.eq.25
   end function is_higgs
-  logical function is_higgsor(this,iPDG)
+  logical function is_auxiliary_scalar(this,iPDG)
     implicit none
     class(physics_model) :: this
     integer :: iPDG
-    is_higgsor=iPDG.eq.125.or.iPDG.eq.126.or.iPDG.eq.127
-  end function is_higgsor
+    is_auxiliary_scalar=iPDG.eq.125.or.iPDG.eq.126.or.iPDG.eq.127
+  end function is_auxiliary_scalar
   logical function is_jet(this,iPDG)
     implicit none
     class(physics_model) :: this
