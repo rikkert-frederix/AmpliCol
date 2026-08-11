@@ -64,6 +64,7 @@ contains
     close(14)
     filename='Library/amplitudes.bin'
     open(unit=14,file=filename,form='unformatted',access='stream',status='unknown')
+    write(14) 2 ! binary amplitude-library format version
     write(14) pgl_unique%next,pgl_unique%nproc
     write(14) unique_map
     write(14) unique_map_value
@@ -89,8 +90,12 @@ contains
        write(14) size(pgl(igroup)%multichan%map_proc_to_channelgroup),&
             pgl(igroup)%multichan%map_proc_to_channelgroup
        write(14) size(pgl(igroup)%multichan%number_of_channels),pgl(igroup)%multichan%number_of_channels
+       write(14) shape(pgl(igroup)%multichan%channels),pgl(igroup)%multichan%channels
+       write(14) shape(pgl(igroup)%multichan%channel_permutations),&
+            pgl(igroup)%multichan%channel_permutations
        ! rest
        write(14) shape(pgl(igroup)%processes),pgl(igroup)%processes
+       write(14) shape(pgl(igroup)%phase_space_permutations),pgl(igroup)%phase_space_permutations
        write(14) size(pgl(igroup)%iden_iproc),pgl(igroup)%iden_iproc
        write(14) size(pgl(igroup)%phase_space_orders),pgl(igroup)%phase_space_orders
        write(14) size(pgl(igroup)%nhel),pgl(igroup)%nhel
@@ -115,11 +120,17 @@ contains
   subroutine read_amplitude_lib()
     implicit none
     character(len=170) :: filename
-    integer :: dim1,dim2,dim3,iamp,igroup
+    integer :: dim1,dim2,dim3,iamp,igroup,library_version
     filename='Library/amplitudes.bin'
     open(unit=14,file=filename,form='unformatted',access='stream',status='old')
+    read(14) library_version
+    if (library_version.ne.2) then
+       write (*,*) 'Amplitude library has an incompatible binary format; recreate it'
+       stop 1
+    endif
     allocate(pgl_unique)
     read(14) pgl_unique%next,pgl_unique%nproc
+    next=pgl_unique%next
     allocate(unique_map(pgl_unique%nproc))
     read(14) unique_map
     allocate(unique_map_value(pgl_unique%nproc))
@@ -163,10 +174,20 @@ contains
        read(14) dim1
        allocate(pgl(igroup)%multichan%number_of_channels(dim1))
        read(14) pgl(igroup)%multichan%number_of_channels
+       read(14) dim1,dim2
+       allocate(pgl(igroup)%multichan%channels(dim1,dim2))
+       read(14) pgl(igroup)%multichan%channels
+       pgl(igroup)%multichan%max_channels=dim1
+       read(14) dim1,dim2,dim3
+       allocate(pgl(igroup)%multichan%channel_permutations(dim1,dim2,dim3))
+       read(14) pgl(igroup)%multichan%channel_permutations
        ! rest
        read(14) dim1,dim2
        allocate(pgl(igroup)%processes(dim1,dim2))
        read(14) pgl(igroup)%processes
+       read(14) dim1,dim2
+       allocate(pgl(igroup)%phase_space_permutations(dim1,dim2))
+       read(14) pgl(igroup)%phase_space_permutations
        read(14) dim1
        allocate(pgl(igroup)%iden_iproc(dim1))
        read(14) pgl(igroup)%iden_iproc
@@ -197,7 +218,7 @@ contains
        read(14) pgl(igroup)%iden
        read(14) pgl(igroup)%ipdgs
        read(14) pgl(igroup)%next,pgl(igroup)%ndim
-       allocate(pgl(igroup)%hel(next))
+       allocate(pgl(igroup)%hel(pgl(igroup)%next))
        read(14) dim1
        allocate(pgl(igroup)%col_fac(dim1))
        read(14) pgl(igroup)%col_fac

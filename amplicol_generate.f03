@@ -407,7 +407,8 @@ contains
     real(kind=8),intent(out) :: f,f_abs
     real(kind=8), dimension(:),allocatable,save :: val,val_abs,vol_ichan
     real(kind=8),dimension(pgl(ichan)%nproc) :: colour_singlet_multichannel_weight
-    integer :: ih,iproc
+    integer :: ih,iproc,a,target_label
+    real(kind=8),dimension(0:3,pgl(ichan)%next) :: p_generated
     real(kind=8), parameter :: pi=3.14159265358979323846d0,conv=389379660d0
     logical :: done,time_physics
     real(kind=8),external :: alphaspdf
@@ -449,6 +450,21 @@ contains
        return
     endif
     if (.not.read_momenta) then
+       ! The adaptive grid uses a canonical labelling of interchangeable
+       ! massless-QCD final legs.  Restore the fixed coefficient labelling
+       ! before cuts, amplitudes, scales, and event output.
+       p_generated=pgl(ichan)%ps(1)%p
+       if (keep_processes_separate) then
+          iproc=iint
+       else
+          iproc=1
+       endif
+       do a=1,pgl(ichan)%next
+          target_label=pgl(ichan)%phase_space_permutations(a,iproc)
+          pgl(ichan)%ps(1)%p(:,target_label)=p_generated(:,a)
+       enddo
+    endif
+    if (.not.read_momenta) then
     if (.not.pass_cuts(pgl(ichan))) then
        val=0d0
        if (time_physics) then
@@ -459,7 +475,7 @@ contains
     endif
     endif
     pgl(ichan)%passed(iint) = pgl(ichan)%passed(iint) + 1
-    call compute_multichannel_weight(ichan,pgl(ichan)%ps(1),colour_singlet_multichannel_weight)
+    call compute_multichannel_weight(ichan,iint,pgl(ichan)%ps(1),colour_singlet_multichannel_weight)
     if (time_physics) then
        call cpu_time(tAfter)
        t_PS= t_PS + (tAfter-tBefore)*dble(timing_sample)

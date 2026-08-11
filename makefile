@@ -200,7 +200,10 @@ amplicol_generate.o : amplitude_QCD.o phase_space_gen23.o common.o math_function
 common.o : particles.o simple_integrator.o
 handling_events.o : common.o handling_processes.o simple_integrator.o
 read_process_file.o : phase_space_gen23.o cuts.o handling_processes.o simple_integrator.o
-multichannel.o : handling_processes.o math_functions.o simple_integrator.o
+# The inverse-map guard must distinguish NaN/Inf values.  The finite-math
+# part of -ffast-math otherwise makes ieee_is_finite fold to true.
+multichannel.o : multichannel.f03 handling_processes.o math_functions.o simple_integrator.o
+	$(FC) $(FFLAGS) -fno-finite-math-only -c -I. $<
 handling_processes.o : math_functions.o common.o phase_space.o amplitude_QCD.o
 cuts.o : common.o particles.o handling_processes.o
 pdf_wrap.o : handling_processes.o

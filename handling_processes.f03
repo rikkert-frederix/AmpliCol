@@ -5,6 +5,7 @@ module handling_processes
   type :: multichan_info
      ! if adding variables here, also update the finalize_multichan_info subroutine
      integer,dimension(:,:),allocatable :: channels,unique_channelgroup_list
+     integer,dimension(:,:,:),allocatable :: channel_permutations
      integer,dimension(:),allocatable :: unique_channel_list,map_proc_to_channelgroup,number_of_channels
      integer :: max_channels,n_unique_channels,n_unique_channelgroups
    contains
@@ -17,6 +18,7 @@ module handling_processes
      type(multichan_info) :: multichan
      type(psv),dimension(:),allocatable :: ps
      integer,dimension(:,:),allocatable :: processes,color_orders
+     integer,dimension(:,:),allocatable :: phase_space_permutations
      integer,dimension(:),allocatable :: iden_iproc,phase_space_orders,nhel
      integer :: nproc
      real(kind=8),dimension(:,:),allocatable :: val_procs,idenCOandMAPfactor
@@ -663,6 +665,7 @@ contains
   subroutine finalize_multichan_info(mi)
     type(multichan_info),intent(inout) :: mi
     if (allocated(mi%channels)) deallocate(mi%channels)
+    if (allocated(mi%channel_permutations)) deallocate(mi%channel_permutations)
     if (allocated(mi%unique_channelgroup_list)) deallocate(mi%unique_channelgroup_list)
     if (allocated(mi%unique_channel_list)) deallocate(mi%unique_channel_list)
     if (allocated(mi%map_proc_to_channelgroup)) deallocate(mi%map_proc_to_channelgroup)
@@ -690,6 +693,7 @@ contains
     call finalize_multichan_info(pgl%multichan)
     if (allocated(pgl%processes)) deallocate(pgl%processes)
     if (allocated(pgl%color_orders)) deallocate(pgl%color_orders)
+    if (allocated(pgl%phase_space_permutations)) deallocate(pgl%phase_space_permutations)
     if (allocated(pgl%iden_iproc)) deallocate(pgl%iden_iproc)
     if (allocated(pgl%phase_space_orders)) deallocate(pgl%phase_space_orders)
     if (allocated(pgl%val_procs)) deallocate(pgl%val_procs)

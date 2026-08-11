@@ -56,6 +56,7 @@ contains
     logical,intent(in),optional :: flat
     integer(kind=4) :: i,j,ndim_extra,cnt1,cnt2
     integer(kind=4),dimension(2) :: iset
+    this%can_invert_momenta=.true.
     this%sqrtshat=sqrts
     this%sqrts=sqrts
     this%t_channel=t_chan
@@ -1173,6 +1174,7 @@ contains
     ! get the two random number corresponding to the initial state
     if (includePDF) then
        call compute_x_initial_state
+       if (ps%jac.lt.0d0) return
     else
       sqrtshat=this%sqrts
     endif
@@ -1207,6 +1209,7 @@ contains
       this%invm(ibset(0,ires-1))=dot(ps%p(0:3,ires),ps%p(0:3,ires))
       y=atan((qmass-this%invm(ibset(0,ires-1))/qmass)/qwidth)
       call var_to_random(y,0d0,B,A,ps%x(ix),ps%jac)
+      if (ps%jac.lt.0d0) return
       ps%jac=ps%jac*qmass*qwidth/(cos(y))**2
     end subroutine generate_bw_mass_inverse
     subroutine decay_bw_inverse(ires,id1,id2)
@@ -1224,6 +1227,7 @@ contains
       implicit none
       real(kind=8) :: tau
       call compute_x_from_tau(tau)
+      if (ps%jac.lt.0d0) return
       call compute_x_from_y(tau)
     end subroutine compute_x_initial_state
     subroutine compute_x_from_tau(tau)
@@ -1236,6 +1240,7 @@ contains
       sqrtshat=sqrt(shat)
       ix=ix+1
       call var_to_random(shat,ip_shat,smin,smax,ps%x(ix),ps%jac)
+      if (ps%jac.lt.0d0) return
       tau=shat/smax
       ps%jac=ps%jac/smax
     end subroutine compute_x_from_tau
@@ -1247,6 +1252,7 @@ contains
       ymax=-log(tau)/2d0
       ix=ix+1
       call var_to_random(ycm,0d0,ymin,ymax,ps%x(ix),ps%jac)
+      if (ps%jac.lt.0d0) return
     end subroutine compute_x_from_y
     subroutine compute_x_final_state
       implicit none
@@ -1266,21 +1272,25 @@ contains
          else
             call gens_one_step_inverse(set(2),set(1))
          endif
+         if (ps%jac.lt.0d0) return
          invm(set(2)+2)=dot(pp(0:3,set(2)+2),pp(0:3,set(2)+2))
       elseif (popcnt(set(1)).eq.1 .and. popcnt(set(2)).gt.1) then
          if (debug) write (*,*) 'special double t-channel (1)'&
               &,popcnt(this%sets(0,1)),popcnt(this%sets(0,2))
          call double_t_inverse(set(1),set(2),1,2)
+         if (ps%jac.lt.0d0) return
          invm(set(2)+2)=dot(pp(0:3,set(2)+2),pp(0:3,set(2)+2))
       elseif (popcnt(set(1)).gt.1 .and. popcnt(set(2)).eq.1) then
          if (debug) write (*,*) 'special double t-channel (2)'&
               &,popcnt(this%sets(0,1)),popcnt(this%sets(0,2))
          call double_t_inverse(set(2),set(1),1,2)
+         if (ps%jac.lt.0d0) return
          invm(set(1)+1)=dot(pp(0:3,set(1)+1),pp(0:3,set(1)+1))
       elseif (popcnt(set(1)).eq.1 .and. popcnt(set(2)).eq.1) then
          if (debug) write (*,*) '2->2 scattering with one particle in each set'&
               &,popcnt(this%sets(0,1)),popcnt(this%sets(0,2))
          call gent_one_step_inverse(set(2),set(1),1)
+         if (ps%jac.lt.0d0) return
          invm(set(2)+2)=dot(pp(0:3,set(2)+2),pp(0:3,set(2)+2))
       endif
 
@@ -1293,6 +1303,7 @@ contains
             if (debug) write (*,*) 'At least 3 particles in a set',&
                  & popcnt(this%sets(0,i)),popcnt(this%sets(0,3-i))
             call gent_one_step_inverse(set(i),inext,i)
+            if (ps%jac.lt.0d0) return
             invm((3-i)+set(i)+inext)=dot(pp(0:3,(3-i)+set(i)+inext),pp(0:3,(3-i)+set(i)+inext))
             invm((3-i)+set(i))=dot(pp(0:3,(3-i)+set(i)),pp(0:3,(3-i)+set(i)))
             do j=2,popcnt(set(i))-1
@@ -1305,6 +1316,7 @@ contains
                else
                   call gen23_one_step_inverse(inext,set(i),3-i,im1)
                endif
+               if (ps%jac.lt.0d0) return
             enddo
             inext=ibset(0,this%sets(j,i)-1)
             im1=ibset(0,this%sets(j-1,i)-1)
@@ -1314,6 +1326,7 @@ contains
             else
                call gen23_one_step_inverse(inext,set(i),3-i,im1)
             endif
+            if (ps%jac.lt.0d0) return
          elseif (popcnt(set(i)).eq.1 .and. popcnt(this%sets(0,3-i)).ne.0) then
             ! Exactly 2 particles in a set (and the other set contains at least one)
             if (debug) write (*,*) 'Exactly 2 particles in a set (and ', &
@@ -1327,12 +1340,14 @@ contains
             else
                call gen23_one_step_inverse(set(i),inext,i,im1)
             endif
+            if (ps%jac.lt.0d0) return
          elseif (popcnt(set(i)).eq.1 .and. popcnt(this%sets(0,3-i)).eq.0) then
             ! Exactly 2 particles in a set (and the other set contains none)
             if (debug) write (*,*) 'Exactly 2 particles in a set (and ', &
                  & 'the other set contains none)', &
                  & popcnt(this%sets(0,i)),popcnt(this%sets(0,3-i))
             call gent_one_step_inverse(set(i),inext,i)
+            if (ps%jac.lt.0d0) return
          else
             write (*,*) 'Inconsistent sets'
             write (*,*) i,':',this%sets(:,i)
@@ -1366,6 +1381,7 @@ contains
          endif
          if (debug) write (*,*) 'generate_mass_inverse gent 1',i,ir
          call generate_mass_inverse(i,shatmin,shatmax)
+         if (ps%jac.lt.0d0) return
       endif
       if (popcnt(ir).gt.1) then
          call shatminmax(this,ir,i,shatmin,shatmax,invm)
@@ -1375,6 +1391,7 @@ contains
          endif
          if (debug) write (*,*) 'generate_mass_inverse gent 2',ir
          call generate_mass_inverse(ir,shatmin,shatmax)
+         if (ps%jac.lt.0d0) return
       endif
       call tminmax(invm(ir+i),invm(ir+i+ib),invm(ir),invm(i),0d0,tmin,tmax)
       if (this%invm_max(ir+ib).ne.0d0) tmax=min(tmax,this%invm_max(ir+ib))
@@ -1402,21 +1419,22 @@ contains
       root=(piir(0)-ETmini-ETminir)*(piir(0)+ETmini-ETminir)*&
            (piir(0)-ETmini+ETminir)*(piir(0)+ETmini+ETminir)
       if (root.lt.0d0) then
-         write (*,*) 'root.lt.0d0 in gent_one_step_inverse',root
-         stop 1
+         ps%jac=-1d0
+         return
       endif
       tmin=max(tmin,invm(ir)-pib(0)/piir(0)*(base+sqrt(root)))
       tmax=min(tmax,invm(ir)-pib(0)/piir(0)*(base-sqrt(root)))
       invm(ir+ib)=dot(pp(0:3,ir+ib),pp(0:3,ir+ib))
       if (tmin.ge.tmax) then
-         write (*,*) 'tmin.ge.tmax in gent_one_step_inverse',tmin,tmax,invm(ir+ib)
-         stop 1
+         ps%jac=-1d0
+         return
       endif
       if (debug) then
          write (*,*) 'ti - ir+ib',ir+ib,tmin,tmax,invm(ir+ib)
       endif
       ix=ix+1
       call var_to_random(invm(ir+ib),ip,tmin,tmax,ps%x(ix),ps%jac)
+      if (ps%jac.lt.0d0) return
       ! inverse of boosts and rotation from gentcms()
       esum=sqrt(invm(i+ir))
       p_boost(0)=pp(0,i+ir)
@@ -1432,6 +1450,7 @@ contains
       endif
       ix=ix+1
       call var_to_random(phi,0d0,0d0,2d0*pi,ps%x(ix),ps%jac)
+      if (ps%jac.lt.0d0) return
       ps%jac = ps%jac/(4d0*sqrt(lambda(invm(ir+i),0d0,invm(ir+i+ib))))
     end subroutine gent_one_step_inverse
     subroutine gens_one_step_inverse(i,ir)
@@ -1444,11 +1463,13 @@ contains
          call shatminmax(this,i,ir,shatmin,shatmax,invm)
          if (debug) write (*,*) 'generate_mass_inverse gens 1',i
          call generate_mass_inverse(i,shatmin,shatmax)
+         if (ps%jac.lt.0d0) return
       endif
       if (popcnt(ir).gt.1) then
          call shatminmax(this,ir,i,shatmin,shatmax,invm)
          if (debug) write (*,*) 'generate_mass_inverse gent 2',ir
          call generate_mass_inverse(ir,shatmin,shatmax)
+         if (ps%jac.lt.0d0) return
       endif
       ! boost p(i) and p(ir) to the p(i+ir) rest frame
       esum=sqrt(invm(i+ir))
@@ -1462,6 +1483,7 @@ contains
       endif
       ix=ix+1
       call var_to_random(costh,0d0,-1d0,1d0,ps%x(ix),ps%jac)
+      if (ps%jac.lt.0d0) return
       phi=atan(p_i(2)/p_i(1))
       if(p_i(1).lt.0d0) phi=phi+pi
       if(phi.lt.0d0) phi=phi+2d0*pi
@@ -1470,6 +1492,7 @@ contains
       endif
       ix=ix+1
       call var_to_random(phi,0d0,0d0,2d0*pi,ps%x(ix),ps%jac)
+      if (ps%jac.lt.0d0) return
       ! update the Jacobian
       ps%jac=ps%jac*sqrt(lambda(invm(i+ir),invm(i),invm(ir)))/(8d0*invm(i+ir))
       ! compute some t-channel invariants just to make sure they are filled. 
@@ -1497,8 +1520,8 @@ contains
       tmin=max(tmin,invm(i)-sqrtshat*(Eimax+pzmax))
       tmax=min(tmax,invm(i)-sqrtshat*(Eimax-pzmax))
       if (tmin.ge.tmax) then
-         write (*,*) 'tmin.ge.tmax in double_t_inverse',tmin,tmax
-         stop 1
+         ps%jac=-1d0
+         return
       endif
       invm(i+ia)=dot(pp(0:3,i+ia),pp(0:3,i+ia))
       if (debug) then
@@ -1506,6 +1529,7 @@ contains
       endif
       ix=ix+1
       call var_to_random(invm(i+ia),ip_dt,tmin,tmax,ps%x(ix),ps%jac)
+      if (ps%jac.lt.0d0) return
       tmin=-invm(ia+ib)-invm(i+ia)+invm(i)+this%invm_min(ir)
       tmax=invm(i)*(invm(i)-invm(ia+ib)-invm(i+ia))/(invm(i)-invm(i+ia))
       if (this%invm_max(ir+ib).ne.0d0) tmax=min(tmax,this%invm_max(ir+ib))
@@ -1515,8 +1539,8 @@ contains
       tmin=max(tmin,invm(i)-sqrtshat**2*(1-this%ETmin(ir)**2/(sqrtshat**2+invm(i+ia)-invm(i))))
       tmax=min(tmax,invm(i)-sqrtshat**2*(this%ETmin(i)**2/(invm(i)-invm(i+ia))))
       if (tmin.ge.tmax) then
-         write (*,*) 'tmin.ge.tmax in double_t_inverse',tmin,tmax
-         stop 1
+         ps%jac=-1d0
+         return
       endif
       invm(i+ib)=dot(pp(0:3,i+ib),pp(0:3,i+ib))
       if (debug) then
@@ -1524,6 +1548,7 @@ contains
       endif
       ix=ix+1
       call var_to_random(invm(i+ib),ip_dt,tmin,tmax,ps%x(ix),ps%jac)
+      if (ps%jac.lt.0d0) return
       phi=atan(pp(2,i)/pp(1,i))
       if(pp(1,i).lt.0d0) phi=phi+pi
       if(phi.lt.0d0) phi=phi+2d0*pi
@@ -1532,13 +1557,11 @@ contains
       endif
       ix=ix+1
       call var_to_random(phi,0d0,0d0,2d0*pi,ps%x(ix),ps%jac)
+      if (ps%jac.lt.0d0) return
       invm(ir)=dot(pp(0,ir),pp(0,ir))
       if (invm(ir).le.0d0) then
-         write (*,*) "ERROR in double_t: invariant mass of system", &
-              & " must be larger than zero",ir,invm(ir),i
-         write (*,*) invm(ir),invm(ia+ib)+invm(i+ia)+invm(i+ib)-invm(i)&
-              &,invm(ia+ib),invm(i +ia),invm(i+ib),invm(i)
-         stop
+         ps%jac=-1d0
+         return
       endif
       ps%jac = ps%jac/(4d0*sqrt(lambda(invm(ir+i),0d0,0d0)))
     end subroutine double_t_inverse
@@ -1553,11 +1576,13 @@ contains
          call shatminmax(this,i,ir,shatmin,shatmax,invm)
          if (debug) write (*,*) 'generate_mass_inverse gen23 1',i
          call generate_mass_inverse(i,shatmin,shatmax)
+         if (ps%jac.lt.0d0) return
       endif
       if (popcnt(ir).gt.1) then
          call shatminmax(this,ir,i,shatmin,shatmax,invm)
          if (debug) write (*,*) 'generate_mass_inverse gen23 2',ir
          call generate_mass_inverse(ir,shatmin,shatmax)
+         if (ps%jac.lt.0d0) return
       endif
       call tminmax(invm(ir+i),invm(ir+i+ib),invm(ir),invm(i),0d0,tmin,tmax)
       if (this%invm_max(ir+ib).ne.0d0) tmax=min(tmax,this%invm_max(ir+ib))
@@ -1582,14 +1607,15 @@ contains
       root=(piir(0)-ETmini-ETminir)*(piir(0)+ETmini-ETminir)*&
            (piir(0)-ETmini+ETminir)*(piir(0)+ETmini+ETminir)
       if (root.lt.0d0) then
-         write (*,*) 'root.lt.0d0 in gen23_one_step_inverse',root
-         stop 1
+         ps%jac=-1d0
+         return
       endif
       tmin=max(tmin,invm(ir)-pib(0)/piir(0)*(base+sqrt(root)))
       tmax=min(tmax,invm(ir)-pib(0)/piir(0)*(base-sqrt(root)))
       if (tmin.ge.tmax) then
          if (debug) write (*,*) 'tmin.ge.tmax in gen23_one_step_inverse',tmin,tmax
-         stop 1
+         ps%jac=-1d0
+         return
       endif
       invm(ir+ib)=dot(pp(0:3,ir+ib),pp(0:3,ir+ib))
       if (debug) then
@@ -1597,6 +1623,7 @@ contains
       endif
       ix=ix+1
       call var_to_random(invm(ir+ib),ip,tmin,tmax,ps%x(ix),ps%jac)
+      if (ps%jac.lt.0d0) return
       call sminmax(invm(ir+i),invm(ir),invm(ir+i+im1),invm(ir+i+ib)&
            &,invm(ir+ib),invm(ir+ib+i+im1),invm(i),invm(im1),smin,smax,V,sqrtGG)
       if (this%invm_min(i+im1).ne.0d0) smin=max(smin,this%invm_min(i+im1))
@@ -1621,9 +1648,9 @@ contains
          endif
       endif
       if (smin.ge.smax) then
-         write (*,*) 'smin.ge.smax in gen23_one_step_inverse',smin,smax
-         write (*,*) ir,ib,i,im1,this%invm_min(i+im1)
-         stop 1
+         if (debug) write (*,*) 'smin.ge.smax in gen23_one_step_inverse',smin,smax
+         ps%jac=-1d0
+         return
       endif
       invm(i+im1)=dot(pp(0:3,i+im1),pp(0:3,i+im1))
       if (debug) then
@@ -1631,6 +1658,7 @@ contains
       endif
       ix=ix+1
       call var_to_random(invm(i+im1),ip,smin,smax,ps%x(ix),ps%jac)
+      if (ps%jac.lt.0d0) return
       ! Generate the momenta from the integration variables. Since there is an
       ! ambiguity in phi, get both of them and pick the one that passes the cuts
       ! (if it's only one). If both pass, simply pick one of the two at random
@@ -1760,6 +1788,7 @@ contains
       endif
       ix=ix+1
       call var_to_random(invm(i),ip_mass,shatmin,shatmax,ps%x(ix),ps%jac)
+      if (ps%jac.lt.0d0) return
     end subroutine generate_mass_inverse
 
   end subroutine gen23_compute_x_from_momenta

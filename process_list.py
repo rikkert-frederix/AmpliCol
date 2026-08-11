@@ -16,18 +16,23 @@ Important internal representations:
 * ``perm`` is a zero-based colour-order permutation of the entries in
   ``proc``. The file written to disk converts these indices to one-based
   Fortran-style indices.
-* ``phase_space_orders`` maps a canonical phase-space ordering to a list of
-  subprocess records ``(proc, perm, multichannel_partners, factor)``.
+* ``phase_space_orders`` maps an internal phase-map key to records
+  ``(proc, perm, multichannel_partners, factor, P, partner_Ps)``.  ``P`` maps
+  canonical phase-space labels to the fixed labels used by ``proc`` and
+  ``perm``; ``partner_Ps`` contains the corresponding map for every listed
+  multichannel partner.  This lets relabelling-related coefficients share a
+  canonical adaptive grid without changing which fixed-label amplitude is
+  evaluated.
 """
 
 import itertools
-import copy
 import re
 import argparse
-from collections import Counter
+from collections import Counter, defaultdict
 import multiprocessing
 import math
 
+PROCESS_FILE_VERSION = 2
 
 
 # Global sets (make then 'frozenset' so that they are immutable):
@@ -88,8 +93,11 @@ def ProcessProcess(proc):
     """Return phase-space groups for all valid colour orderings of ``proc``.
 
     The result is local to one subprocess and is later merged with the results
-    from all other subprocesses. Each dictionary key is a canonical phase-space
-    order, while each value stores subprocess records that share that order.
+    from all other subprocesses.  The internal dictionary key contains both the
+    canonical phase-space order and the (pre-canonicalisation) open-string
+    connection.  The latter is essential: final-state relabelling can otherwise
+    put a leading connected flow and an auxiliary-U(1) flow on the same adaptive
+    integration grid even though their normalisations and peak histories differ.
     """
     phase_space_orders_local = {}
 
@@ -106,13 +114,20 @@ def ProcessProcess(proc):
     # the massless_QCD final state particles to reduce the number of
     # required phase-space orderings. 
     for perm in unique_color_ord:
+        orientation = ThreeQuarkLineOrientation(proc, perm)
         ordered_proc, ordered_perm = OrderProcPerm(proc, perm)
+        # Express the connection in the same canonical external-leg labelling
+        # as the phase-space map.  This lets genuinely like-shaped flavour
+        # subprocesses share a grid without collapsing distinct three-line
+        # endpoint permutations into one coarse cycle-count class.
+        topology = ColourTopologyTag(ordered_proc, ordered_perm) + (orientation,)
         zero = ordered_perm.index(0)
         perm_mapped = tuple(ordered_perm[zero:] + ordered_perm[:zero])
-        if perm_mapped in phase_space_orders_local:
-            phase_space_orders_local[perm_mapped].append((ordered_proc, ordered_perm, []))
+        channel_key = (perm_mapped, topology)
+        if channel_key in phase_space_orders_local:
+            phase_space_orders_local[channel_key].append((ordered_proc, ordered_perm, []))
         else:
-            phase_space_orders_local[perm_mapped] = [(ordered_proc, ordered_perm, [])]
+            phase_space_orders_local[channel_key] = [(ordered_proc, ordered_perm, [])]
     return phase_space_orders_local
 
 
@@ -213,10 +228,11 @@ def OrderProcPerm(proc,perm):
     """Canonicalize a subprocess and its colour order.
 
     For up to two quark lines, final-state massless QCD particles are relabelled
-    so their colour-order positions increase.  Three-line partner maps must
-    instead keep a common external-momentum labelling: only genuinely identical
-    final particles may be relabelled there.  Otherwise an alternate map would
-    evaluate its Jacobian for a different permutation of the target function.
+    so their colour-order positions increase.  Three-line phase maps instead
+    retain every distinguishable external label: relabelling those endpoints
+    moves the physical fermion-transfer pole and was found to destroy the grid
+    efficiency.  Only genuinely identical final particles are canonicalised in
+    that case.
     """
     # Start by bringing the colour order into the canonical frame.
     zero=perm.index(0)
@@ -227,7 +243,8 @@ def OrderProcPerm(proc,perm):
                 i for i, part in enumerate(proc) if i > 1 and part == particle
             ]
             positions_in_order = [
-                i for i, idx in enumerate(perm_mapped) if idx in particle_positions
+                i for i, idx in enumerate(perm_mapped)
+                if idx in particle_positions
             ]
             for i, val in zip(positions_in_order, sorted(particle_positions)):
                 perm_mapped[i] = val
@@ -476,26 +493,61 @@ def IdenticalParticleSymmetryFactor(proc):
     return i_fac
 
 
+def PhaseSpaceOrderFromKey(key):
+    """Return the external-leg permutation stored in an internal channel key.
+
+    Distinct matrix-element coefficients can require independent adaptive grids
+    even when they use the same phase-space permutation.  After multichannel
+    finalisation such duplicate channels are keyed by ``(order, topology)``;
+    the historical plain tuple remains accepted for compatibility.
+    """
+    if len(key) >= 2 and isinstance(key[0], tuple):
+        return key[0]
+    return tuple(key)
+
+
+def ColourTopologyFromKey(key):
+    """Return the immutable colour-connection tag in an internal key."""
+    if len(key) >= 2 and isinstance(key[0], tuple):
+        return key[1]
+    # Backward-compatible fallback for callers constructing historical keys.
+    return (0, (), 0, 0)
+
+
 def build_process_index():
-    """Index ``(process, colour_order)`` pairs by phase-space-order number."""
+    """Index amplitude targets by every phase-space channel containing them."""
     process_order_to_index.clear()
-    for i, key in enumerate(all_keys_sorted):
-        for (process, order, _) in phase_space_orders[key]:
-            process_order_to_index[(process, order)] = i
+    indices = defaultdict(list)
+    for channel, key in enumerate(all_keys_sorted):
+        for row in phase_space_orders[key]:
+            process, order = row[:2]
+            if channel not in indices[(process, order)]:
+                indices[(process, order)].append(channel)
+    process_order_to_index.update(
+        (target, tuple(channels)) for target, channels in indices.items()
+    )
 
 
-def ThreeQuarkLineBlocks(proc, perm):
-    """Split ``perm`` into three strings, anchored on the one containing zero."""
+def QuarkLineBlocks(proc, perm, expected_lines=None):
+    """Split a cyclic colour order into fixed-label open-string blocks.
+
+    Each returned block starts with a quark and contains its ordered gluons,
+    closing antiquark, and any following colour singlets.  The block containing
+    external leg zero is placed first.  No external labels are canonicalised.
+    """
     quark_positions = [i for i, idx in enumerate(perm) if proc[idx] in quarks]
-    if len(quark_positions) != 3:
-        raise ValueError("three open colour strings require exactly three quarks")
+    if expected_lines is not None and len(quark_positions) != expected_lines:
+        raise ValueError(
+            f"expected {expected_lines} open colour strings, found "
+            f"{len(quark_positions)}"
+        )
+    if not quark_positions:
+        return ()
 
     zero_position = perm.index(0)
     starts_before_zero = [i for i in quark_positions if i <= zero_position]
-    if starts_before_zero:
-        anchor_start = starts_before_zero[-1]
-    else:
-        anchor_start = quark_positions[-1]
+    anchor_start = starts_before_zero[-1] if starts_before_zero \
+        else quark_positions[-1]
     anchored_order = perm[anchor_start:] + perm[:anchor_start]
 
     blocks = []
@@ -505,9 +557,175 @@ def ThreeQuarkLineBlocks(proc, perm):
         if not blocks:
             raise ValueError("colour order does not start on an open string")
         blocks[-1].append(idx)
-    if len(blocks) != 3 or 0 not in blocks[0]:
-        raise ValueError("could not identify the colour string containing leg zero")
+    if expected_lines is not None and len(blocks) != expected_lines:
+        raise ValueError("could not split colour order into open strings")
+    if 0 not in blocks[0]:
+        raise ValueError("could not anchor colour strings on external leg zero")
+    for block in blocks:
+        if sum(proc[idx] in antiquarks for idx in block) != 1:
+            raise ValueError("an open colour string must contain one antiquark")
     return tuple(tuple(block) for block in blocks)
+
+
+def _cycle_count(permutation):
+    """Return the number of cycles of a permutation in one-line notation."""
+    seen = set()
+    cycles = 0
+    for start in range(len(permutation)):
+        if start in seen:
+            continue
+        cycles += 1
+        current = start
+        while current not in seen:
+            seen.add(current)
+            current = permutation[current]
+    return cycles
+
+
+def ColourTopologyTag(proc, perm):
+    """Describe the labelled open-string connection before canonicalisation.
+
+    The endpoint permutation distinguishes colour coefficients that may share a
+    numerical phase-space order after :func:`OrderProcPerm`.  When a unique
+    flavour-preserving fermion-line matching exists, the final entry is the
+    cycle count relative to that matching.  It is ``-1`` for identical-flavour
+    or flavour-changing cases where external PDGs do not identify a unique Wick
+    contraction; those cases are augmented conservatively later.
+    """
+    nlines = sum(p in quarks for p in proc)
+    # Zero- and one-line coefficients have no disconnected colour-flow
+    # topology.  Keep their historical shared phase-space grouping, including
+    # mixed inclusive subprocess groups.
+    if nlines <= 1:
+        return (0, (), 0)
+
+    blocks = QuarkLineBlocks(proc, perm, nlines)
+    quark_legs = sorted(block[0] for block in blocks)
+    antiquark_legs = sorted(
+        next(idx for idx in block if proc[idx] in antiquarks)
+        for block in blocks
+    )
+    endpoint_by_quark = {}
+    for block in blocks:
+        endpoint_by_quark[block[0]] = next(
+            idx for idx in block if proc[idx] in antiquarks
+        )
+    endpoint_permutation = tuple(
+        antiquark_legs.index(endpoint_by_quark[q]) for q in quark_legs
+    )
+
+    # Enumerating at most 3! matchings is cheap and avoids choosing an arbitrary
+    # Wick contraction for repeated flavours.
+    physical_matchings = []
+    for matching in itertools.permutations(range(nlines)):
+        if all(
+            proc[antiquark_legs[matching[i]]] == anti_particle[proc[q]]
+            for i, q in enumerate(quark_legs)
+        ):
+            physical_matchings.append(matching)
+    if len(physical_matchings) == 1:
+        matching = physical_matchings[0]
+        inverse_matching = [0] * nlines
+        for q_index, antiquark_index in enumerate(matching):
+            inverse_matching[antiquark_index] = q_index
+        relative_permutation = tuple(
+            inverse_matching[endpoint] for endpoint in endpoint_permutation
+        )
+        relative_cycles = _cycle_count(relative_permutation)
+        connection = relative_permutation
+    else:
+        relative_cycles = -1
+        connection = endpoint_permutation
+
+    return (nlines, connection, relative_cycles)
+
+
+def CanonicalPhaseMap(proc, perm):
+    """Canonicalize only a phase header, retaining the amplitude labels.
+
+    The returned permutation maps canonical (``base``) external labels to the
+    fixed labels used by ``proc`` and ``perm``::
+
+        target_label = permutation[base_label]
+
+    Initial-state and colour-singlet labels are fixed.  Consequently a point
+    generated with the canonical header can be evaluated for the fixed-label
+    target by assigning ``p_target[P[base]] = p_base[base]``.  The returned
+    ``base_proc`` and ``base_perm`` are used only to derive a canonical colour
+    topology; they are not substituted for the target amplitude record.
+    """
+    zero = perm.index(0)
+    natural_header = tuple(perm[zero:] + perm[:zero])
+    final_qcd_labels = tuple(sorted(
+        i for i, particle in enumerate(proc)
+        if i > 1 and particle in massless_QCD
+    ))
+    qcd_positions = [
+        position for position, label in enumerate(natural_header)
+        if label in final_qcd_labels
+    ]
+    if len(qcd_positions) != len(final_qcd_labels):
+        raise ValueError("could not locate every final-state QCD label")
+
+    canonical_header = list(natural_header)
+    base_to_target = list(range(len(proc)))
+    for position, base_label in zip(qcd_positions, final_qcd_labels):
+        base_to_target[base_label] = natural_header[position]
+        canonical_header[position] = base_label
+
+    if sorted(base_to_target) != list(range(len(proc))):
+        raise ValueError("phase-map label transformation is not a permutation")
+    target_to_base = [None] * len(proc)
+    for base_label, target_label in enumerate(base_to_target):
+        target_to_base[target_label] = base_label
+
+    base_proc = tuple(proc[base_to_target[label]] for label in range(len(proc)))
+    base_perm = tuple(target_to_base[label] for label in perm)
+    canonical_header = tuple(canonical_header)
+    base_to_target = tuple(base_to_target)
+
+    if tuple(base_to_target[label] for label in canonical_header) != \
+            natural_header:
+        raise ValueError("canonical phase header does not reconstruct its target")
+    base_zero = base_perm.index(0)
+    if tuple(base_perm[base_zero:] + base_perm[:base_zero]) != canonical_header:
+        raise ValueError("canonical colour order and phase header disagree")
+    return canonical_header, base_to_target, base_proc, base_perm
+
+
+def AdaptiveTopologyClass(topology):
+    """Return the compact adaptive class for a canonical colour topology.
+
+    The historical compact classes are retained through two quark lines.
+    Three-line coefficients use the complete endpoint permutation: the three
+    transpositions and two oriented three-cycles put fermion-transfer poles on
+    different labelled momenta and do not train one grid efficiently.  Actual
+    flavour names are omitted, so kinematically equivalent flavour variants
+    continue to share a grid.
+    """
+    nlines, connection, cycles = topology[:3]
+    if nlines == 3:
+        if cycles < 0:
+            return ("mixed", 3, connection)
+        return ("flow", 3, connection)
+    if nlines < 2 or cycles == 1:
+        return ("leading", 0)
+    if cycles < 0:
+        return ("mixed", nlines)
+    return ("disconnected", cycles - 1)
+
+
+def ThreeQuarkLineBlocks(proc, perm):
+    """Split ``perm`` into three strings, anchored on the one containing zero."""
+    return QuarkLineBlocks(proc, perm, 3)
+
+
+def ThreeQuarkLineOrientation(proc, perm):
+    """Label the two cyclic representations of three open colour strings."""
+    if sum(p in quarks for p in proc) != 3:
+        return 0
+    blocks = ThreeQuarkLineBlocks(proc, perm)
+    return int(blocks[1][0] > blocks[2][0])
 
 
 def SwapThreeQuarkLineOrder(proc, perm):
@@ -541,25 +759,6 @@ def ThreeQuarkLineBlockSignature(proc, perm):
         sorted(tuple(idx for idx in block if proc[idx] in all_coloured)
                for block in blocks)
     )
-
-
-def LookupMultiChannelIndices(process_orders):
-    """Return the unique phase-space groups containing ``process_orders``."""
-    indices = []
-    for order, process in process_orders:
-        idx = process_order_to_index.get((process, order))
-        if idx is None:
-            raise ValueError(
-                "expected multichannel partner not found among phase-space "
-                f"orderings: {process} {order}"
-            )
-        if idx in indices:
-            raise ValueError(
-                "singlet permutations unexpectedly share phase-space group "
-                f"{idx}: {process} {order}"
-            )
-        indices.append(idx)
-    return tuple(sorted(indices))
 
 
 def SingletMultiChannelOrders(proc, perm):
@@ -640,38 +839,55 @@ def SingletMultiChannelOrders(proc, perm):
     return tuple(all_possible_perms)
 
 
-def MultiChannelPartners(proc, perm, k, l):
-    """Attach the original singlet-only multichannel metadata to one row."""
-    singlet_orders = SingletMultiChannelOrders(proc, perm)
-    mt = LookupMultiChannelIndices(singlet_orders)
-    anti_quark_count = sum(p in antiquarks for p in proc)
-    factor = 0.5 if anti_quark_count == 3 else 1.0
-    # Overwrite the current proc+perm element with the one that also
-    # includes the multi-channel partners:
-    phase_space_orders[k][l] = (proc, perm, mt, factor)
+def BuildTopologyAwareMultiChannels():
+    """Build compact grids without relabelling fixed amplitude targets.
 
-
-def CombineThreeQuarkLineMultiChannels():
-    """Combine the two three-string representations into exact partner maps.
-
-    Start from the old normalization, in which each open-string ordering carries
-    one half and singlet placements are already multichannel partners.  Connected
-    components under singlet placement and pointwise-equivalent swaps of the two
-    unanchored strings are one physical coefficient.  Every phase-space map in
-    a component must carry the same *total* coefficient; otherwise unequal row
-    multiplicities can bias the pointwise Jacobian partition.  Rows sharing a
-    map therefore split the component weight between them.
+    For three quark lines, the phase header alone is canonicalized and its
+    base-to-target leg permutation is retained on the row.  Singlet placements
+    and exact fixed-label swaps of the two unanchored colour strings are joined
+    into one multichannel component.  Swaps that additionally relabel identical
+    final particles share an adaptive grid but remain different MIS targets. If
+    two maps in one component canonicalize to the same header and topology, a
+    small component-local source rank keeps both maps present.
     """
+    global phase_space_orders, all_keys_sorted
+
     nodes = []
-    node_index = {}
+    node_index = defaultdict(list)
+    exact_target_index = defaultdict(list)
     for channel, key in enumerate(all_keys_sorted):
         for row_index, row in enumerate(phase_space_orders[key]):
             process, order = row[:2]
+            raw_topology = ColourTopologyFromKey(key)
+            nlines = raw_topology[0]
+            if nlines == 3:
+                current_map, permutation, base_process, base_order = \
+                    CanonicalPhaseMap(process, order)
+                canonical_topology = ColourTopologyTag(
+                    base_process, base_order
+                )
+            else:
+                current_map = PhaseSpaceOrderFromKey(key)
+                permutation = tuple(range(len(process)))
+                canonical_topology = raw_topology[:3]
+            base_key = (
+                current_map,
+                AdaptiveTopologyClass(canonical_topology),
+            )
             node = len(nodes)
-            nodes.append((key, row_index, channel))
-            if (process, order) in node_index:
-                raise ValueError(f"duplicate process/order row: {process} {order}")
-            node_index[(process, order)] = node
+            nodes.append({
+                "source_key": key,
+                "row_index": row_index,
+                "old_channel": channel,
+                "process": process,
+                "order": order,
+                "raw_topology": raw_topology,
+                "nlines": nlines,
+                "base_key": base_key,
+                "permutation": permutation,
+            })
+            node_index[(process, order, raw_topology)].append(node)
+            exact_target_index[(process, order)].append(node)
 
     parent = list(range(len(nodes)))
 
@@ -687,68 +903,186 @@ def CombineThreeQuarkLineMultiChannels():
         if first != second:
             parent[second] = first
 
-    three_line_nodes = []
-    for node, (key, row_index, _) in enumerate(nodes):
-        process, order = phase_space_orders[key][row_index][:2]
-        if sum(p in antiquarks for p in process) != 3:
-            continue
-        three_line_nodes.append(node)
-        for partner_order, partner_process in SingletMultiChannelOrders(process, order):
-            union(node, node_index[(partner_process, partner_order)])
-        swapped_process, swapped_order = SwapThreeQuarkLineOrder(process, order)
-        # A canonical relabelling of identical final particles can change which
-        # momentum-labelled leg belongs to which open string.  Those rows agree
-        # only after permuting momenta, while the Fortran multichannel runtime
-        # evaluates every inverse map at the same momentum labels.  Combine only
-        # swaps that retain the exact three string contents.
-        if ThreeQuarkLineBlockSignature(process, order) == \
-                ThreeQuarkLineBlockSignature(swapped_process, swapped_order):
-            union(node, node_index[(swapped_process, swapped_order)])
+    singlet_channel_count = [1] * len(nodes)
+    for node, record in enumerate(nodes):
+        process = record["process"]
+        order = record["order"]
+        topology = record["raw_topology"]
+        singlet_channels = set()
+        singlet_orders = SingletMultiChannelOrders(process, order)
+        for partner_order, partner_process in singlet_orders:
+            if record["nlines"] == 3:
+                matches = exact_target_index.get(
+                    (partner_process, partner_order), ()
+                )
+            else:
+                matches = node_index.get(
+                    (partner_process, partner_order, topology), ()
+                )
+            if len(matches) != 1:
+                raise ValueError(
+                    "expected one singlet multichannel target, found "
+                    f"{len(matches)}: {partner_process} {partner_order}"
+                )
+            partner = matches[0]
+            union(node, partner)
+            singlet_channels.add(nodes[partner]["old_channel"])
+        if len(singlet_channels) != len(singlet_orders):
+            raise ValueError(
+                "singlet permutations unexpectedly share a phase-space group: "
+                f"{process} {order}"
+            )
+        singlet_channel_count[node] = len(singlet_channels)
 
-    components = {}
-    for node in three_line_nodes:
+        if record["nlines"] == 3:
+            blocks = ThreeQuarkLineBlocks(process, order)
+            raw_swapped_order = tuple(blocks[0] + blocks[2] + blocks[1])
+            swapped_process, swapped_order = OrderProcPerm(
+                process, raw_swapped_order
+            )
+            # Only a swap that leaves every fixed external label unchanged is
+            # a pointwise identity and hence a valid MIS partner.  If
+            # canonicalizing identical final particles changes the order, the
+            # two rows obey A_2(p)=A_1(Pp), not A_2(p)=A_1(p).  They may still
+            # share the canonical adaptive grid through ``base_key``, but must
+            # retain separate components and their original one-half weights.
+            if swapped_process == process and \
+                    swapped_order == raw_swapped_order:
+                matches = exact_target_index.get(
+                    (swapped_process, swapped_order), ()
+                )
+                if len(matches) != 1:
+                    raise ValueError(
+                        "expected one exact three-string partner target, found "
+                        f"{len(matches)}: {swapped_process} {swapped_order}"
+                    )
+                union(node, matches[0])
+
+    components = defaultdict(list)
+    for node in range(len(nodes)):
         components.setdefault(find(node), []).append(node)
 
+    component_maps = []
+    all_channel_keys = set()
     for component in components.values():
-        channels = tuple(sorted({nodes[node][2] for node in component}))
-        rows_per_channel = Counter(nodes[node][2] for node in component)
         old_weight = math.fsum(
-            phase_space_orders[nodes[node][0]][nodes[node][1]][3]
-            / len(phase_space_orders[nodes[node][0]][nodes[node][1]][2])
+            (0.5 if nodes[node]["nlines"] == 3 else 1.0)
+            / singlet_channel_count[node]
             for node in component
         )
 
+        # Rank only maps of this coefficient that would otherwise collapse to
+        # one grid.  Ranks are local to a component, so unrelated flavour
+        # variants retain the maximum useful grid sharing.
+        buckets = defaultdict(list)
         for node in component:
-            key, row_index, channel = nodes[node]
-            process, order = phase_space_orders[key][row_index][:2]
-            factor = old_weight / rows_per_channel[channel]
-            phase_space_orders[key][row_index] = (process, order, channels, factor)
+            buckets[nodes[node]["base_key"]].append(node)
+
+        maps = {}
+        for base_key, bucket in buckets.items():
+            ordered_bucket = sorted(
+                bucket,
+                key=lambda item: (
+                    nodes[item]["permutation"],
+                    nodes[item]["order"],
+                    nodes[item]["process"],
+                ),
+            )
+            for source_rank, node in enumerate(ordered_bucket):
+                record = nodes[node]
+                channel_key = base_key + (source_rank,)
+                if channel_key in maps:
+                    raise ValueError(
+                        "two coefficient maps share a ranked channel key"
+                    )
+                maps[channel_key] = (
+                    record["process"],
+                    record["order"],
+                    record["permutation"],
+                )
+                all_channel_keys.add(channel_key)
+        component_maps.append((maps, old_weight))
+
+    all_keys_sorted = sorted(all_channel_keys)
+    channel_number = {key: i for i, key in enumerate(all_keys_sorted)}
+    rebuilt = {key: [] for key in all_keys_sorted}
+    for maps, old_weight in component_maps:
+        partner_keys = tuple(sorted(maps, key=channel_number.__getitem__))
+        partners = tuple(channel_number[key] for key in partner_keys)
+        partner_permutations = tuple(maps[key][2] for key in partner_keys)
+        for key, (process, order, permutation) in maps.items():
+            factor = old_weight * IdenticalParticleSymmetryFactor(process)
+            rebuilt[key].append((
+                process,
+                order,
+                partners,
+                factor,
+                permutation,
+                partner_permutations,
+            ))
+
+    phase_space_orders = rebuilt
+    build_process_index()
 
 
 def DetermineMultiChannelPartnersAndSymmetryFactor():
     """Finalize each subprocess record with channels and symmetry factors."""
-    # Build a dictionary from process + colour order to phase-space order so
-    # partner lookup in MultiChannelPartners is cheap and unambiguous.
-    build_process_index()
-    # Determine the multi-channel partners:
-    for key in all_keys_sorted:
-        for i,(process,order,multichannel) in enumerate(phase_space_orders[key]):
-            MultiChannelPartners(process,order,key,i)
-    CombineThreeQuarkLineMultiChannels()
-    # Add the identical particle symmetry factor:
-    for key in all_keys_sorted:
-        for i,(process,order,multichannel,iden) in enumerate(phase_space_orders[key]):
-            phase_space_orders[key][i]=(process,order,multichannel,iden*IdenticalParticleSymmetryFactor(process))
+    BuildTopologyAwareMultiChannels()
+
+
+def ExpandLegPermutation(permutation, index):
+    """Replace one fixed label by two identity-mapped decay-product labels."""
+    if permutation[index] != index:
+        raise ValueError("a resonance label must be fixed by the QCD map")
+    expanded = [None] * (len(permutation) + 1)
+    for base_label, target_label in enumerate(permutation):
+        if base_label == index:
+            continue
+        expanded_base = base_label + (base_label > index)
+        expanded_target = target_label + (target_label > index)
+        expanded[expanded_base] = expanded_target
+    expanded[index] = index
+    expanded[index + 1] = index + 1
+    if sorted(expanded) != list(range(len(expanded))):
+        raise ValueError("expanded leg map is not a permutation")
+    return tuple(expanded)
+
 
 def ConvertProcToString(proc):
     """Convert one subprocess record into the ``processes.txt`` row format."""
-    process,order,multi_channel,iden=proc
+    process, order, multi_channel, iden = proc[:4]
+    if len(proc) >= 5:
+        permutation = proc[4]
+    else:
+        # Preserve the historical helper API for callers that construct a
+        # four-field row directly.
+        permutation = tuple(range(len(process)))
+    if len(proc) >= 6:
+        partner_permutations = proc[5]
+    else:
+        partner_permutations = tuple(
+            permutation for _ in multi_channel
+        )
+    if len(permutation) != len(process):
+        raise ValueError("row leg permutation has the wrong size")
+    if sorted(permutation) != list(range(len(process))):
+        raise ValueError("row leg map is not a permutation")
+    if len(partner_permutations) != len(multi_channel):
+        raise ValueError("partner permutations are not aligned with channels")
+    if any(len(item) != len(process) for item in partner_permutations):
+        raise ValueError("partner leg permutation has the wrong size")
     crossed=[pdgs[p] if i>1 else pdgs[anti_particle[p]] for i,p in enumerate(process)] # cross intial state
     line=str(len(multi_channel))
     line=line+'   '+' '.join([str(m+1) for m in multi_channel])
     line=line+'   '+' '.join(crossed)
     line=line+'   '+' '.join([str(o+1) for o in order])
     line=line+'   '+str(iden)
+    line=line+'   '+' '.join(str(label+1) for label in permutation)
+    line=line+'   '+' '.join(
+        str(label+1)
+        for partner_permutation in partner_permutations
+        for label in partner_permutation
+    )
     return line
 
 def sort_by_pdg_codes(process):
@@ -773,25 +1107,26 @@ def WriteAllProcsIntoList(lep):
     towrite=[]
     towrite.append(str(len(all_keys_sorted))) # number of phase-space orderings to consider
     towrite.append('')
-    all_keys_sorted_new=copy.copy(all_keys_sorted)
-    phase_space_orders_new={}
-    # re-shuffle the phase space orders if there is a resonance
-    if (options['include_resonance']):
-        for i,key in enumerate(all_keys_sorted):
-            first = phase_space_orders[key][0]
+    output_channels=[]
+    for internal_key in all_keys_sorted:
+        key = PhaseSpaceOrderFromKey(internal_key)
+        rows = phase_space_orders[internal_key]
+        # Re-shuffle the physical phase-space order if a resonance placeholder
+        # is expanded into its two decay products.  Keep rows in a list rather
+        # than a dictionary: independent topology grids may intentionally have
+        # identical numerical phase-space headers.
+        if options['include_resonance']:
+            first = rows[0]
             if 'z' in first[0]:
                 j = key.index(first[0].index("z"))
-                new = tuple([first[0].index("z"),first[0].index("z")+1])
-                t = key[0:j] + new + key[j+1:]
-                all_keys_sorted_new[i]=t
-                phase_space_orders_new[t]=phase_space_orders[key]
-    else:
-        phase_space_orders_new=copy.copy(phase_space_orders)
+                new = (first[0].index("z"), first[0].index("z") + 1)
+                key = key[0:j] + new + key[j+1:]
+        output_channels.append((key, rows))
 
-    for i,key in enumerate(all_keys_sorted_new):
-        towrite.append(str(i+1)+'   '+str(len(phase_space_orders_new[key]))+'   '+str(max(len(proc[2]) for proc in phase_space_orders_new[key]))+'   '+' '.join([str(k+1) for k in key]))
+    for i,(key,rows) in enumerate(output_channels):
+        towrite.append(str(i+1)+'   '+str(len(rows))+'   '+str(max(len(proc[2]) for proc in rows))+'   '+' '.join([str(k+1) for k in key]))
         # order the processes in the process_list, so that we get a neat processes.txt file:
-        process_list=sorted(phase_space_orders_new[key],key=sort_by_pdg_codes2)
+        process_list=sorted(rows,key=sort_by_pdg_codes2)
         for proc in process_list:
             if (options['include_resonance']):
                 if 'z' in proc[0]:
@@ -802,6 +1137,16 @@ def WriteAllProcsIntoList(lep):
                     new = tuple([ib,ib+1])
                     t = proc[1][0:j] + new + proc[1][j+1:]
                     proc = (proc[0],) + (t,) + proc[2:]
+                    if len(proc) >= 6:
+                        permutation = ExpandLegPermutation(proc[4], ib)
+                        partner_permutations = tuple(
+                            ExpandLegPermutation(item, ib)
+                            for item in proc[5]
+                        )
+                        proc = proc[:4] + (
+                            permutation,
+                            partner_permutations,
+                        )
             process_line=ConvertProcToString(proc)
             towrite.append(process_line)
         towrite.append('')
@@ -837,7 +1182,7 @@ def WriteUniqueProcsIntoList(procs,lep):
     # in case of different flavour multiple-quark line processes, add all the possible orders:
     sorted_procs=Addqq_dfProcesses(sorted_procs)
     try:
-        line=[str(len(sorted_procs[0]))+' '+str(len(sorted_procs))]
+        line=[str(len(sorted_procs[0]))+' '+str(len(sorted_procs))+' '+str(PROCESS_FILE_VERSION)]
     except IndexError:
         print("ERROR: no processes found. Try './process_list.py --help' to get more information on usage")
         quit()
@@ -852,7 +1197,8 @@ def CheckConsistency():
     """Verify that the generated rows contain the expected dual amplitudes."""
     allprocs={}
     for key in all_keys_sorted:
-        for (process,order,multichannel,iden) in phase_space_orders[key]:
+        for row in phase_space_orders[key]:
+            process, order, multichannel, iden = row[:4]
             proc=[process[0],process[1]]
             proc.extend(sorted(process[2:],key=lambda x: sort_particles[x]))
             proc=tuple(proc)

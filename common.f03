@@ -31,10 +31,10 @@ module common
   real(kind=8),parameter :: etaa_max     = 6d0
   real(kind=8),parameter :: sqrt_saa_min = -1d0
 
-  ! leptons:
-  real(kind=8),parameter :: pTl_min      = -1d0
-  real(kind=8),parameter :: DRll_min     = -1d0  ! max allowed value: Drll_min=1d0
-  real(kind=8),parameter :: etal_max     = -1d0
+  ! leptons (charged leptons and neutrinos, PDG 11--16):
+  real(kind=8),parameter :: pTl_min      = 20d0
+  real(kind=8),parameter :: DRll_min     = 0.4d0  ! max allowed value: Drll_min=1d0
+  real(kind=8),parameter :: etal_max     = 2.5d0
   real(kind=8),parameter :: sqrt_sll_min = -1d0
 
   ! jets+photons:
@@ -42,7 +42,7 @@ module common
   real(kind=8),parameter :: sqrt_sja_min = -1d0
 
   ! jets+leptons:
-  real(kind=8),parameter :: DRjl_min     = -1d0  ! max allowed value: Drjl_min=1d0
+  real(kind=8),parameter :: DRjl_min     = 0.4d0  ! max allowed value: Drjl_min=1d0
   real(kind=8),parameter :: sqrt_sjl_min = -1d0
 
   ! leptons+photons:
