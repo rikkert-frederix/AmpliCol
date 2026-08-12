@@ -1,4 +1,4 @@
-! gfortran -ffast-math -O3 -o matrix_reweight random.f color_algebra.f95 amplitude_real.f03 math_functions.f03 feynmanrules.f03 amplitude_QCD.f03 matrix_reweight.f03
+! gfortran -ffast-math -O3 -o matrix_reweight random.f color_algebra.f95 math_functions.f03 feynmanrules.f03 amplitude_QCD.f03 matrix_reweight.f03
 
 module comb_events
   implicit none

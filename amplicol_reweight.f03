@@ -1,5 +1,3 @@
-! gfortran -ffast-math -O3 -o matrix_reweight random.f color_algebra.f95 amplitude_real.f03 math_functions.f03 feynmanrules.f03 amplitude_QCD.f03 matrix_reweight.f03
-
 module rw_events
   implicit none
   type :: lhef_event
@@ -55,7 +53,7 @@ program amplicol_reweight
   integer :: i,j,col_acc,icol,irow,ic,iacc,nColOrd,next,nprocs,iproc,ioff,unique_nproc
   integer,dimension(:),allocatable :: hel,unique_map
   integer,dimension(:,:),allocatable :: spin,o,part,processes,unique_processes
-  real(kind=8) :: amp2,amp_col,process_map_value
+  real(kind=8) :: process_map_value
   real(kind=8),dimension(:,:),allocatable :: p
   real(kind=8),dimension(:),allocatable :: unique_map_value
   complex(kind=8) :: amp2_c,amp_col_c
@@ -113,34 +111,18 @@ program amplicol_reweight
      do iacc=1,3 ! LC, NLC and full colour
         call cpu_time(tBefore)
         if (iacc.eq.3 .and. col_acc.lt.2) cycle
-        if (amps(iproc)%n_qqbar(1).eq.0 .and. use_real_gluons) then
-           ! same as in the 'else' below, except that all are real variables instead of complex. 
-           do irow=1,amps(iproc)%nColOrd
-              amp_col=0d0
-              do i=1,amps(iproc)%n_col_vals(iacc)
-                 amp2=0d0
-                 do ic=amps(iproc)%row_index(irow-1,i,iacc)+1,amps(iproc)%row_index(irow,i,iacc)
-                    icol=amps(iproc)%col_index(amps(iproc)%i_col_i(i,iacc)+ic)
-                    amp2=amp2+amps(iproc)%amps_r(ioff+icol)
-                 enddo
-                 amp_col=amp_col+amp2*amps(iproc)%diff_col_vals(i,iacc)
+        do irow=1,amps(iproc)%nColOrd
+           amp_col_c=(0d0,0d0)
+           do i=1,amps(iproc)%n_col_vals(iacc)
+              amp2_c=(0d0,0d0)
+              do ic=amps(iproc)%row_index(irow-1,i,iacc)+1,amps(iproc)%row_index(irow,i,iacc)
+                 icol=amps(iproc)%col_index(amps(iproc)%i_col_i(i,iacc)+ic)
+                 amp2_c=amp2_c+amps(iproc)%amps(ioff+icol)
               enddo
-              events(nevt)%matrix2(iacc)=events(nevt)%matrix2(iacc)+amp_col*amps(iproc)%amps_r(ioff+irow)
+              amp_col_c=amp_col_c+amp2_c*amps(iproc)%diff_col_vals(i,iacc)
            enddo
-        else
-           do irow=1,amps(iproc)%nColOrd
-              amp_col_c=(0d0,0d0)
-              do i=1,amps(iproc)%n_col_vals(iacc)
-                 amp2_c=(0d0,0d0)
-                 do ic=amps(iproc)%row_index(irow-1,i,iacc)+1,amps(iproc)%row_index(irow,i,iacc)
-                    icol=amps(iproc)%col_index(amps(iproc)%i_col_i(i,iacc)+ic)
-                    amp2_c=amp2_c+amps(iproc)%amps(ioff+icol)
-                 enddo
-                 amp_col_c=amp_col_c+amp2_c*amps(iproc)%diff_col_vals(i,iacc)
-              enddo
-              events(nevt)%matrix2(iacc)=events(nevt)%matrix2(iacc)+dble(amp_col_c*conjg(amps(iproc)%amps(ioff+irow)))
-           enddo
-        endif
+           events(nevt)%matrix2(iacc)=events(nevt)%matrix2(iacc)+dble(amp_col_c*conjg(amps(iproc)%amps(ioff+irow)))
+        enddo
         ! The following line can be removed since 'process_map_value'
         ! will drop out when taking the ratio w.r.t. LC.
 !        events(nevt)%matrix2(iacc)=events(nevt)%matrix2(iacc)*process_map_value

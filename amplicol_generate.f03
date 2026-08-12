@@ -16,7 +16,6 @@ program amplicol_generate
   use handling_processes
   use multichannel
   use amplitude_library
-  use mg_checks
   implicit none
   integer :: iproc,iident,target_label
   real(kind=8) :: weight
@@ -37,7 +36,7 @@ program amplicol_generate
   character(len=10) :: time
   character(len=5) :: zone
   character(len=19) :: formatted
-  logical :: create_amplitude_library,use_amplitude_library,read_momenta
+  logical :: create_amplitude_library,use_amplitude_library
   logical :: timing_enabled,time_detail_point,time_point_sample
   integer(kind=8) :: timing_point
   real(kind=8) :: tLoopBefore,tLoopAfter,tSampleBefore,tSampleAfter,tFinalBefore,tFinalAfter
@@ -170,16 +169,8 @@ program amplicol_generate
      if (timing_mode.eq.timing_detailed) call cpu_time(tBefore)
      if (keep_processes_separate) then
         do iamp=1,pgl(igroup)%nproc
-           if (read_momenta) call run_madgraph_check(pgl(igroup)%next,igroup,iamp,pgl(igroup)%processes(1,iamp))
            call pgl(igroup)%amps(iamp)%init(1,pgl(igroup)%next,1,pgl(igroup)%processes(1,iamp),&
                 pgl(igroup)%spin,pgl(igroup)%color_orders(1,iamp),phys_model)
-           if (read_momenta) then
-                   if (.not.allocated(p_read)) allocate(p_read(pgl(igroup)%next,0:3))
-                   call read_in_momenta(pgl(igroup)%next,igroup,iamp,p_read)
-                   do i=1,pgl(igroup)%next
-                         pgl(igroup)%ps(1)%p(:,i)=p_read(i,:)
-                   enddo
-           endif
         enddo
      else
         call pgl(igroup)%amps(1)%init(1,pgl(igroup)%next,pgl(igroup)%nproc,pgl(igroup)%processes,&
@@ -465,10 +456,8 @@ contains
 
     ! Generate phase-space point based on the random numbers 'x(1:ndim)'
     if (time_physics) call cpu_time(tBefore)
-    if (.not.read_momenta) then
-       pgl(ichan)%ps(1)%x=x
-       call pgl(ichan)%phase_space%generate_momenta(pgl(ichan)%ps(1))
-    endif
+    pgl(ichan)%ps(1)%x=x
+    call pgl(ichan)%phase_space%generate_momenta(pgl(ichan)%ps(1))
     if (debug ) then
        write (*,*) pgl(ichan)%ps(1)%jac
        stop 1
@@ -481,17 +470,14 @@ contains
        endif
        return
     endif
-    if (.not.read_momenta) then
-       ! The adaptive grid uses a canonical labelling of interchangeable
-       ! massless-QCD final legs.  Restore the fixed coefficient labelling
-       ! before cuts, amplitudes, scales, and event output.
-       p_generated=pgl(ichan)%ps(1)%p
-       do a=1,pgl(ichan)%next
-          target_label=pgl(ichan)%phase_space_permutations(a,iproc)
-          pgl(ichan)%ps(1)%p(:,target_label)=p_generated(:,a)
-       enddo
-    endif
-    if (.not.read_momenta) then
+    ! The adaptive grid uses a canonical labelling of interchangeable
+    ! massless-QCD final legs.  Restore the fixed coefficient labelling
+    ! before cuts, amplitudes, scales, and event output.
+    p_generated=pgl(ichan)%ps(1)%p
+    do a=1,pgl(ichan)%next
+       target_label=pgl(ichan)%phase_space_permutations(a,iproc)
+       pgl(ichan)%ps(1)%p(:,target_label)=p_generated(:,a)
+    enddo
     if (.not.pass_cuts(pgl(ichan))) then
        val=0d0
        if (time_physics) then
@@ -499,7 +485,6 @@ contains
           t_PS= t_PS + (tAfter-tBefore)*dble(timing_sample)
        endif
        return
-    endif
     endif
     pgl(ichan)%passed(iint) = pgl(ichan)%passed(iint) + 1
     call compute_multichannel_weight(ichan,iint,pgl(ichan)%ps(1),colour_singlet_multichannel_weight)
@@ -528,11 +513,6 @@ contains
           t_Amp_opt=t_Amp_opt+(tAfter-tBefore)*dble(timing_sample)
        endif
        if (done) return
-    endif
-
-    if (read_momenta) then
-        call perform_check(iint,ichan)
-        if (pgl(ichan)%passed(iint).gt.me_points) read_momenta=.false.
     endif
 
     ! set scales and update alphaS
@@ -638,37 +618,19 @@ contains
     iproc=0
     pgl(ichan)%amp2=0d0
     if (keep_processes_separate) then
-       if (use_real_gluons .and. all(pgl(ichan)%amps(iint)%n_qqbar(1:1).eq.0)) then
-          do ih=1,pgl(ichan)%amps(iint)%n_amps
-             do while (pgl(ichan)%amps(iint)%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
-             pgl(ichan)%amp2_hel(ih)=pgl(ichan)%amps(iint)%amps_r(ih)*&
-                  pgl(ichan)%col_fac(iint)*pgl(ichan)%amps(iint)%amps_r(ih)*pgl(ichan)%hel_fac(ih,iint)
-             pgl(ichan)%amp2(iproc)=pgl(ichan)%amp2(iproc)+pgl(ichan)%amp2_hel(ih)
-          enddo
-       else
           do ih=1,pgl(ichan)%amps(iint)%n_amps
              do while (pgl(ichan)%amps(iint)%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
              pgl(ichan)%amp2_hel(ih)=dble(pgl(ichan)%amps(iint)%amps(ih)*&
                   pgl(ichan)%col_fac(iint)*dconjg(pgl(ichan)%amps(iint)%amps(ih)))*pgl(ichan)%hel_fac(ih,iint)
              pgl(ichan)%amp2(iproc)=pgl(ichan)%amp2(iproc)+pgl(ichan)%amp2_hel(ih)
           enddo
-       endif
     else
-       if (use_real_gluons .and. all(pgl(ichan)%amps(iint)%n_qqbar(1:1).eq.0)) then
-          do ih=1,pgl(ichan)%amps(iint)%n_amps
-             do while (pgl(ichan)%amps(iint)%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
-             pgl(ichan)%amp2_hel(ih)=pgl(ichan)%amps(iint)%amps_r(ih)*&
-                  pgl(ichan)%col_fac(iproc)*pgl(ichan)%amps(iint)%amps_r(ih)*pgl(ichan)%hel_fac(ih,iint)
-             pgl(ichan)%amp2(iproc)=pgl(ichan)%amp2(iproc)+pgl(ichan)%amp2_hel(ih)
-          enddo
-       else
           do ih=1,pgl(ichan)%amps(iint)%n_amps
              do while (pgl(ichan)%amps(iint)%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
              pgl(ichan)%amp2_hel(ih)=dble(pgl(ichan)%amps(iint)%amps(ih)*&
                   pgl(ichan)%col_fac(iproc)*dconjg(pgl(ichan)%amps(iint)%amps(ih)))*pgl(ichan)%hel_fac(ih,iint)
              pgl(ichan)%amp2(iproc)=pgl(ichan)%amp2(iproc)+pgl(ichan)%amp2_hel(ih)
           enddo
-       endif
     endif
   end subroutine square_the_amps
   
@@ -741,10 +703,6 @@ contains
     type(phase_space_order_group),intent(in) :: pgl
     integer,intent(in) :: iamp,idau,iint
     complex(kind=8) :: amp1,amp2
-    if (use_real_gluons) then
-       write (*,*) 'Find operation for same flavour sum only for complex amplitudes'
-       stop 1
-    endif
     amp1=pgl%amps(iint)%amps(pgl%amps(iint)%same_flavour_sum(iamp,idau))
     amp2=pgl%amps(iint)%amps(-pgl%include_hel(pgl%amps(iint)%same_flavour_sum(iamp,idau),iint))
     find_operation=0
@@ -771,7 +729,7 @@ contains
     integer(kind=8) iseed
     common /to_seed/iseed
     call parse_argument(filename,input_filename,ncalls0,itmax,PS_choice,iseed,library,tag,&
-         read_momenta,me_points,timing_arg,timing_sample_arg)
+         timing_arg,timing_sample_arg)
 
     logfile="Outputs/"//trim(adjustl(tag))//"log_file.txt"
     open(unit=99,file=logfile,status='unknown')

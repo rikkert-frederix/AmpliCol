@@ -89,7 +89,6 @@ Usage: amplicol_generate <arguments>'. Possible arguments are
   --itmax=[X],      -i=[X]  : The maximum number of iterations to use (detault is 128).
   --library=[X],    -l=[X]  : To create or use a library for the amplitudes, set [X] to 'create' or 'use', respectively. (To use a library, re-compile code with 'make amplicol_generate_library' after a library has been created). Default is 'none'.
   --tag=[X],        -t=[X]  : Event file (and log file) names will be prepended with a tag '[X]_'.
-  --me_test=[X],    -mt=[X] : Perform ME-level test against MG with [X] points tested (single PS kinematics)
 *****************************
 
 Most important are the '--nevents=X' to set the number of events to

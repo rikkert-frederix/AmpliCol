@@ -2,7 +2,7 @@ module argument_parser
   implicit none
 contains
   subroutine parse_argument(filename,input_file,ncalls0,itmax,PS_choice,seed,library,tag,&
-       read_momenta,me_points,timing,timing_sample)
+       timing,timing_sample)
     integer :: i
     character(len=256) :: arg
     character(len=256) :: tmp
@@ -11,8 +11,7 @@ contains
     character(len=256) :: input_file
     integer :: ncalls0,itmax,PS_choice
     integer(kind=8) :: seed
-    logical :: read_momenta 
-    integer :: me_points,timing_sample
+    integer :: timing_sample
 
     ! Default values:
     show_help=.false.
@@ -24,7 +23,6 @@ contains
     itmax=128
     library='none'
     tag=''
-    read_momenta=.false.
     timing='basic'
     timing_sample=100
 
@@ -53,10 +51,6 @@ contains
           library = arg(index(arg, "=")+1:)
        elseif (index(arg, "--tag=").eq.1 .or. index(arg, "-t=").eq.1) then
           tag = trim(arg(index(arg, "=")+1:))//'_'
-       elseif (index(arg, "--me_test=").eq.1 .or. index(arg, "-mt=").eq.1) then
-          tmp = arg(index(arg, "=")+1:)
-          read(tmp,*) me_points
-          read_momenta=.true.
        elseif (index(arg, "--timing=").eq.1) then
           timing = arg(index(arg, "=")+1:)
        elseif (index(arg, "--timing-sample=").eq.1) then
@@ -84,8 +78,6 @@ contains
             "set [X] to 'create' or 'use', respectively. (To use a library, re-compile code with 'make "// &
             "amplicol_generate_library' after a library has been created). Default is 'none'."
        write (*,'(a)') "  --tag=[X],        -t=[X]  : Event file (and log file) names will be prepended with with a tag '[X]_'."
-       write (*,'(a)') "  --me_test=[X],    -mt=[X] : Perform ME level test against MG "//& 
-            "with [X] points tested (single PS kinematics)"
        write (*,'(a)') "  --timing=[X]              : Timing mode: none, basic (default), or detailed."
        write (*,'(a)') "  --timing-sample=[X]       : In detailed timing, sample point timers every [X] points. Default is 100."
        write (*,'(a)') ""

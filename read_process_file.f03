@@ -340,7 +340,6 @@ contains
     integer :: i,j,iproc,ih
     integer,parameter :: nevent=10
     real(kind=8),dimension(:,:),allocatable :: amp2
-    complex(kind=8),dimension(:,:),allocatable :: amp
     real(kind=8),dimension(:),allocatable :: mass,width
     real(kind=8),dimension(pgl_unique%ndim) :: x
     real(kind=8),external :: ran2
@@ -383,7 +382,6 @@ contains
          pgl_unique%spin,pgl_unique%color_orders,phys_model)
         
     allocate(amp2(nevent,pgl_unique%nproc))
-    allocate(amp(nevent,pgl_unique%amps(1)%n_amps))
     allocate(pgl_unique%passed(1))
 
     pgl_unique%passed=0
@@ -397,20 +395,11 @@ contains
        call pgl_unique%amps(1)%evaluate(next,ps%p,pgl_unique%hel,read_proc_from_file,phys_model)
        iproc=0
        amp2(pgl_unique%passed(1),:)=0d0
-       if (use_real_gluons .and. all(pgl_unique%amps(1)%n_qqbar(1:pgl_unique%amps(1)%nprocs).eq.0)) then
-          do ih=1,pgl_unique%amps(1)%n_amps
-             do while (pgl_unique%amps(1)%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
-             amp2(pgl_unique%passed(1),iproc)=amp2(pgl_unique%passed(1),iproc)+&
-                  pgl_unique%amps(1)%amps_r(ih)*pgl_unique%amps(1)%amps_r(ih)
-          enddo
-       else
-          do ih=1,pgl_unique%amps(1)%n_amps
-             do while (pgl_unique%amps(1)%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
-             amp2(pgl_unique%passed(1),iproc)=amp2(pgl_unique%passed(1),iproc)+&
-                  dble(pgl_unique%amps(1)%amps(ih)*dconjg(pgl_unique%amps(1)%amps(ih)))
-          enddo
-          amp(pgl_unique%passed(1),1:pgl_unique%amps(1)%n_amps)=pgl_unique%amps(1)%amps(1:pgl_unique%amps(1)%n_amps)
-       endif
+       do ih=1,pgl_unique%amps(1)%n_amps
+          do while (pgl_unique%amps(1)%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
+          amp2(pgl_unique%passed(1),iproc)=amp2(pgl_unique%passed(1),iproc)+&
+               dble(pgl_unique%amps(1)%amps(ih)*dconjg(pgl_unique%amps(1)%amps(ih)))
+       enddo
        call find_same_flavour(pgl_unique,nevent,amp2(1,:))
     enddo
     allocate(unique_map(1:pgl_unique%nproc))
@@ -426,7 +415,6 @@ contains
     deallocate(ps%p)
     deallocate(ps%x)
     deallocate(amp2)
-    deallocate(amp)
   end subroutine check_unique_processes
 
   subroutine find_unique(pgl,nevent,amp2,unique_map,unique_map_value)

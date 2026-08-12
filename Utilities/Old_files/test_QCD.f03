@@ -1,4 +1,4 @@
-! gfortran -fbounds-check -o test_QCD math_functions.f03 color_algebra.f95 feynmanrules.f03 amplitude_QCD.f03 amplitude_real.f03 test_QCD.f03 
+! gfortran -fbounds-check -o test_QCD math_functions.f03 color_algebra.f95 feynmanrules.f03 amplitude_QCD.f03 test_QCD.f03
 
 program test_QCD
   use amplitude_mod

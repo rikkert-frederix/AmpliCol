@@ -2,7 +2,6 @@ module amplitude_QCD_mod
   use bitset_mod
   implicit none
   logical,parameter :: use_symmetry=.true.
-  logical,parameter :: use_real_gluons=.false.
   logical,parameter :: use_symm_cm=.true.
   logical,parameter :: use_cm_dict=.true.
   integer(kind=8),parameter :: max_three_line_color_orders=5000_8
@@ -14,7 +13,6 @@ module amplitude_QCD_mod
      integer,dimension(:),allocatable :: vertices,order,spin,ext_type
      logical,dimension(:),allocatable :: vertex_sign
      complex(kind=8),dimension(:),allocatable :: val_c
-     real(kind=8),dimension(:),allocatable :: val_r
      real(kind=8) :: mass,width
      integer,dimension(:),allocatable :: fermi_list
    contains
@@ -26,7 +24,6 @@ module amplitude_QCD_mod
      integer,dimension(2) :: currents
      integer,dimension(:),allocatable :: singlet_mv
      complex(kind=8),dimension(:),allocatable :: val_c
-     real(kind=8),dimension(:),allocatable :: val_r
      real(kind=8),dimension(2) :: coupl
    contains
      final :: finalize_interaction ! custom deallocation of interaction
@@ -43,7 +40,6 @@ module amplitude_QCD_mod
      type(current),dimension(:),allocatable :: current_list
      type(interaction),dimension(:),allocatable :: interaction_list
      complex(kind=8),dimension(:),allocatable :: amps
-     real(kind=8),dimension(:),allocatable :: amps_r
      real(kind=8),dimension(:,:),allocatable :: pp,diff_col_vals
      integer,dimension(:),allocatable :: n_cur_start,n_cur_end,n_vert_start,n_vert_end, &
           pp_bin_to_i,pp_i_to_bin,col_index,n_col_vals,iproc_start,n_sing,n_qqbar
@@ -761,10 +757,6 @@ contains
                      endif
                   endif
                enddo
-               if (use_real_gluons) then
-                  write (*,*) 'ERROR: cannot use real gluons with two quark lines around'
-                  stop 1
-               endif
             endif
          endif
       enddo
@@ -2063,33 +2055,16 @@ contains
     real(kind=8),dimension(0:3,n) :: p
     integer :: ic,iv,isize,ih_in,ifinal,dim
     logical :: read_file
-    if (.not. allocated(this%current_list(1)%val_c) .and. .not.allocated(this%current_list(1)%val_r)) then
+    if (.not. allocated(this%current_list(1)%val_c)) then
        do ic=1,this%n_cur
-          if (use_real_gluons .and. &
-               (pm%is_colour_flow_vector(this%current_list(ic)%type) .or. &
-               pm%is_auxiliary_tensor(this%current_list(ic)%type))) then
-             dim=current_dim(ic)
-             allocate(this%current_list(ic)%val_r(1:dim))
-          else
-             dim=current_dim(ic)
-             allocate(this%current_list(ic)%val_c(1:dim))
-          endif
+          dim=current_dim(ic)
+          allocate(this%current_list(ic)%val_c(1:dim))
        enddo
        do iv=1,this%n_vert
-          if (use_real_gluons .and. &
-               (this%interaction_list(iv)%type.ge.0 .and. this%interaction_list(iv)%type.le.3)) then
-             dim=interaction_dim(iv)
-             allocate(this%interaction_list(iv)%val_r(1:dim))
-          else
-             dim=interaction_dim(iv)
-             allocate(this%interaction_list(iv)%val_c(1:dim))
-          endif
+          dim=interaction_dim(iv)
+          allocate(this%interaction_list(iv)%val_c(1:dim))
        enddo
-       if (use_real_gluons .and. this%n_qqbar(1).eq.0) then
-          if (.not. allocated(this%amps_r)) allocate(this%amps_r(1:this%n_amps))
-       else
-          if (.not. allocated(this%amps)) allocate(this%amps(1:this%n_amps))
-       endif
+       if (.not. allocated(this%amps)) allocate(this%amps(1:this%n_amps))
     endif
     
     call fill_momentum_array()
@@ -2105,13 +2080,8 @@ contains
                 ih_in=this%current_list(ic)%spin(1)
              endif
              if (pm%is_colour_flow_vector(this%current_list(ic)%type) .or. pm%is_photon(this%current_list(ic)%type)) then
-                if (use_real_gluons) then
-                   call ext_massless_vector_real(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
-                        ih_in,ifinal,this%current_list(ic)%val_r(1:4))
-                else
-                   call ext_massless_vector_cmplx(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
-                        ih_in,ifinal,this%current_list(ic)%val_c(1:4))
-                endif
+                call ext_massless_vector_cmplx(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
+                     ih_in,ifinal,this%current_list(ic)%val_c(1:4))
              elseif (pm%is_quark(this%current_list(ic)%type) .or. &
                   pm%is_lepton(this%current_list(ic)%type)) then
                 if (this%current_list(ic)%chirality.ne.0) then
@@ -2147,66 +2117,32 @@ contains
        ! number of external particles combined
        do iv=this%n_vert_start(isize),this%n_vert_end(isize)
           if (this%interaction_list(iv)%type.eq.0) then
-             if (use_real_gluons) then
-                call threeGluon_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:4),&
-                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
-                     this%current_list(this%interaction_list(iv)%currents(2))%val_r(1:4),&
-                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
-                     this%interaction_list(iv)%val_r(1:4))
-             else
-                call threeGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
-                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
-                     this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
-                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
-                     this%interaction_list(iv)%val_c(1:4))
-             endif
+             call threeGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                  this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
+                  this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                  this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
+                  this%interaction_list(iv)%val_c(1:4))
           elseif(this%interaction_list(iv)%type.eq.1) then
-             if (use_real_gluons) then
-                call TwoGluonToAuxTensor_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:4),&
-                     this%current_list(this%interaction_list(iv)%currents(2))%val_r(1:4),&
-                     this%interaction_list(iv)%val_r(1:6))
-             else
-                call TwoGluonToAuxTensor(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
-                     this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
-                     this%interaction_list(iv)%val_c(1:6))
-             endif
+             call TwoGluonToAuxTensor(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                  this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                  this%interaction_list(iv)%val_c(1:6))
 
           elseif(this%interaction_list(iv)%type.eq.2) then
-             if (use_real_gluons) then
-                call AuxTensorGluonToGluon_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:6),&
-                     this%current_list(this%interaction_list(iv)%currents(2))%val_r(1:4),&
-                     this%interaction_list(iv)%val_r(1:4))
-             else
-                call AuxTensorGluonToGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:6),&
-                     this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
-                     this%interaction_list(iv)%val_c(1:4))
-             endif
+             call AuxTensorGluonToGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:6),&
+                  this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                  this%interaction_list(iv)%val_c(1:4))
 
           elseif(this%interaction_list(iv)%type.eq.3) then
-             if (use_real_gluons) then
-                call GluonAuxTensorToGluon_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:4),&
-                                             this%current_list(this%interaction_list(iv)%currents(2))%val_r(1:6),&
-                                             this%interaction_list(iv)%val_r(1:4))
-             else
-                call GluonAuxTensorToGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
-                                        this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:6),&
-                                        this%interaction_list(iv)%val_c(1:4))
-             endif
+             call GluonAuxTensorToGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                                     this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:6),&
+                                     this%interaction_list(iv)%val_c(1:4))
 
           elseif(this%interaction_list(iv)%type.eq.4) then
              if (this%interaction_list(iv)%chirality.ne.0) then
-                if (use_real_gluons) then
-                   write (*,*) 'Weyl fermions with real gluons are not implemented'
-                   stop 1
-                endif
                 call ColourFlowVectorQuarkToQuark_weyl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
                                             this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
                                             this%interaction_list(iv)%val_c(1),&
                                             this%interaction_list(iv)%chirality)
-             elseif (use_real_gluons) then
-                call ColourFlowVectorQuarkToQuark_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:4),&
-                                            this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
-                                            this%interaction_list(iv)%val_c(1:4))
              else
                 call ColourFlowVectorQuarkToQuark(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                        this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
@@ -2215,20 +2151,11 @@ contains
 
           elseif(this%interaction_list(iv)%type.eq.5) then
              if (this%interaction_list(iv)%chirality.ne.0) then
-                if (use_real_gluons) then
-                   write (*,*) 'Weyl fermions with real gluons are not implemented'
-                   stop 1
-                endif
                 call ColourFlowVectorAntiquarkToAntiquark_weyl(&
                      this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
                                               this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
                                               this%interaction_list(iv)%val_c(1),&
                                               this%interaction_list(iv)%chirality)
-             elseif (use_real_gluons) then
-                call ColourFlowVectorAntiquarkToAntiquark_real(&
-                     this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:4),&
-                                              this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
-                                              this%interaction_list(iv)%val_c(1:4))
              else
                  call ColourFlowVectorAntiquarkToAntiquark(&
                       this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
@@ -2237,18 +2164,10 @@ contains
              endif
           elseif(this%interaction_list(iv)%type.eq.6) then
              if (this%interaction_list(iv)%chirality.ne.0) then
-                if (use_real_gluons) then
-                   write (*,*) 'Weyl fermions with real gluons are not implemented'
-                   stop 1
-                endif
                 call QuarkColourFlowVectorToQuark_weyl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
                                             this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
                                             this%interaction_list(iv)%val_c(1),&
                                             this%interaction_list(iv)%chirality)
-             elseif (use_real_gluons) then
-                call QuarkColourFlowVectorToQuark_real(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
-                                            this%current_list(this%interaction_list(iv)%currents(2))%val_r(1:4),&
-                                            this%interaction_list(iv)%val_c(1:4))
              else
                 call QuarkColourFlowVectorToQuark(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                        this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
@@ -2256,20 +2175,11 @@ contains
              endif
           elseif(this%interaction_list(iv)%type.eq.7) then
              if (this%interaction_list(iv)%chirality.ne.0) then
-                if (use_real_gluons) then
-                   write (*,*) 'Weyl fermions with real gluons are not implemented'
-                   stop 1
-                endif
                 call AntiquarkColourFlowVectorToAntiquark_weyl(&
                      this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
                                               this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
                                               this%interaction_list(iv)%val_c(1),&
                                               this%interaction_list(iv)%chirality)
-             elseif (use_real_gluons) then
-                call AntiquarkColourFlowVectorToAntiquark_real(&
-                     this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
-                                              this%current_list(this%interaction_list(iv)%currents(2))%val_r(1:4),&
-                                              this%interaction_list(iv)%val_c(1:4))
              else
                 call AntiquarkColourFlowVectorToAntiquark(&
                      this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
@@ -2602,12 +2512,6 @@ contains
       implicit none
       integer :: iamp,iproc,idau
       if (this%imode.eq.1 .or. this%imode.eq.3) then
-         if (use_real_gluons .and. all(this%n_qqbar(1:this%nprocs).eq.0)) then
-            do iamp=1,this%n_amps
-               this%amps_r(iamp)=sum(this%current_list(this%curr2amp(1,iamp))%val_r(1:4)* &
-                                     this%current_list(this%curr2amp(2,iamp))%val_r(1:4))
-            enddo
-         else
             do iproc=1,this%nprocs
                do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
                   if (.not.this%same_flav(iproc)) then
@@ -2628,19 +2532,7 @@ contains
                   endif
                enddo
             enddo
-         endif
       elseif(this%imode.eq.2) then
-         if (use_real_gluons .and. this%n_qqbar(1).eq.0) then
-            do iamp=1,this%n_amps
-               if (use_symmetry .and. this%n_qqbar(1).eq.0 .and. iamp.gt.this%n_amps/2 .and. mod(n,2).eq.1) then
-                  this%amps_r(iamp)=-sum(this%current_list(this%curr2amp(1,iamp))%val_r(1:4)* &
-                       this%current_list(this%curr2amp(2,iamp))%val_r(1:4))
-               else
-                  this%amps_r(iamp)=sum(this%current_list(this%curr2amp(1,iamp))%val_r(1:4)* &
-                       this%current_list(this%curr2amp(2,iamp))%val_r(1:4))
-               endif
-            enddo
-         else
             do iproc=1,this%nprocs
                do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
                   if (use_symmetry .and. this%n_qqbar(1).eq.0 .and. iamp.gt.this%n_amps/2 .and. mod(n,2).eq.1) then
@@ -2685,7 +2577,6 @@ contains
                   endif
                enddo
             enddo
-         endif
       endif
     end subroutine compute_amps_from_currents
 
@@ -2718,42 +2609,21 @@ contains
     subroutine combine_interactions(dim)
       implicit none
       integer :: dim,iv
-      if (use_real_gluons .and. &
-           (pm%is_colour_flow_vector(this%current_list(ic)%type).or. &
-           pm%is_gluon_aux_tensor(this%current_list(ic)%type))) then
-         this%current_list(ic)%val_r(1:dim)=0d0
-         do iv=1,this%current_list(ic)%n_vert
-            if (this%current_list(ic)%vertex_sign(iv))then
-               this%current_list(ic)%val_r(1:dim)=&
-                    this%current_list(ic)%val_r(1:dim)-this%interaction_list(this%current_list(ic)%vertices(iv))%val_r(1:dim)
-            else
-               this%current_list(ic)%val_r(1:dim)=&
-                    this%current_list(ic)%val_r(1:dim)+this%interaction_list(this%current_list(ic)%vertices(iv))%val_r(1:dim)
-            endif
-         enddo
-
-      else
-         this%current_list(ic)%val_c(1:dim)=(0d0,0d0)
-         do iv=1,this%current_list(ic)%n_vert
-            if (this%current_list(ic)%vertex_sign(iv))then
-               this%current_list(ic)%val_c(1:dim)=&
-                    this%current_list(ic)%val_c(1:dim)-this%interaction_list(this%current_list(ic)%vertices(iv))%val_c(1:dim)
-            else
-               this%current_list(ic)%val_c(1:dim)=&
-                    this%current_list(ic)%val_c(1:dim)+this%interaction_list(this%current_list(ic)%vertices(iv))%val_c(1:dim)
-            endif
-         enddo
-      endif
+      this%current_list(ic)%val_c(1:dim)=(0d0,0d0)
+      do iv=1,this%current_list(ic)%n_vert
+         if (this%current_list(ic)%vertex_sign(iv))then
+            this%current_list(ic)%val_c(1:dim)=&
+                 this%current_list(ic)%val_c(1:dim)-this%interaction_list(this%current_list(ic)%vertices(iv))%val_c(1:dim)
+         else
+            this%current_list(ic)%val_c(1:dim)=&
+                 this%current_list(ic)%val_c(1:dim)+this%interaction_list(this%current_list(ic)%vertices(iv))%val_c(1:dim)
+         endif
+      enddo
     end subroutine combine_interactions
     subroutine include_massless_vector_propagator()
       implicit none
-      if (use_real_gluons) then
-         call MasslessVectorPropagator_real(this%current_list(ic)%val_r, &
-              this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)))
-      else
-         call MasslessVectorPropagator(this%current_list(ic)%val_c, &
-              this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)))
-      endif
+      call MasslessVectorPropagator(this%current_list(ic)%val_c, &
+           this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)))
     end subroutine include_massless_vector_propagator
 
     subroutine include_massive_vector_propagator()
@@ -3891,11 +3761,9 @@ contains
     deallocate(this%include_amp)
     do ic=1,this%n_cur
        if (allocated(this%current_list(ic)%val_c)) deallocate(this%current_list(ic)%val_c)
-       if (allocated(this%current_list(ic)%val_r)) deallocate(this%current_list(ic)%val_r)
     enddo
     do iv=1,this%n_vert
        if (allocated(this%interaction_list(iv)%val_c)) deallocate(this%interaction_list(iv)%val_c)
-       if (allocated(this%interaction_list(iv)%val_r)) deallocate(this%interaction_list(iv)%val_r)
     enddo
     write (99,*) 'Total number of currents, vertices and amplitudes after optimisation',this%n_cur,this%n_vert,this%n_amps
   end subroutine optimise_evaluation
@@ -4089,11 +3957,6 @@ contains
           cycle
        endif
 
-       if (use_real_gluons) then
-          write (*,*) 'create library not implemented for use_real_gluons'
-          stop 1
-       endif
-       
        ! interactions
        ! loop over the vertices required to create all the currents with isize
        ! number of external particles combined
@@ -4883,14 +4746,11 @@ contains
     ! deallocate a bunch
     do ic=1,this%n_cur
        if (allocated(this%current_list(ic)%val_c)) deallocate(this%current_list(ic)%val_c)
-       if (allocated(this%current_list(ic)%val_r)) deallocate(this%current_list(ic)%val_r)
     enddo
     do iv=1,this%n_vert
        if (allocated(this%interaction_list(iv)%val_c)) deallocate(this%interaction_list(iv)%val_c)
-       if (allocated(this%interaction_list(iv)%val_r)) deallocate(this%interaction_list(iv)%val_r)
     enddo
     if (allocated(this%amps)) deallocate(this%amps)
-    if (allocated(this%amps_r)) deallocate(this%amps_r)
     
     allocate(include_current(this%n_cur))
     include_current(this%n_cur_start(n  ):this%n_cur_end(n  ))=.false.
@@ -5185,12 +5045,6 @@ contains
        allocate(lhs%val_c(1:val_size))
        lhs%val_c(1:val_size)=rhs%val_c(1:val_size)
     endif
-    if (allocated(lhs%val_r)) deallocate(lhs%val_r)
-    if (allocated(rhs%val_r)) then
-       val_size=size(rhs%val_r)
-       allocate(lhs%val_r(1:val_size))
-       lhs%val_r(1:val_size)=rhs%val_r(1:val_size)
-    endif
   end subroutine assign_interaction
   
   subroutine assign_current(lhs,rhs)
@@ -5242,12 +5096,6 @@ contains
        allocate(lhs%val_c(1:val_size))
        lhs%val_c(1:val_size)=rhs%val_c(1:val_size)
     endif
-    if (allocated(lhs%val_r)) deallocate(lhs%val_r)
-    if (allocated(rhs%val_r)) then
-       val_size=size(rhs%val_r)
-       allocate(lhs%val_r(1:val_size))
-       lhs%val_r(1:val_size)=rhs%val_r(1:val_size)
-    endif
     if (allocated(lhs%fermi_list)) deallocate(lhs%fermi_list)
     if (allocated(rhs%fermi_list)) then
        lsize=size(rhs%fermi_list)
@@ -5271,7 +5119,6 @@ contains
        deallocate(amp%interaction_list)
     endif
     if (allocated(amp%amps)) deallocate(amp%amps)
-    if (allocated(amp%amps_r)) deallocate(amp%amps_r)
     if (allocated(amp%pp)) deallocate(amp%pp)
     if (allocated(amp%diff_col_vals)) deallocate(amp%diff_col_vals)
     if (allocated(amp%n_cur_start)) deallocate(amp%n_cur_start)
@@ -5302,7 +5149,6 @@ contains
     type(interaction),intent(inout) :: vert
     if (allocated(vert%singlet_mv)) deallocate(vert%singlet_mv)
     if (allocated(vert%val_c)) deallocate(vert%val_c)
-    if (allocated(vert%val_r)) deallocate(vert%val_r)
   end subroutine finalize_interaction
   subroutine finalize_current(cur)
     type(current),intent(inout) :: cur
@@ -5313,7 +5159,6 @@ contains
     if (allocated(cur%ext_type)) deallocate(cur%ext_type)
     if (allocated(cur%vertex_sign)) deallocate(cur%vertex_sign)
     if (allocated(cur%val_c)) deallocate(cur%val_c)
-    if (allocated(cur%val_r)) deallocate(cur%val_r)
     if (allocated(cur%fermi_list)) deallocate(cur%fermi_list)
   end subroutine finalize_current
 
