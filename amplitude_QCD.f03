@@ -60,10 +60,11 @@ module amplitude_QCD_mod
      integer,dimension(:,:,:),allocatable :: spins,row_index
      logical,dimension(:),allocatable :: include_amp,same_flav
      logical,dimension(:,:),allocatable :: sector_present
-     logical :: lib_created=.false.
+     logical,dimension(:,:),allocatable :: sector_retained
+     logical :: lib_created=.false.,sectors_pruned_empty=.false.,sectors_pruned=.false.
    contains
      procedure,public :: init,evaluate,init_col,filter_helicity,write_init_amps_to_file,read_init_amps_from_file &
-          ,create_library,optimise_evaluation,sector_index
+          ,create_library,optimise_evaluation,sector_index,prune_coupling_sectors
      procedure,private :: filter_dead_trees
      final :: finalize_amplitude_QCD ! custom deallocation of amplitude_QCD
   end type amplitude_QCD
@@ -84,6 +85,9 @@ contains
     integer(kind=8),dimension(:),allocatable :: current_dict
     integer,dimension(:,:),allocatable :: key_to_current
 
+    this%sectors_pruned_empty=.false.
+    this%sectors_pruned=.false.
+    if (allocated(this%sector_retained)) deallocate(this%sector_retained)
     if (imode.eq.1) then
        write (99,*) 'Initialising amplitude for:'
        write (99,*) '   - all polarisation/helicity configurations'
@@ -3289,6 +3293,7 @@ contains
     implicit none
     class(amplitude_QCD) :: this
     integer :: n,iunit,ic,iv,isize,iamp,iproc,nterms,itmp
+    logical :: include_this_amp
     write (iunit) this%n_cur,this%n_vert,this%imode,this%nColOrd,this%max_pp,this%n_amps,this%nprocs,this%n_sectors
     write (iunit) this%sector_powers(:,1:this%n_sectors)
     write (iunit) this%n_cur_start(1:n)
@@ -3335,7 +3340,9 @@ contains
     ! amp specific information
     do iproc=1,this%nprocs
        do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
-          write (iunit) this%include_amp(iamp),this%same_flavour_sum(iamp,1:2),this%same_flavour_sum_operation(iamp,1:2)
+          include_this_amp=.true.
+          if (allocated(this%include_amp)) include_this_amp=this%include_amp(iamp)
+          write (iunit) include_this_amp,this%same_flavour_sum(iamp,1:2),this%same_flavour_sum_operation(iamp,1:2)
           if (allocated(this%spins)) then
              write (iunit) this%spins(1:n,1,iamp)
           else
@@ -3360,12 +3367,25 @@ contains
        write (iunit) this%sector_term_curr2amp(:,1:nterms)
        write (iunit) this%sector_term_sign(1:nterms)
     endif
+    ! Pruned amplitudes can be cached after the selector has been resolved.
+    ! Persist the gate as well as the compact sparse roots so a later
+    ! same-flavour reconstruction cannot resurrect a removed sector.
+    write (iunit) this%sectors_pruned,this%sectors_pruned_empty
+    if (this%sectors_pruned) then
+       if (.not.allocated(this%sector_retained)) then
+          write (*,*) 'Missing retained-sector gate while writing amplitude cache'
+          stop 1
+       endif
+       write (iunit) this%sector_retained(1:this%n_amps,1:this%n_sectors)
+    endif
   end subroutine write_init_amps_to_file
 
   subroutine read_init_amps_from_file(this,n,iunit)
     implicit none
     class(amplitude_QCD) :: this
     integer :: n,iunit,ic,iv,isize,iamp,iproc,itmp,nterms
+    this%sectors_pruned_empty=.false.
+    this%sectors_pruned=.false.
     call deallocate_all()
     read (iunit) this%n_cur,this%n_vert,this%imode,this%nColOrd,this%max_pp,this%n_amps,this%nprocs,this%n_sectors
     allocate(this%sector_powers(2,this%n_sectors))
@@ -3466,6 +3486,16 @@ contains
        read (iunit) this%sector_term_curr2amp
        read (iunit) this%sector_term_sign
     endif
+    read (iunit) this%sectors_pruned,this%sectors_pruned_empty
+    if (this%sectors_pruned) then
+       allocate(this%sector_retained(this%n_amps,this%n_sectors))
+       read (iunit) this%sector_retained
+    endif
+    if (this%sectors_pruned_empty .neqv. &
+         (nterms.eq.0 .and. .not.any(this%sector_present))) then
+       write (*,*) 'Inconsistent empty coupling-sector state in amplitude cache'
+       stop 1
+    endif
   contains
     subroutine deallocate_all()
       implicit none
@@ -3505,6 +3535,7 @@ contains
       if (allocated(this%sector_three_line_partner_curr2amp)) &
            deallocate(this%sector_three_line_partner_curr2amp)
       if (allocated(this%sector_present)) deallocate(this%sector_present)
+      if (allocated(this%sector_retained)) deallocate(this%sector_retained)
       if (allocated(this%sector_sign)) deallocate(this%sector_sign)
       if (allocated(this%sector_term_start)) deallocate(this%sector_term_start)
       if (allocated(this%sector_term_curr2amp)) deallocate(this%sector_term_curr2amp)
@@ -3523,6 +3554,20 @@ contains
     real(kind=8),dimension(0:3,n) :: p
     integer :: ic,iv,isize,ih_in,ifinal,dim
     logical :: read_file
+    if (this%sectors_pruned_empty) then
+       if (allocated(this%amps)) deallocate(this%amps)
+       if (allocated(this%amps_by_order)) deallocate(this%amps_by_order)
+       if (allocated(this%amps_r)) deallocate(this%amps_r)
+       allocate(this%amps(this%n_amps))
+       allocate(this%amps_by_order(this%n_amps,this%n_sectors))
+       this%amps=(0d0,0d0)
+       this%amps_by_order=(0d0,0d0)
+       if (use_real_gluons .and. all(this%n_qqbar(1:this%nprocs).eq.0)) then
+          allocate(this%amps_r(this%n_amps))
+          this%amps_r=0d0
+       endif
+       return
+    endif
     if (.not. allocated(this%current_list(1)%val_c) .and. .not.allocated(this%current_list(1)%val_r)) then
        do ic=1,this%n_cur
           if (use_real_gluons .and. &
@@ -4101,6 +4146,12 @@ contains
          if (.not.this%same_flav(iproc)) cycle
          do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
             do isector=1,this%n_sectors
+               if (this%sectors_pruned) then
+                  if (.not.this%sector_retained(iamp,isector)) then
+                     this%sector_present(iamp,isector)=.false.
+                     cycle
+                  endif
+               endif
                this%sector_present(iamp,isector)=.false.
                do idau=1,2
                   if (this%same_flavour_sum(iamp,idau).gt.0) then
@@ -5259,6 +5310,10 @@ contains
     type(current),dimension(:),allocatable :: current_list_local
     type(interaction),dimension(:),allocatable :: interaction_list_local
     integer,dimension(:),allocatable :: interactions_map
+    if (this%sectors_pruned_empty) then
+       write (99,*) 'Skipping amplitude optimisation: no selected coupling sector is present'
+       return
+    endif
     allocate(include_cur(1:this%n_cur))
     allocate(include_vert(1:this%n_vert))
     include_cur=.true.
@@ -5434,14 +5489,22 @@ contains
     write(iunit,'(4x,a)') 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//') :: val_c'
     write(tmp,*) this%n_vert
     write(iunit,'(4x,a)') 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//') :: int_c'
-    write(iunit,'(4x,a)') 'call fill_momentum_array(p,pp)'
-    write(iunit,'(4x,a)') 'call compute_external_currents(pp,val_c)'
-    do isize=2,n-1
-       write(tmp,*) isize
-       write(iunit,'(4x,a)') 'call compute_vertices'//trim(adjustl(tmp))//'(pp,val_c,int_c)'
-       write(iunit,'(4x,a)') 'call compute_currents'//trim(adjustl(tmp))//'(pp,val_c,int_c)'
-    enddo
-    write(iunit,'(4x,a)') 'call compute_amps_by_order(amps_by_order,val_c)'
+    if (this%sectors_pruned_empty) then
+       ! A locally valid subprocess/order can contain none of the globally
+       ! selected sectors.  Its generated routine must be an exact-zero fast
+       ! path too: do not build even external currents for it.
+       write(iunit,'(4x,a)') 'amps_by_order=(0d0,0d0)'
+       write(iunit,'(4x,a)') 'return'
+    else
+       write(iunit,'(4x,a)') 'call fill_momentum_array(p,pp)'
+       write(iunit,'(4x,a)') 'call compute_external_currents(pp,val_c)'
+       do isize=2,n-1
+          write(tmp,*) isize
+          write(iunit,'(4x,a)') 'call compute_vertices'//trim(adjustl(tmp))//'(pp,val_c,int_c)'
+          write(iunit,'(4x,a)') 'call compute_currents'//trim(adjustl(tmp))//'(pp,val_c,int_c)'
+       enddo
+       write(iunit,'(4x,a)') 'call compute_amps_by_order(amps_by_order,val_c)'
+    endif
     write(tmp,*) igroup
     write(line,*) iint
     write(iunit,'(2x,a)') 'end subroutine evaluate_amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_by_order'
@@ -6283,6 +6346,7 @@ contains
     write(tmp,*) this%n_cur
     write(iunit,'(4x,a)') 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(in) :: val_c'
     write(iunit,'(4x,a)') 'amps_by_order=(0d0,0d0)'
+    if (this%sectors_pruned_empty) write(iunit,'(4x,a)') 'return'
     do iproc=1,this%nprocs
        do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
           if (this%same_flav(iproc)) cycle
@@ -6327,6 +6391,9 @@ contains
        if (.not.this%same_flav(iproc)) cycle
        do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
           do isector=1,this%n_sectors
+             if (this%sectors_pruned) then
+                if (.not.this%sector_retained(iamp,isector)) cycle
+             endif
              write(tmp,*) iamp
              write(idx,*) isector
              line='amps_by_order('//trim(adjustl(tmp))//','//trim(adjustl(idx))//')='
@@ -6372,66 +6439,12 @@ contains
     write(iunit,'(4x,a)') 'complex(kind=8),dimension('//trim(adjustl(tmp))//'),intent(out) :: amps'
     write(tmp,*) this%n_cur
     write(iunit,'(4x,a)') 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(in) :: val_c'
-
-    ! first the 'non-same-flavour' ones
-    do iproc=1,this%nprocs
-       do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
-          if (.not.this%same_flav(iproc)) then
-             write(tmp,*) iamp
-             line='amps('//trim(adjustl(tmp))//')=ContractFermionCurrents('
-             write(tmp,*) this%curr2amp(1,iamp)
-             line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'),'
-             write(tmp,*) this%current_list(this%curr2amp(1,iamp))%chirality
-             line=trim(adjustl(line))//trim(adjustl(tmp))//',val_c(1,'
-             write(tmp,*) this%curr2amp(2,iamp)
-             line=trim(adjustl(line))//trim(adjustl(tmp))//'),'
-             write(tmp,*) this%current_list(this%curr2amp(2,iamp))%chirality
-             line=trim(adjustl(line))//trim(adjustl(tmp))//')'
-             write(iunit,'(4x,a)') trim(adjustl(line))
-          endif
-       enddo
-    enddo
-    ! now the same-flavour ones. They are the "sum" of two non-same-flavour ones.
-    do iproc=1,this%nprocs
-       do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
-          if (this%same_flav(iproc)) then
-             ! same-flavour amps are build from two different-flavour amps
-             write(tmp,*) iamp
-             line='amps('//trim(adjustl(tmp))//')='
-             do idau=1,2
-                if (this%same_flavour_sum(iamp,idau).gt.0) then
-                   write(tmp,*) this%same_flavour_sum(iamp,idau)
-                   if (this%same_flavour_sum_operation(iamp,idau) .eq. 0) then
-                      line=trim(adjustl(line))//'+amps('//trim(adjustl(tmp))//')'
-                   elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 1) then
-                      line=trim(adjustl(line))//'-conjg(amps('//trim(adjustl(tmp))//'))'
-                   elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 2) then
-                      line=trim(adjustl(line))//'+conjg(amps('//trim(adjustl(tmp))//'))'
-                   elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 3) then
-                      line=trim(adjustl(line))//'-amps('//trim(adjustl(tmp))//')'
-                   elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 4) then
-                      line=trim(adjustl(line))//'+cmplx(aimag(amps('//trim(adjustl(tmp))// &
-                           ')),dble(amps('//trim(adjustl(tmp))//')))'
-                   elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 5) then
-                      line=trim(adjustl(line))//'+cmplx(-aimag(amps('//trim(adjustl(tmp))// &
-                           ')),dble(amps('//trim(adjustl(tmp))//')))'
-                   elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 6) then
-                      line=trim(adjustl(line))//'+cmplx(aimag(amps('//trim(adjustl(tmp))// &
-                           ')),-dble(amps('//trim(adjustl(tmp))//')))'
-                   elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 7) then
-                      line=trim(adjustl(line))//'+cmplx(-aimag(amps('//trim(adjustl(tmp))// &
-                           ')),-dble(amps('//trim(adjustl(tmp))//')))'
-                   else
-                      write (*,*) 'ERROR: unknown operation in creating library', &
-                           this%same_flavour_sum_operation(iamp,idau)
-                      stop 1
-                   endif
-                endif
-             enddo
-             write(iunit,'(4x,a)') trim(adjustl(line))
-          endif
-       enddo
-    enddo
+    write(tmp,*) this%n_amps
+    write(line,*) this%n_sectors
+    write(iunit,'(4x,a)') 'complex(kind=8),dimension('//trim(adjustl(tmp))//','//&
+         trim(adjustl(line))//') :: amps_by_order'
+    write(iunit,'(4x,a)') 'call compute_amps_by_order(amps_by_order,val_c)'
+    write(iunit,'(4x,a)') 'amps=sum(amps_by_order,dim=2)'
     write(iunit,'(2x,a)') 'end subroutine compute_amps'
     write(tmp,*) igroup
     write(line,*) iint
@@ -6465,6 +6478,7 @@ contains
     if (allocated(this%amps_r)) deallocate(this%amps_r)
     
     allocate(include_current(this%n_cur))
+    include_current=.false.
     include_current(this%n_cur_start(n  ):this%n_cur_end(n  ))=.false.
     include_current(this%n_cur_start(n-1):this%n_cur_end(n-1))=.false.
 
@@ -6543,6 +6557,324 @@ contains
 
   end subroutine filter_helicity
 
+  subroutine prune_coupling_sectors(this,allowed_sector_pairs)
+    ! Remove amplitude-level coupling sectors which cannot contribute to an
+    ! already-resolved squared-order selection.  The selector is deliberately
+    ! passed as a sector-pair mask so this core module does not depend on the
+    ! input-language/coupling_orders module.
+    !
+    ! For fixed-colour imode=1 a sector is retained separately for every
+    ! physical helicity amplitude iff it has a partner in that same slot.  For
+    ! full-colour imode=2, the colour Gram matrix can couple different flow
+    ! slots, so use the conservative global endpoint union: every present
+    ! (flow,sector) is retained if its sector has an allowed partner in any
+    ! other present flow.  The mask need not be symmetric; either orientation
+    ! is accepted.  Interference-only endpoints and shared currents therefore
+    ! remain live.  The public sector and physical-amplitude axes remain
+    ! stable; pruned amp-sector entries have sector_present=.false. and empty
+    ! sparse-terminal ranges.
+    implicit none
+    class(amplitude_qcd),intent(inout) :: this
+    logical,dimension(:,:),intent(in) :: allowed_sector_pairs
+    logical,dimension(:,:),allocatable :: retain_sector,effective_present
+    logical,dimension(:),allocatable :: include_current,global_present
+    integer,dimension(:,:),allocatable :: new_term_start,new_term_curr2amp
+    integer,dimension(:),allocatable :: new_term_sign
+    integer :: n,old_nterms,new_nterms,iamp,isector,jsector,iterm,new_term,&
+         iproc,idau,daughter
+    logical :: changed,had_include_amp
+
+    this%sectors_pruned_empty=.false.
+
+    if (size(allowed_sector_pairs,1).ne.this%n_sectors .or. &
+         size(allowed_sector_pairs,2).ne.this%n_sectors) then
+       write (*,*) 'Coupling-sector pair mask has incompatible shape',&
+            shape(allowed_sector_pairs),this%n_sectors
+       stop 1
+    endif
+    if (this%imode.ne.1 .and. this%imode.ne.2) then
+       write (*,*) 'Coupling-sector pruning only supports imode=1 or imode=2 amplitudes',&
+            this%imode
+       stop 1
+    endif
+    if (this%imode.eq.2 .and. .not.allocated(this%col_index)) then
+       write (*,*) 'Full-colour coupling-sector pruning must be applied after init_col'
+       stop 1
+    endif
+    if (this%sectors_pruned) then
+       write (*,*) 'Coupling-sector pruning may only be applied once to an amplitude'
+       stop 1
+    endif
+    if (.not.allocated(this%sector_present) .or. &
+         .not.allocated(this%sector_term_start) .or. &
+         .not.allocated(this%sector_term_curr2amp) .or. &
+         .not.allocated(this%sector_term_sign)) then
+       write (*,*) 'Coupling-sector pruning requires initialized sparse sector metadata'
+       stop 1
+    endif
+    if (this%nprocs.lt.1 .or. size(this%processes,1).lt.2) then
+       write (*,*) 'Coupling-sector pruning requires an initialized amplitude'
+       stop 1
+    endif
+    n=size(this%processes,1)
+
+    allocate(retain_sector(this%n_amps,this%n_sectors))
+    allocate(effective_present(this%n_amps,this%n_sectors))
+    effective_present=this%sector_present
+    ! Same-flavour amplitudes are derived linear combinations and have no
+    ! terminal roots of their own.  Resolve their effective sector support
+    ! from the daughter graph before applying the pair selector.
+    do
+       changed=.false.
+       do iproc=1,this%nprocs
+          if (.not.this%same_flav(iproc)) cycle
+          do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
+             do idau=1,2
+                daughter=this%same_flavour_sum(iamp,idau)
+                if (daughter.le.0 .or. daughter.gt.this%n_amps) cycle
+                do isector=1,this%n_sectors
+                   if (effective_present(iamp,isector) .or. &
+                        .not.effective_present(daughter,isector)) cycle
+                   effective_present(iamp,isector)=.true.
+                   changed=.true.
+                enddo
+             enddo
+          enddo
+       enddo
+       if (.not.changed) exit
+    enddo
+    retain_sector=.false.
+    if (this%imode.eq.1) then
+       do iamp=1,this%n_amps
+          do isector=1,this%n_sectors
+             if (.not.effective_present(iamp,isector)) cycle
+             do jsector=1,this%n_sectors
+                if (.not.effective_present(iamp,jsector)) cycle
+                if (allowed_sector_pairs(isector,jsector) .or. &
+                     allowed_sector_pairs(jsector,isector)) then
+                   retain_sector(iamp,isector)=.true.
+                   exit
+                endif
+             enddo
+          enddo
+       enddo
+    else
+       allocate(global_present(this%n_sectors))
+       do isector=1,this%n_sectors
+          global_present(isector)=any(effective_present(:,isector))
+       enddo
+       do iamp=1,this%n_amps
+          do isector=1,this%n_sectors
+             if (.not.effective_present(iamp,isector)) cycle
+             do jsector=1,this%n_sectors
+                if (.not.global_present(jsector)) cycle
+                if (allowed_sector_pairs(isector,jsector) .or. &
+                     allowed_sector_pairs(jsector,isector)) then
+                   retain_sector(iamp,isector)=.true.
+                   exit
+                endif
+             enddo
+          enddo
+       enddo
+       deallocate(global_present)
+    endif
+    ! A retained sector of a derived amplitude requires the same sector from
+    ! each daughter that contributes it.  Close that dependency graph before
+    ! compacting terminal roots so same-flavour interference remains exact.
+    do
+       changed=.false.
+       do iproc=1,this%nprocs
+          if (.not.this%same_flav(iproc)) cycle
+          do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
+             do isector=1,this%n_sectors
+                if (.not.retain_sector(iamp,isector)) cycle
+                do idau=1,2
+                   daughter=this%same_flavour_sum(iamp,idau)
+                   if (daughter.le.0 .or. daughter.gt.this%n_amps) cycle
+                   if (.not.effective_present(daughter,isector)) cycle
+                   if (.not.retain_sector(daughter,isector)) then
+                      retain_sector(daughter,isector)=.true.
+                      changed=.true.
+                   endif
+                enddo
+             enddo
+          enddo
+       enddo
+       if (.not.changed) exit
+    enddo
+
+    old_nterms=size(this%sector_term_sign)
+    new_nterms=0
+    do isector=1,this%n_sectors
+       do iamp=1,this%n_amps
+          if (.not.retain_sector(iamp,isector)) cycle
+          new_nterms=new_nterms+this%sector_term_start(iamp,isector)-&
+               this%sector_term_start(iamp-1,isector)
+       enddo
+    enddo
+    allocate(new_term_start(0:this%n_amps,this%n_sectors))
+    allocate(new_term_curr2amp(2,new_nterms))
+    allocate(new_term_sign(new_nterms))
+    new_term=0
+    do isector=1,this%n_sectors
+       new_term_start(0,isector)=new_term
+       do iamp=1,this%n_amps
+          if (retain_sector(iamp,isector)) then
+             do iterm=this%sector_term_start(iamp-1,isector)+1,&
+                  this%sector_term_start(iamp,isector)
+                new_term=new_term+1
+                new_term_curr2amp(:,new_term)=this%sector_term_curr2amp(:,iterm)
+                new_term_sign(new_term)=this%sector_term_sign(iterm)
+             enddo
+          endif
+          new_term_start(iamp,isector)=new_term
+       enddo
+    enddo
+    if (new_term.ne.new_nterms) then
+       write (*,*) 'Internal error compacting coupling-sector terminal terms',&
+            new_term,new_nterms,old_nterms
+       stop 1
+    endif
+    call move_alloc(new_term_start,this%sector_term_start)
+    call move_alloc(new_term_curr2amp,this%sector_term_curr2amp)
+    call move_alloc(new_term_sign,this%sector_term_sign)
+
+    this%sector_present=retain_sector
+    if (allocated(this%sector_retained)) deallocate(this%sector_retained)
+    allocate(this%sector_retained(this%n_amps,this%n_sectors))
+    this%sector_retained=retain_sector
+    this%sectors_pruned=.true.
+    do iamp=1,this%n_amps
+       do isector=1,this%n_sectors
+          if (retain_sector(iamp,isector)) cycle
+          this%sector_curr2amp(:,iamp,isector)=0
+          this%sector_sign(iamp,isector)=1
+          if (allocated(this%sector_three_line_partner_curr2amp)) &
+               this%sector_three_line_partner_curr2amp(:,iamp,isector)=0
+       enddo
+    enddo
+    ! The legacy coherent root is only a compatibility representative.  Point
+    ! it at the first retained sparse term, or clear it for a locally empty
+    ! physical amplitude.  This does not alter n_amps or any public indexing.
+    this%curr2amp=0
+    do iamp=1,this%n_amps
+       do isector=1,this%n_sectors
+          if (.not.retain_sector(iamp,isector)) cycle
+          if (this%sector_term_start(iamp,isector).eq.&
+               this%sector_term_start(iamp-1,isector)) cycle
+          iterm=this%sector_term_start(iamp-1,isector)+1
+          this%sector_curr2amp(:,iamp,isector)=&
+               this%sector_term_curr2amp(:,iterm)
+          this%sector_sign(iamp,isector)=this%sector_term_sign(iterm)
+          if (iamp.le.size(this%curr2amp,2)) then
+             if (all(this%curr2amp(:,iamp).eq.0)) &
+                  this%curr2amp(:,iamp)=this%sector_term_curr2amp(:,iterm)
+          endif
+       enddo
+    enddo
+
+    ! filter_dead_trees normally keeps every terminal current.  Supplying this
+    ! explicit mask makes the recursion start only at retained sparse roots,
+    ! while shared lower currents/interactions are discovered and preserved by
+    ! its backwards traversal.
+    allocate(include_current(this%n_cur))
+    include_current=.false.
+    do iterm=1,size(this%sector_term_sign)
+       include_current(this%sector_term_curr2amp(1,iterm))=.true.
+       include_current(this%sector_term_curr2amp(2,iterm))=.true.
+    enddo
+    had_include_amp=allocated(this%include_amp)
+    if (had_include_amp) then
+       this%include_amp=.true.
+    else
+       allocate(this%include_amp(this%n_amps))
+       this%include_amp=.true.
+    endif
+
+    ! Evaluation work arrays refer to the old current/interaction arrays and
+    ! dimensions.  Recreate them lazily on the next evaluate call.
+    do iterm=1,this%n_cur
+       if (allocated(this%current_list(iterm)%val_c)) &
+            deallocate(this%current_list(iterm)%val_c)
+       if (allocated(this%current_list(iterm)%val_r)) &
+            deallocate(this%current_list(iterm)%val_r)
+    enddo
+    do iterm=1,this%n_vert
+       if (allocated(this%interaction_list(iterm)%val_c)) &
+            deallocate(this%interaction_list(iterm)%val_c)
+       if (allocated(this%interaction_list(iterm)%val_r)) &
+            deallocate(this%interaction_list(iterm)%val_r)
+    enddo
+    if (allocated(this%amps)) deallocate(this%amps)
+    if (allocated(this%amps_by_order)) deallocate(this%amps_by_order)
+    if (allocated(this%amps_r)) deallocate(this%amps_r)
+
+    if (new_nterms.eq.0) then
+       call retain_external_currents_only()
+       this%sectors_pruned_empty=.true.
+    else
+       call this%filter_dead_trees(n,include_current)
+    endif
+    ! Unlike helicity filtering, squared-order pruning never owns or compacts
+    ! the physical amplitude axis.  Keep include_amp only if it already
+    ! existed on entry; otherwise restore the ordinary post-init state.
+    if (.not.had_include_amp .and. allocated(this%include_amp)) &
+         deallocate(this%include_amp)
+    deallocate(include_current,retain_sector,effective_present)
+  contains
+    subroutine retain_external_currents_only()
+      implicit none
+      type(current),dimension(:),allocatable :: old_currents
+      integer :: old_ncur,old_nvert,ic,iv,new_cur
+
+      old_ncur=this%n_cur
+      old_nvert=this%n_vert
+      allocate(old_currents(old_ncur))
+      do ic=1,old_ncur
+         old_currents(ic)=this%current_list(ic)
+      enddo
+      new_cur=0
+      do ic=this%n_cur_start(1),this%n_cur_end(1)
+         new_cur=new_cur+1
+         if (new_cur.ne.ic) this%current_list(new_cur)=old_currents(ic)
+         this%current_list(new_cur)%n_vert=0
+         if (allocated(this%current_list(new_cur)%vertices)) &
+              deallocate(this%current_list(new_cur)%vertices)
+         if (allocated(this%current_list(new_cur)%vertex_sign)) &
+              deallocate(this%current_list(new_cur)%vertex_sign)
+      enddo
+      do ic=1,old_ncur
+         call finalize_current(old_currents(ic))
+      enddo
+      deallocate(old_currents)
+      do ic=new_cur+1,old_ncur
+         call finalize_current(this%current_list(ic))
+      enddo
+      do iv=1,old_nvert
+         call finalize_interaction(this%interaction_list(iv))
+      enddo
+      this%n_cur=new_cur
+      this%n_vert=0
+      this%n_cur_start(1)=1
+      this%n_cur_end(1)=new_cur
+      do ic=2,n
+         this%n_cur_start(ic)=new_cur+1
+         this%n_cur_end(ic)=new_cur
+      enddo
+      do ic=2,n-1
+         this%n_vert_start(ic)=1
+         this%n_vert_end(ic)=0
+      enddo
+      this%curr2amp=0
+      this%sector_curr2amp=0
+      this%sector_sign=1
+      if (allocated(this%three_line_partner_curr2amp)) &
+           this%three_line_partner_curr2amp=0
+      if (allocated(this%sector_three_line_partner_curr2amp)) &
+           this%sector_three_line_partner_curr2amp=0
+    end subroutine retain_external_currents_only
+  end subroutine prune_coupling_sectors
+
   
   subroutine filter_dead_trees(this,n,include_current)
     ! some currents can be removed, since the "tree" starting from some of
@@ -6564,7 +6896,9 @@ contains
     integer,dimension(:),allocatable :: old_sector_term_sign
     logical,dimension(*),optional :: include_current
     integer :: to_skip,isize,nc,iv,n,iamp,iproc,i,isector,iterm,&
-         old_term,nterms_new,new_amp
+         old_term,nterms_new,new_amp,old_cur_start,old_cur_end,&
+         old_vert_start,old_vert_end
+    logical :: found_range
     allocate(is_needed_cur(this%n_cur))
     allocate(is_needed_ver(this%n_vert))
     allocate(where_to_cur(this%n_cur))
@@ -6580,8 +6914,7 @@ contains
        is_needed_cur(this%n_cur_start(n-1):this%n_cur_end(n-1))=.true.
        is_needed_cur(this%n_cur_start(n  ):this%n_cur_end(n  ))=.true.
     else
-       is_needed_cur(this%n_cur_start(n-1):this%n_cur_end(n-1))=include_current(this%n_cur_start(n-1):this%n_cur_end(n-1))
-       is_needed_cur(this%n_cur_start(n  ):this%n_cur_end(n  ))=include_current(this%n_cur_start(n  ):this%n_cur_end(n  ))
+       is_needed_cur(:)=include_current(1:this%n_cur)
     endif
     ! Since currents are created from previous ones, we should go backwards
     ! throught the list. If we encounter a 'is_needed_cur=.true.', it means
@@ -6654,13 +6987,19 @@ contains
     ! do the actual shifting of the amplitudes in the list
     do iamp=1,this%n_amps
        if (.not.this%include_amp(iamp)) cycle
-       do i=1,2
-          if (this%curr2amp(i,iamp).ne.0) then
-             this%curr2amp(i,where_to_amp(iamp))=where_to_cur(this%curr2amp(i,iamp))
-          endif
-       enddo
+       if (iamp.le.size(this%curr2amp,2) .and. &
+            where_to_amp(iamp).le.size(this%curr2amp,2)) then
+          do i=1,2
+             if (this%curr2amp(i,iamp).ne.0) then
+                this%curr2amp(i,where_to_amp(iamp))=where_to_cur(this%curr2amp(i,iamp))
+             endif
+          enddo
+       endif
        do isector=1,this%n_sectors
           this%sector_present(where_to_amp(iamp),isector)=this%sector_present(iamp,isector)
+          if (allocated(this%sector_retained)) &
+               this%sector_retained(where_to_amp(iamp),isector)=&
+               this%sector_retained(iamp,isector)
           this%sector_sign(where_to_amp(iamp),isector)=this%sector_sign(iamp,isector)
           do i=1,2
              if (this%sector_curr2amp(i,iamp,isector).ne.0) then
@@ -6741,6 +7080,24 @@ contains
        deallocate(old_sector_term_start,old_sector_term_curr2amp,&
             old_sector_term_sign)
     endif
+    ! Keep legacy representative roots synchronized with the compact sparse
+    ! terminal map.  A physical amplitude is intentionally allowed to have no
+    ! retained sector after squared-order pruning.
+    this%curr2amp=0
+    do new_amp=1,count(this%include_amp)
+       do isector=1,this%n_sectors
+          if (.not.this%sector_present(new_amp,isector)) cycle
+          if (this%sector_term_start(new_amp,isector).eq.&
+               this%sector_term_start(new_amp-1,isector)) cycle
+          old_term=this%sector_term_start(new_amp-1,isector)+1
+          this%sector_curr2amp(:,new_amp,isector)=&
+               this%sector_term_curr2amp(:,old_term)
+          this%sector_sign(new_amp,isector)=this%sector_term_sign(old_term)
+          if (new_amp.le.size(this%curr2amp,2)) &
+               this%curr2amp(:,new_amp)=this%sector_term_curr2amp(:,old_term)
+          exit
+       enddo
+    enddo
     do iamp=1,this%n_amps
        if (.not.this%include_amp(iamp)) cycle
        do i=1,2
@@ -6755,31 +7112,60 @@ contains
     enddo
     ! and also the shifting of the auxiliary arrays and variables
     do isize=1,n
-       do nc=this%n_cur_start(isize),this%n_cur
+       old_cur_start=this%n_cur_start(isize)
+       old_cur_end=this%n_cur_end(isize)
+       found_range=.false.
+       do nc=old_cur_start,old_cur_end
           if (where_to_cur(nc).ne.0) then
              this%n_cur_start(isize)=where_to_cur(nc)
+             found_range=.true.
              exit
           endif
        enddo
-       do nc=this%n_cur_end(isize),1,-1
-          if (where_to_cur(nc).ne.0) then
-             this%n_cur_end(isize)=where_to_cur(nc)
-             exit
-          endif
-       enddo
+       if (found_range) then
+          do nc=old_cur_end,old_cur_start,-1
+             if (where_to_cur(nc).ne.0) then
+                this%n_cur_end(isize)=where_to_cur(nc)
+                exit
+             endif
+          enddo
+       elseif (isize.eq.1) then
+          this%n_cur_start(isize)=1
+          this%n_cur_end(isize)=0
+       elseif (isize.eq.n) then
+          ! The size-n range is a sentinel for external closing currents and
+          ! is not ordered after the composite-current blocks.
+          this%n_cur_start(isize)=count(is_needed_cur)+1
+          this%n_cur_end(isize)=count(is_needed_cur)
+       else
+          this%n_cur_start(isize)=this%n_cur_end(isize-1)+1
+          this%n_cur_end(isize)=this%n_cur_end(isize-1)
+       endif
        if (isize.ge.2 .and. isize.le.n-1) then
-          do iv=this%n_vert_start(isize),this%n_vert
+          old_vert_start=this%n_vert_start(isize)
+          old_vert_end=this%n_vert_end(isize)
+          found_range=.false.
+          do iv=old_vert_start,old_vert_end
              if (where_to_ver(iv).ne.0) then
                 this%n_vert_start(isize)=where_to_ver(iv)
+                found_range=.true.
                 exit
              endif
           enddo
-          do iv=this%n_vert_end(isize),1,-1
-             if (where_to_ver(iv).ne.0) then
-                this%n_vert_end(isize)=where_to_ver(iv)
-                exit
-             endif
-          enddo
+          if (found_range) then
+             do iv=old_vert_end,old_vert_start,-1
+                if (where_to_ver(iv).ne.0) then
+                   this%n_vert_end(isize)=where_to_ver(iv)
+                   exit
+                endif
+             enddo
+          elseif (isize.eq.2) then
+             this%n_vert_start(isize)=1
+             this%n_vert_end(isize)=0
+          else
+             this%n_vert_start(isize)=this%n_vert_end(isize-1)+1
+             this%n_vert_end(isize)=this%n_vert_end(isize-1)
+          endif
        endif
     enddo
     do iproc=2,this%nprocs
@@ -6824,6 +7210,7 @@ contains
     deallocate(is_needed_cur)
     deallocate(where_to_ver)
     deallocate(where_to_cur)
+    deallocate(where_to_amp)
   end subroutine filter_dead_trees
 
   integer function sector_index(this,n_gs,n_ew)
@@ -6984,6 +7371,7 @@ contains
     if (allocated(amp%sector_three_line_partner_curr2amp)) &
          deallocate(amp%sector_three_line_partner_curr2amp)
     if (allocated(amp%sector_present)) deallocate(amp%sector_present)
+    if (allocated(amp%sector_retained)) deallocate(amp%sector_retained)
     if (allocated(amp%sector_sign)) deallocate(amp%sector_sign)
     if (allocated(amp%sector_term_start)) deallocate(amp%sector_term_start)
     if (allocated(amp%sector_term_curr2amp)) deallocate(amp%sector_term_curr2amp)

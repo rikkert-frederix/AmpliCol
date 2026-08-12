@@ -2,7 +2,8 @@
 
 .PHONY: test_matrix_elements test_fermi_statistics test_mixed_spinors \
 	test_three_quark_line_reweight test_three_quark_line_multichannel \
-	test_coupling_order_parser test_coupling_order_sectors test_coupling_order_lhe_roundtrip \
+	test_coupling_order_parser test_coupling_order_sectors test_coupling_order_pruning \
+	test_coupling_order_lhe_roundtrip \
 	test_find_unique_coupling_sectors test_signed_event test_run_parameters \
 	update_matrix_cases update_matrix_goldens
 
@@ -126,6 +127,9 @@ FILES_M_TEST_MIXED_SPINOR = bitset.o color_algebra.o math_functions.o feynmanrul
 FILES_M_TEST_COUPLING_ORDERS = bitset.o color_algebra.o math_functions.o feynmanrules.o run_parameters.o \
 	particles.o amplitude_QCD.o coupling_order_sector_regression.o
 
+FILES_M_TEST_COUPLING_PRUNING = bitset.o color_algebra.o math_functions.o feynmanrules.o run_parameters.o \
+	particles.o amplitude_QCD.o coupling_order_pruning_regression.o
+
 FILES_M_TEST_SIGNED_EVENT = ranmar.o helper_modules.o simple_integrator.o run_parameters.o particles.o \
 	common.o coupling_orders.o handling_events.o signed_event_regression.o
 
@@ -163,6 +167,9 @@ mixed_spinor_regression: $(FILES_M_TEST_MIXED_SPINOR)
 coupling_order_sector_regression: $(FILES_M_TEST_COUPLING_ORDERS)
 	$(FC) $(FFLAGS) -o $@ $(FILES_M_TEST_COUPLING_ORDERS)
 
+coupling_order_pruning_regression: $(FILES_M_TEST_COUPLING_PRUNING)
+	$(FC) $(FFLAGS) -o $@ $(FILES_M_TEST_COUPLING_PRUNING)
+
 signed_event_regression: $(FILES_M_TEST_SIGNED_EVENT)
 	$(FC) $(FFLAGS) -o $@ $(FILES_M_TEST_SIGNED_EVENT)
 
@@ -189,6 +196,10 @@ mixed_spinor_regression.o: \
 
 coupling_order_sector_regression.o: \
 		tests/matrix_elements/coupling_order_sector_regression.f03 amplitude_QCD.o particles.o
+	$(FC) $(FFLAGS) -c -I. $< -o $@
+
+coupling_order_pruning_regression.o: \
+		tests/matrix_elements/coupling_order_pruning_regression.f03 amplitude_QCD.o particles.o
 	$(FC) $(FFLAGS) -c -I. $< -o $@
 
 signed_event_regression.o: tests/signed_event_regression.f03 handling_events.o
@@ -239,14 +250,20 @@ test_three_quark_line_multichannel: \
 test_coupling_order_parser: process_list.py tests/process_list_coupling_orders_regression.py
 	$(PYTHON) tests/process_list_coupling_orders_regression.py
 
-test_coupling_order_sectors: coupling_order_sector_regression \
+test_coupling_order_sectors: coupling_order_sector_regression coupling_order_pruning_regression \
 		tests/matrix_elements/run_coupling_order_library_regression.py \
 		tests/matrix_elements/coupling_order_library_regression.f03 \
+		tests/matrix_elements/run_coupling_order_pruning_library_regression.py \
+		tests/matrix_elements/coupling_order_pruning_library_regression.f03 \
 		find_unique_coupling_sector_regression amplicol_reweight \
 		tests/coupling_order_lhe_roundtrip_regression.py
 	./coupling_order_sector_regression
+	./coupling_order_pruning_regression
 	$(PYTHON) tests/matrix_elements/run_coupling_order_library_regression.py \
 		--generator $(CURDIR)/coupling_order_sector_regression \
+		--compiler "$(FC)" --fflags="$(FFLAGS)"
+	$(PYTHON) tests/matrix_elements/run_coupling_order_pruning_library_regression.py \
+		--generator $(CURDIR)/coupling_order_pruning_regression \
 		--compiler "$(FC)" --fflags="$(FFLAGS)"
 	./find_unique_coupling_sector_regression
 	$(PYTHON) tests/coupling_order_lhe_roundtrip_regression.py \
@@ -254,6 +271,14 @@ test_coupling_order_sectors: coupling_order_sector_regression \
 
 test_find_unique_coupling_sectors: find_unique_coupling_sector_regression
 	./find_unique_coupling_sector_regression
+
+test_coupling_order_pruning: coupling_order_pruning_regression \
+		tests/matrix_elements/run_coupling_order_pruning_library_regression.py \
+		tests/matrix_elements/coupling_order_pruning_library_regression.f03
+	./coupling_order_pruning_regression
+	$(PYTHON) tests/matrix_elements/run_coupling_order_pruning_library_regression.py \
+		--generator $(CURDIR)/coupling_order_pruning_regression \
+		--compiler "$(FC)" --fflags="$(FFLAGS)"
 
 test_coupling_order_lhe_roundtrip: amplicol_reweight \
 		tests/coupling_order_lhe_roundtrip_regression.py

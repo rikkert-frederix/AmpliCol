@@ -245,6 +245,18 @@ program amplicol_generate
 
   call resolve_and_validate_coupling_order_selection()
 
+  ! Automatic maximum-aS selection can only be resolved after every physical
+  ! production colour ordering has been initialized.  Once resolved, remove
+  ! unused sectors and their backward current trees before the first matrix-
+  ! element evaluation or generated-library emission.
+  if (.not.use_amplitude_library) then
+     do igroup=1,ngroups
+        do iamp=1,size(pgl(igroup)%amps)
+           call prune_selected_coupling_sectors(pgl(igroup)%amps(iamp))
+        enddo
+     enddo
+  endif
+
   if (use_amplitude_library) then
      if (timing_mode.eq.timing_detailed) call cpu_time(tBefore)
      call test_lib
@@ -852,6 +864,29 @@ contains
        stop 1
     endif
   end subroutine get_run_arguments
+
+  subroutine prune_selected_coupling_sectors(amplitude)
+    implicit none
+    type(amplitude_QCD),intent(inout) :: amplitude
+    logical,dimension(:,:),allocatable :: allowed_sector_pairs
+    logical :: ok
+    integer :: old_ncur,old_nvert,old_nterms
+
+    call build_coupling_order_pair_mask(amplitude%sector_powers,&
+         allowed_sector_pairs,ok)
+    if (.not.ok) then
+       write (*,*) 'Coupling-order selection must be resolved before amplitude pruning'
+       stop 1
+    endif
+    old_ncur=amplitude%n_cur
+    old_nvert=amplitude%n_vert
+    old_nterms=size(amplitude%sector_term_sign)
+    call amplitude%prune_coupling_sectors(allowed_sector_pairs)
+    write (99,*) 'Coupling-order pruning: currents',old_ncur,'->',amplitude%n_cur,&
+         'vertices',old_nvert,'->',amplitude%n_vert,'terminal roots',&
+         old_nterms,'->',size(amplitude%sector_term_sign)
+    deallocate(allowed_sector_pairs)
+  end subroutine prune_selected_coupling_sectors
 
   subroutine resolve_and_validate_coupling_order_selection()
     implicit none

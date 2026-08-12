@@ -22,6 +22,7 @@ module coupling_orders
 
   public :: reset_coupling_order_selection,set_coupling_order_selection
   public :: resolve_automatic_coupling_order
+  public :: build_coupling_order_pair_mask
 
 contains
 
@@ -108,5 +109,33 @@ contains
     if (this%aew_max2.ne.coupling_order_unbounded .and. aew2.gt.this%aew_max2) return
     coupling_order_selection_allows=.true.
   end function coupling_order_selection_allows
+
+  subroutine build_coupling_order_pair_mask(sector_powers,pair_mask,ok)
+    integer,dimension(:,:),intent(in) :: sector_powers
+    logical,dimension(:,:),allocatable,intent(out) :: pair_mask
+    logical,intent(out),optional :: ok
+    integer :: isector,jsector,as2,aew2,nsectors
+    logical :: valid
+
+    valid=size(sector_powers,1).eq.2 .and. coupling_order_selection%is_valid()
+    if (valid .and. coupling_order_selection%mode.eq.coupling_order_mode_automatic) &
+         valid=coupling_order_selection%resolved_as2.ne.coupling_order_unbounded
+    if (.not.valid) then
+       allocate(pair_mask(0,0))
+       if (present(ok)) ok=.false.
+       return
+    endif
+
+    nsectors=size(sector_powers,2)
+    allocate(pair_mask(nsectors,nsectors))
+    do isector=1,nsectors
+       do jsector=1,nsectors
+          as2=sector_powers(1,isector)+sector_powers(1,jsector)
+          aew2=sector_powers(2,isector)+sector_powers(2,jsector)
+          pair_mask(isector,jsector)=coupling_order_selection%allows(as2,aew2)
+       enddo
+    enddo
+    if (present(ok)) ok=.true.
+  end subroutine build_coupling_order_pair_mask
 
 end module coupling_orders

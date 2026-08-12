@@ -104,6 +104,7 @@ program amplicol_reweight
         processes(1:next,iproc)=part(1:next,1)
         call amps(iproc)%init(2,next,1,part,spin,o,phys_model)
         call amps(iproc)%init_col(next,col_acc)
+        call prune_selected_coupling_sectors(amps(iproc))
         call cpu_time(tAfter)
         t_amp_init=t_amp_init+tAfter-tBefore
      endif
@@ -169,6 +170,22 @@ program amplicol_reweight
   write(*,*) 'Total time:',t_all
   write(*,*) 'Total FC cross section:',xsec
 contains  
+
+  subroutine prune_selected_coupling_sectors(amplitude)
+    implicit none
+    type(amplitude_QCD),intent(inout) :: amplitude
+    logical,dimension(:,:),allocatable :: allowed_sector_pairs
+    logical :: valid_pair_mask
+
+    call build_coupling_order_pair_mask(amplitude%sector_powers,&
+         allowed_sector_pairs,valid_pair_mask)
+    if (.not.valid_pair_mask) then
+       write (*,*) 'Coupling-order selection must be resolved before amplitude pruning'
+       stop 1
+    endif
+    call amplitude%prune_coupling_sectors(allowed_sector_pairs)
+    deallocate(allowed_sector_pairs)
+  end subroutine prune_selected_coupling_sectors
 
   subroutine resolve_legacy_automatic_selection()
     implicit none
