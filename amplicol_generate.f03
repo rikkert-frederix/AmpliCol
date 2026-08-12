@@ -17,6 +17,7 @@ program amplicol_generate
   use multichannel
   use amplitude_library
   use mg_checks
+  use coupling_orders
   implicit none
   integer :: iproc,iident,target_label
   real(kind=8) :: weight
@@ -70,8 +71,21 @@ program amplicol_generate
      call read_processes_from_file(filename)
      do i=1,ngroups
        call setup_optimised_multichannel_weight_computation(pgl(i))
-    enddo
+     enddo
  endif
+  if (read_momenta .and. use_amplitude_library) then
+     write (*,*) '--me_test is not available with --library=use'
+     stop 1
+  endif
+  if (read_momenta .and. .not.keep_processes_separate) then
+     write (*,*) '--me_test requires keep_processes_separate=true'
+     stop 1
+  endif
+  if (read_momenta .and. &
+       coupling_order_selection%mode.eq.coupling_order_mode_explicit) then
+     write (*,*) '--me_test does not yet support explicit aS/aEW restrictions'
+     stop 1
+  endif
   if (timing_mode.eq.timing_detailed) then
      call cpu_time(tAfter)
      t_Proc_init=t_Proc_init+tAfter-tBefore
@@ -170,10 +184,15 @@ program amplicol_generate
      if (timing_mode.eq.timing_detailed) call cpu_time(tBefore)
      if (keep_processes_separate) then
         do iamp=1,pgl(igroup)%nproc
-           if (read_momenta) call run_madgraph_check(pgl(igroup)%next,igroup,iamp,pgl(igroup)%processes(1,iamp))
            call pgl(igroup)%amps(iamp)%init(1,pgl(igroup)%next,1,pgl(igroup)%processes(1,iamp),&
                 pgl(igroup)%spin,pgl(igroup)%color_orders(1,iamp),phys_model)
            if (read_momenta) then
+                   if (pgl(igroup)%amps(iamp)%n_sectors.ne.1) then
+                      write (*,*) '--me_test does not yet support amplitudes with multiple coupling sectors'
+                      stop 1
+                   endif
+                   call run_madgraph_check(pgl(igroup)%next,igroup,iamp,&
+                        pgl(igroup)%processes(1,iamp))
                    if (.not.allocated(p_read)) allocate(p_read(pgl(igroup)%next,0:3))
                    call read_in_momenta(pgl(igroup)%next,igroup,iamp,p_read)
                    do i=1,pgl(igroup)%next
@@ -205,12 +224,15 @@ program amplicol_generate
 
      if (keep_processes_separate) then
         allocate(pgl(igroup)%amp2(1))
+        allocate(pgl(igroup)%amp2_abs(1))
      else
         allocate(pgl(igroup)%amp2(1:pgl(igroup)%nproc))
+        allocate(pgl(igroup)%amp2_abs(1:pgl(igroup)%nproc))
      endif
 
      ! number of helicities to sum over
      allocate(pgl(igroup)%amp2_hel(1:maxval(pgl(igroup)%nhel)))
+     allocate(pgl(igroup)%amp2_hel_abs(1:maxval(pgl(igroup)%nhel)))
      allocate(pgl(igroup)%hel(1:pgl(igroup)%next))
      if (keep_processes_separate) then
         allocate(pgl(igroup)%hel_fac(1:maxval(pgl(igroup)%nhel),pgl(igroup)%nproc))
@@ -220,6 +242,8 @@ program amplicol_generate
      pgl(igroup)%hel_fac=1
 
   enddo ! loop over phase-space-order groups
+
+  call resolve_and_validate_coupling_order_selection()
 
   if (use_amplitude_library) then
      if (timing_mode.eq.timing_detailed) call cpu_time(tBefore)
@@ -508,6 +532,20 @@ contains
        t_PS= t_PS + (tAfter-tBefore)*dble(timing_sample)
        tBefore=tAfter
     endif
+    ! Coupling-order components must be scaled before they are combined at
+    ! squared-amplitude level.  In particular alpha_s is point dependent.
+    call set_scale(scale_choice,pgl(ichan)%next,pgl(ichan)%ps(1)%p,&
+         pgl(ichan)%iden_processes(:,1,iproc),scale_ren)
+    scale_fac=scale_ren
+    scale_shower=scale_ren
+    if (read_momenta) then
+       ! The bundled MadGraph check card uses a fixed alpha_s=0.118.
+       alphas=alpha_check
+    elseif (use_lhapdf) then
+       alphas=alphaspdf(scale_ren)
+    else
+       alphas=alphas_Q(scale_ren,2,alphas_MZ)
+    endif
     call compute_the_amps(iint,ichan)
     if (time_physics) then
        call cpu_time(tAfter)
@@ -535,40 +573,24 @@ contains
         if (pgl(ichan)%passed(iint).gt.me_points) read_momenta=.false.
     endif
 
-    ! set scales and update alphaS
-    if (time_physics) call cpu_time(tBefore)
-    call set_scale(scale_choice,pgl(ichan)%next,pgl(ichan)%ps(1)%p,&
-         pgl(ichan)%iden_processes(:,1,iproc),scale_ren)
-    scale_fac=scale_ren
-    scale_shower=scale_ren
-    if (use_lhapdf) then
-       alphas=alphaspdf(scale_ren)
-    else
-       alphas=alphas_Q(scale_ren,2,alphas_MZ)
-    endif
-    
     ! MINT weight, phase-space jacobian and GeV -> pb conversion factor
+    if (time_physics) call cpu_time(tBefore)
     weight=vol*pgl(ichan)%ps(1)%jac*conv
-
-    ! multiply by the strong coupling
-    if (pgl(ichan)%amps(iint)%n_sing(1).lt.pgl(ichan)%next-2) then
-       weight=weight*(4*pi*alphas)**(pgl(ichan)%next-2-pgl(ichan)%amps(iint)%n_sing(1))
-    endif
-    
-    ! multiply by the EW coupling
-    if (pgl(ichan)%amps(iint)%n_sing(1).ge.1) then
-       weight=weight*(2d0*4d0*pi*alphaEW)**pgl(ichan)%amps(iint)%n_sing(1)
-    endif
 
     if (keep_processes_separate) then
        val(1)=pgl(ichan)%amp2(1)*weight/dble(pgl(ichan)%iden(iint))
        val(1)=val(1)*colour_singlet_multichannel_weight(iint)
+       val_abs(1)=pgl(ichan)%amp2_abs(1)*abs(weight/dble(pgl(ichan)%iden(iint))*&
+            colour_singlet_multichannel_weight(iint))
        call include_PDF_and_identical_procs(val,val_abs,pgl(ichan),iint)
        f_abs=sum(val_abs(1:1))
        f=sum(val(1:1))
     else
        val(1:pgl(ichan)%nproc)=pgl(ichan)%amp2(1:pgl(ichan)%nproc)*weight/dble(pgl(ichan)%iden(1:pgl(ichan)%nproc))
        val(1:pgl(ichan)%nproc)=val(1:pgl(ichan)%nproc)*colour_singlet_multichannel_weight(1:pgl(ichan)%nproc)
+       val_abs(1:pgl(ichan)%nproc)=pgl(ichan)%amp2_abs(1:pgl(ichan)%nproc)*&
+            abs(weight/dble(pgl(ichan)%iden(1:pgl(ichan)%nproc))*&
+            colour_singlet_multichannel_weight(1:pgl(ichan)%nproc))
        call include_PDF_and_identical_procs(val,val_abs,pgl(ichan),-1)
        f_abs=sum(val_abs(1:pgl(ichan)%nproc))
        f=sum(val(1:pgl(ichan)%nproc))
@@ -600,12 +622,14 @@ contains
           call compute_the_amps(iint,ichan)
           call square_the_amps(iint,ichan)
        endif
-       if (any(abs(amp2_save-pgl(ichan)%amp2)/(amp2_save+pgl(ichan)%amp2).gt.1d-8)) then
+       if (any(abs(amp2_save-pgl(ichan)%amp2)/&
+            max(1d-30,abs(amp2_save),abs(pgl(ichan)%amp2)).gt.1d-8)) then
           write (*,*) 'Find same flavour and helicity filter give different matrix elements',ichan,iint
           write (*,*) amp2_save
           write (*,*) pgl(ichan)%amp2
           write (*,*) ''
-          write (*,*) abs(amp2_save-pgl(ichan)%amp2)/(amp2_save+pgl(ichan)%amp2)
+          write (*,*) abs(amp2_save-pgl(ichan)%amp2)/&
+               max(1d-30,abs(amp2_save),abs(pgl(ichan)%amp2))
           stop 1
        endif
        deallocate(amp2_save)
@@ -627,49 +651,62 @@ contains
        call pgl(ichan)%amps(iint)%evaluate(pgl(ichan)%next,pgl(ichan)%ps(1)%p,&
             pgl(ichan)%hel,read_proc_from_file,phys_model)
     else
-       call evaluate_amp(ichan,iint,pgl(ichan)%ps(1)%p,pgl(ichan)%amps(iint)%amps)
+       call evaluate_amp_by_order(ichan,iint,pgl(ichan)%ps(1)%p,&
+            pgl(ichan)%amps(iint)%amps_by_order)
+       pgl(ichan)%amps(iint)%amps=sum(pgl(ichan)%amps(iint)%amps_by_order,dim=2)
     endif
   end subroutine compute_the_amps
     
   subroutine square_the_amps(iint,ichan)
     implicit none
     integer,intent(in) :: iint,ichan
-    integer :: iproc,ih
+    integer :: iproc,ih,isector,jsector,as2,aew2,colour_factor
+    real(kind=8) :: gs,gew,helicity_value
+    complex(kind=8) :: left_amp,right_amp
     iproc=0
     pgl(ichan)%amp2=0d0
-    if (keep_processes_separate) then
-       if (use_real_gluons .and. all(pgl(ichan)%amps(iint)%n_qqbar(1:1).eq.0)) then
-          do ih=1,pgl(ichan)%amps(iint)%n_amps
-             do while (pgl(ichan)%amps(iint)%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
-             pgl(ichan)%amp2_hel(ih)=pgl(ichan)%amps(iint)%amps_r(ih)*&
-                  pgl(ichan)%col_fac(iint)*pgl(ichan)%amps(iint)%amps_r(ih)*pgl(ichan)%hel_fac(ih,iint)
-             pgl(ichan)%amp2(iproc)=pgl(ichan)%amp2(iproc)+pgl(ichan)%amp2_hel(ih)
-          enddo
+    pgl(ichan)%amp2_abs=0d0
+    pgl(ichan)%amp2_hel=0d0
+    pgl(ichan)%amp2_hel_abs=0d0
+    gs=sqrt(4d0*pi*alphas)
+    gew=sqrt(2d0*4d0*pi*alphaEW)
+    do ih=1,pgl(ichan)%amps(iint)%n_amps
+       do while (pgl(ichan)%amps(iint)%iproc_start(iproc+1).eq.ih)
+          iproc=iproc+1
+       enddo
+       if (keep_processes_separate) then
+          colour_factor=pgl(ichan)%col_fac(iint)
        else
-          do ih=1,pgl(ichan)%amps(iint)%n_amps
-             do while (pgl(ichan)%amps(iint)%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
-             pgl(ichan)%amp2_hel(ih)=dble(pgl(ichan)%amps(iint)%amps(ih)*&
-                  pgl(ichan)%col_fac(iint)*dconjg(pgl(ichan)%amps(iint)%amps(ih)))*pgl(ichan)%hel_fac(ih,iint)
-             pgl(ichan)%amp2(iproc)=pgl(ichan)%amp2(iproc)+pgl(ichan)%amp2_hel(ih)
-          enddo
+          colour_factor=pgl(ichan)%col_fac(iproc)
        endif
-    else
-       if (use_real_gluons .and. all(pgl(ichan)%amps(iint)%n_qqbar(1:1).eq.0)) then
-          do ih=1,pgl(ichan)%amps(iint)%n_amps
-             do while (pgl(ichan)%amps(iint)%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
-             pgl(ichan)%amp2_hel(ih)=pgl(ichan)%amps(iint)%amps_r(ih)*&
-                  pgl(ichan)%col_fac(iproc)*pgl(ichan)%amps(iint)%amps_r(ih)*pgl(ichan)%hel_fac(ih,iint)
-             pgl(ichan)%amp2(iproc)=pgl(ichan)%amp2(iproc)+pgl(ichan)%amp2_hel(ih)
+       helicity_value=0d0
+       do isector=1,pgl(ichan)%amps(iint)%n_sectors
+          if (.not.pgl(ichan)%amps(iint)%sector_present(ih,isector)) cycle
+          left_amp=pgl(ichan)%amps(iint)%amps_by_order(ih,isector)*&
+               gs**pgl(ichan)%amps(iint)%sector_powers(1,isector)*&
+               gew**pgl(ichan)%amps(iint)%sector_powers(2,isector)
+          do jsector=isector,pgl(ichan)%amps(iint)%n_sectors
+             if (.not.pgl(ichan)%amps(iint)%sector_present(ih,jsector)) cycle
+             as2=pgl(ichan)%amps(iint)%sector_powers(1,isector)+&
+                  pgl(ichan)%amps(iint)%sector_powers(1,jsector)
+             aew2=pgl(ichan)%amps(iint)%sector_powers(2,isector)+&
+                  pgl(ichan)%amps(iint)%sector_powers(2,jsector)
+             if (.not.coupling_order_selection%allows(as2,aew2)) cycle
+             right_amp=pgl(ichan)%amps(iint)%amps_by_order(ih,jsector)*&
+                  gs**pgl(ichan)%amps(iint)%sector_powers(1,jsector)*&
+                  gew**pgl(ichan)%amps(iint)%sector_powers(2,jsector)
+             if (jsector.eq.isector) then
+                helicity_value=helicity_value+dble(left_amp*dconjg(right_amp))*colour_factor
+             else
+                helicity_value=helicity_value+2d0*dble(left_amp*dconjg(right_amp))*colour_factor
+             endif
           enddo
-       else
-          do ih=1,pgl(ichan)%amps(iint)%n_amps
-             do while (pgl(ichan)%amps(iint)%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
-             pgl(ichan)%amp2_hel(ih)=dble(pgl(ichan)%amps(iint)%amps(ih)*&
-                  pgl(ichan)%col_fac(iproc)*dconjg(pgl(ichan)%amps(iint)%amps(ih)))*pgl(ichan)%hel_fac(ih,iint)
-             pgl(ichan)%amp2(iproc)=pgl(ichan)%amp2(iproc)+pgl(ichan)%amp2_hel(ih)
-          enddo
-       endif
-    endif
+       enddo
+       pgl(ichan)%amp2_hel(ih)=helicity_value*pgl(ichan)%hel_fac(ih,iint)
+       pgl(ichan)%amp2_hel_abs(ih)=abs(pgl(ichan)%amp2_hel(ih))
+       pgl(ichan)%amp2(iproc)=pgl(ichan)%amp2(iproc)+pgl(ichan)%amp2_hel(ih)
+       pgl(ichan)%amp2_abs(iproc)=pgl(ichan)%amp2_abs(iproc)+pgl(ichan)%amp2_hel_abs(ih)
+    enddo
   end subroutine square_the_amps
   
   subroutine setup_helicity_filter(pgl,iint)
@@ -682,17 +719,19 @@ contains
        pgl%include_hel=0
     endif
     ! filter zero helicities and helicities that are identical
-    max_value=maxval(pgl%amp2_hel(1:pgl%nhel(iint)))
+    max_value=maxval(abs(pgl%amp2_hel(1:pgl%nhel(iint))))
+    if (max_value.le.1d-300) return
     do ih1=1,pgl%nhel(iint)
        if (pgl%include_hel(ih1,iint).ne.0) cycle
-       if (pgl%amp2_hel(ih1)/max_value.gt.1d-12) then
+       if (abs(pgl%amp2_hel(ih1))/max_value.gt.1d-12) then
           ! non-zero
           pgl%include_hel(ih1,iint)=1
        else
           cycle
        endif
        do ih2=ih1+1,pgl%nhel(iint)
-          if (abs(pgl%amp2_hel(ih1)-pgl%amp2_hel(ih2))/abs(pgl%amp2_hel(ih1)+pgl%amp2_hel(ih2)).lt.1d-12) then
+          if (abs(pgl%amp2_hel(ih1)-pgl%amp2_hel(ih2)).lt.&
+               1d-12*max(1d-300,abs(pgl%amp2_hel(ih1)),abs(pgl%amp2_hel(ih2)))) then
              ! identical value. Now check that they belong to the same process
              iproc1=1
              do while (iproc1.lt.pgl%nproc .and. (pgl%amps(iint)%iproc_start(iproc1+1)-ih1).le.0)
@@ -813,5 +852,64 @@ contains
        stop 1
     endif
   end subroutine get_run_arguments
-  
+
+  subroutine resolve_and_validate_coupling_order_selection()
+    implicit none
+    integer :: ig,ia,is,js,ih,max_ngs,as2,aew2
+    logical :: found,ok
+
+    max_ngs=-1
+    do ig=1,ngroups
+       do ia=1,size(pgl(ig)%amps)
+          do is=1,pgl(ig)%amps(ia)%n_sectors
+             if (.not.any(pgl(ig)%amps(ia)%sector_present(:,is))) cycle
+             max_ngs=max(max_ngs,pgl(ig)%amps(ia)%sector_powers(1,is))
+          enddo
+       enddo
+    enddo
+    if (max_ngs.lt.0) then
+       write (*,*) 'No amplitude coupling sectors were constructed'
+       stop 1
+    endif
+    if (coupling_order_selection%mode.eq.coupling_order_mode_automatic .and. &
+         coupling_order_selection%resolved_as2.eq.coupling_order_unbounded) then
+       call resolve_automatic_coupling_order(2*max_ngs,ok)
+       if (.not.ok) then
+          write (*,*) 'Could not resolve the automatic maximum-aS selection'
+          stop 1
+       endif
+    endif
+
+    found=.false.
+    do ig=1,ngroups
+       do ia=1,size(pgl(ig)%amps)
+          do ih=1,pgl(ig)%amps(ia)%n_amps
+             do is=1,pgl(ig)%amps(ia)%n_sectors
+                if (.not.pgl(ig)%amps(ia)%sector_present(ih,is)) cycle
+                do js=is,pgl(ig)%amps(ia)%n_sectors
+                   if (.not.pgl(ig)%amps(ia)%sector_present(ih,js)) cycle
+                   as2=pgl(ig)%amps(ia)%sector_powers(1,is)+&
+                        pgl(ig)%amps(ia)%sector_powers(1,js)
+                   aew2=pgl(ig)%amps(ia)%sector_powers(2,is)+&
+                        pgl(ig)%amps(ia)%sector_powers(2,js)
+                   if (coupling_order_selection%allows(as2,aew2)) found=.true.
+                enddo
+             enddo
+          enddo
+       enddo
+    enddo
+    if (.not.found) then
+       write (*,*) 'The requested squared coupling-order selection has no LC contribution'
+       write (*,*) 'Selection:',coupling_order_selection%mode,&
+            coupling_order_selection%resolved_as2,coupling_order_selection%as_min2,&
+            coupling_order_selection%as_max2,coupling_order_selection%aew_min2,&
+            coupling_order_selection%aew_max2
+       stop 1
+    endif
+    write (99,*) 'Coupling-order selection:',coupling_order_selection%mode,&
+         coupling_order_selection%resolved_as2,coupling_order_selection%as_min2,&
+         coupling_order_selection%as_max2,coupling_order_selection%aew_min2,&
+         coupling_order_selection%aew_max2
+  end subroutine resolve_and_validate_coupling_order_selection
+
 end program amplicol_generate

@@ -8,7 +8,9 @@ module amplitude_QCD_mod
   integer(kind=8),parameter :: max_three_line_color_orders=5000_8
   type :: current
      ! if adding variables here, also update the finalize_current and assign_current subroutines
-     integer :: type,bin,n_vert,chirality
+     integer :: type,bin,n_vert,chirality,n_gs=0,n_ew=0,open_quark_leg=0
+     integer,dimension(3) :: ew_pairs=0,u1_pairs=0,gluon_pairs=0
+     integer,dimension(3) :: u1_links=0,gluon_links=0
      type(bitset) :: iproc
      integer(kind=16) :: ext_cur
      integer,dimension(:),allocatable :: vertices,order,spin,ext_type
@@ -22,7 +24,7 @@ module amplitude_QCD_mod
   end type current
   type :: interaction
      ! if adding variables here, also update the finalize_interaction and assign_interaction subroutines
-     integer :: type,chirality
+     integer :: type,chirality,n_gs=0,n_ew=0
      integer,dimension(2) :: currents
      integer,dimension(:),allocatable :: singlet_mv
      complex(kind=8),dimension(:),allocatable :: val_c
@@ -39,22 +41,29 @@ module amplitude_QCD_mod
   end interface assignment(=)
   type :: amplitude_QCD
      ! if adding variables here, also update the finalize_amplitude_QCD subroutine
-     integer :: n_cur,n_vert,imode,nColOrd,max_pp,n_amps,nprocs
+     integer :: n_cur,n_vert,imode,nColOrd,max_pp,n_amps,nprocs,n_sectors=0
      type(current),dimension(:),allocatable :: current_list
      type(interaction),dimension(:),allocatable :: interaction_list
      complex(kind=8),dimension(:),allocatable :: amps
+     complex(kind=8),dimension(:,:),allocatable :: amps_by_order
      real(kind=8),dimension(:),allocatable :: amps_r
      real(kind=8),dimension(:,:),allocatable :: pp,diff_col_vals
      integer,dimension(:),allocatable :: n_cur_start,n_cur_end,n_vert_start,n_vert_end, &
           pp_bin_to_i,pp_i_to_bin,col_index,n_col_vals,iproc_start,n_sing,n_qqbar
      integer,dimension(:,:),allocatable :: perm,curr2amp,i_col_i,processes,&
           same_flavour_sum,same_flavour_sum_operation,three_line_partner_curr2amp
+     integer,dimension(:,:),allocatable :: sector_powers
+     integer,dimension(:,:),allocatable :: sector_sign
+     integer,dimension(:,:),allocatable :: sector_term_start,sector_term_curr2amp
+     integer,dimension(:),allocatable :: sector_term_sign
+     integer,dimension(:,:,:),allocatable :: sector_curr2amp,sector_three_line_partner_curr2amp
      integer,dimension(:,:,:),allocatable :: spins,row_index
      logical,dimension(:),allocatable :: include_amp,same_flav
+     logical,dimension(:,:),allocatable :: sector_present
      logical :: lib_created=.false.
    contains
      procedure,public :: init,evaluate,init_col,filter_helicity,write_init_amps_to_file,read_init_amps_from_file &
-          ,create_library,optimise_evaluation
+          ,create_library,optimise_evaluation,sector_index
      procedure,private :: filter_dead_trees
      final :: finalize_amplitude_QCD ! custom deallocation of amplitude_QCD
   end type amplitude_QCD
@@ -166,6 +175,8 @@ contains
 
     if (this%imode.eq.1) call allocate_and_fill_spins()
     call allocate_and_fill_colour_permutations()
+    call remap_two_line_singlet_exchange_sectors()
+    if (this%imode.ne.2) call filter_fixed_three_line_sector_terms()
     if (this%imode.eq.2 .and. this%n_qqbar(1).eq.3) then
        call group_three_line_colour_flows()
     endif
@@ -214,6 +225,16 @@ contains
       allocate(current_list_local(this%n_cur)%spin(isize))
       current_list_local(this%n_cur)%spin(1)=ispin
       current_list_local(this%n_cur)%n_vert=0
+      current_list_local(this%n_cur)%n_gs=0
+      current_list_local(this%n_cur)%n_ew=0
+      current_list_local(this%n_cur)%open_quark_leg=0
+      current_list_local(this%n_cur)%ew_pairs=0
+      current_list_local(this%n_cur)%u1_pairs=0
+      current_list_local(this%n_cur)%gluon_pairs=0
+      current_list_local(this%n_cur)%u1_links=0
+      current_list_local(this%n_cur)%gluon_links=0
+      if (pm%is_quark(ctype).or.pm%is_antiquark(ctype)) &
+           current_list_local(this%n_cur)%open_quark_leg=iorder
       call current_list_local(this%n_cur)%iproc%init(this%nprocs)
       call current_list_local(this%n_cur)%iproc%set_bit(iproc)
       current_list_local(this%n_cur)%ext_cur=ibset(int(0,kind=16),this%n_cur-1)      
@@ -235,9 +256,11 @@ contains
       ! subroutine also sets the include_amp(iamp) to .true. for all
       ! amplitudes
       implicit none
-      integer :: icur,jcur,i,j,iproc
+      integer :: icur,jcur,i,j,iproc,iraw,iphys,isector,nraw,maxraw
+      integer :: nphys_base,nterms,offset,slot
       type(bitset) :: proc
-      integer,dimension(:,:),allocatable :: curr2amp
+      integer,dimension(:,:),allocatable :: raw_curr2amp,raw_power,counts,cursor
+      integer,dimension(:),allocatable :: raw_iproc,raw_phys,physical_representative
       integer,dimension(n,this%nprocs) :: procs
       do j=1,this%nprocs
          do i=1,n
@@ -248,9 +271,17 @@ contains
             endif
          enddo
       enddo
-      allocate(curr2amp(1:2,1:(this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)*(this%n_cur_end(n)-this%n_cur_start(n)+1)))
-      curr2amp=0
+      maxraw=(this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)*&
+           (this%n_cur_end(n)-this%n_cur_start(n)+1)*this%nprocs
+      allocate(raw_curr2amp(2,maxraw),raw_power(2,maxraw),raw_iproc(maxraw),raw_phys(maxraw))
+      allocate(physical_representative(maxraw))
+      raw_curr2amp=0
+      raw_power=0
+      raw_iproc=0
+      raw_phys=0
+      physical_representative=0
       allocate(this%iproc_start(1:this%nprocs+1))
+      nraw=0
       this%n_amps=0
       do iproc=1,this%nprocs
          this%iproc_start(iproc)=this%n_amps+1
@@ -277,22 +308,93 @@ contains
                   ! one process, but it is not equal to process 'iproc'
                   cycle
                endif
-               this%n_amps=this%n_amps+1
-               curr2amp(1,this%n_amps)=icur
-               curr2amp(2,this%n_amps)=jcur
+               nraw=nraw+1
+               raw_curr2amp(:,nraw)=[icur,jcur]
+               raw_power(:,nraw)=[current_list_local(icur)%n_gs+current_list_local(jcur)%n_gs,&
+                    current_list_local(icur)%n_ew+current_list_local(jcur)%n_ew]
+               raw_iproc(nraw)=iproc
+               if (sum(raw_power(:,nraw)).ne.n-2) then
+                  write (*,*) 'Inconsistent terminal coupling order',raw_power(:,nraw),n-2
+                  write (*,*) this%processes(:,iproc)
+                  stop 1
+               endif
+               do iphys=this%iproc_start(iproc),this%n_amps
+                  if (same_physical_closure(raw_curr2amp(:,nraw),&
+                       raw_curr2amp(:,physical_representative(iphys)),iproc)) exit
+               enddo
+               if (iphys.gt.this%n_amps) then
+                  this%n_amps=this%n_amps+1
+                  physical_representative(this%n_amps)=nraw
+                  iphys=this%n_amps
+               endif
+               raw_phys(nraw)=iphys
             enddo
          enddo
       enddo
 
+      call build_sector_list(nraw,raw_power)
+      nphys_base=this%n_amps
       if (use_symmetry .and. this%n_qqbar(1).eq.0 .and. this%imode.eq.2) then
-         allocate(this%curr2amp(1:2,1:2*this%n_amps))
-         this%curr2amp(1:2,1:this%n_amps)=curr2amp(1:2,1:this%n_amps)
-         this%curr2amp(1:2,this%n_amps+1:2*this%n_amps)=curr2amp(1:2,1:this%n_amps)
          this%n_amps=this%n_amps*2
-      else
-         allocate(this%curr2amp(1:2,1:this%n_amps))
-         this%curr2amp(1:2,1:this%n_amps)=curr2amp(1:2,1:this%n_amps)
       endif
+      allocate(this%curr2amp(2,this%n_amps))
+      allocate(this%sector_curr2amp(2,this%n_amps,this%n_sectors))
+      allocate(this%sector_present(this%n_amps,this%n_sectors))
+      allocate(this%sector_sign(this%n_amps,this%n_sectors))
+      allocate(counts(this%n_amps,this%n_sectors))
+      this%curr2amp=0
+      this%sector_curr2amp=0
+      this%sector_present=.false.
+      this%sector_sign=1
+      counts=0
+      do iraw=1,nraw
+         isector=find_sector(raw_power(:,iraw))
+         iphys=raw_phys(iraw)
+         counts(iphys,isector)=counts(iphys,isector)+1
+      enddo
+      if (this%n_amps.gt.nphys_base) then
+         counts(nphys_base+1:this%n_amps,:)=counts(1:nphys_base,:)
+      endif
+      nterms=sum(counts)
+      allocate(this%sector_term_start(0:this%n_amps,this%n_sectors))
+      allocate(this%sector_term_curr2amp(2,nterms))
+      allocate(this%sector_term_sign(nterms))
+      allocate(cursor(this%n_amps,this%n_sectors))
+      offset=0
+      do isector=1,this%n_sectors
+         this%sector_term_start(0,isector)=offset
+         do iphys=1,this%n_amps
+            offset=offset+counts(iphys,isector)
+            this%sector_term_start(iphys,isector)=offset
+            cursor(iphys,isector)=offset-counts(iphys,isector)
+         enddo
+      enddo
+      do iraw=1,nraw
+         isector=find_sector(raw_power(:,iraw))
+         iphys=raw_phys(iraw)
+         cursor(iphys,isector)=cursor(iphys,isector)+1
+         slot=cursor(iphys,isector)
+         this%sector_term_curr2amp(:,slot)=raw_curr2amp(:,iraw)
+         this%sector_term_sign(slot)=1
+         if (this%n_amps.gt.nphys_base) then
+            iphys=iphys+nphys_base
+            cursor(iphys,isector)=cursor(iphys,isector)+1
+            slot=cursor(iphys,isector)
+            this%sector_term_curr2amp(:,slot)=raw_curr2amp(:,iraw)
+            this%sector_term_sign(slot)=1
+         endif
+      enddo
+      do iphys=1,this%n_amps
+         do isector=1,this%n_sectors
+            if (counts(iphys,isector).eq.0) cycle
+            slot=this%sector_term_start(iphys-1,isector)+1
+            this%sector_curr2amp(:,iphys,isector)=this%sector_term_curr2amp(:,slot)
+            this%sector_sign(iphys,isector)=this%sector_term_sign(slot)
+            this%sector_present(iphys,isector)=.true.
+            if (all(this%curr2amp(:,iphys).eq.0)) &
+                 this%curr2amp(:,iphys)=this%sector_curr2amp(:,iphys,isector)
+         enddo
+      enddo
       if (this%imode.eq.3 .and. this%n_amps.ne.1) then
          write (*,*) 'For this%imode==3, there should only be one amplitude',this%n_amps
          write (*,*) this%n_cur_start
@@ -307,7 +409,99 @@ contains
 
       allocate(this%include_amp(1:this%n_amps))
       this%include_amp(:)=.true.
+      deallocate(raw_curr2amp,raw_power,raw_iproc,raw_phys,physical_representative,&
+           counts,cursor)
     end subroutine allocate_and_fill_currents_to_amps_map
+
+    logical function same_physical_closure(left,right,iproc)
+        implicit none
+        integer,dimension(2),intent(in) :: left,right
+        integer,intent(in) :: iproc
+        integer :: il,ir
+        il=left(1)
+        ir=right(1)
+        same_physical_closure=.false.
+        if (this%imode.ne.2 .and. this%n_qqbar(iproc).ge.2) then
+           same_physical_closure=same_terminal_helicity(left,right)
+           return
+        endif
+        if (left(2).ne.right(2)) return
+        if (current_list_local(il)%type.ne.current_list_local(ir)%type) return
+        if (current_list_local(il)%chirality.ne.current_list_local(ir)%chirality) return
+        if (current_list_local(il)%bin.ne.current_list_local(ir)%bin) return
+        if (current_list_local(il)%ext_cur.ne.current_list_local(ir)%ext_cur) return
+        ! Coupling order and colour-singlet closure history select terms of
+        ! one physical ordered coefficient; they are not extra amplitudes.
+        ! The sparse sector-term map retains those distinct roots.
+        if (any(current_list_local(il)%order(1:n-1).ne.&
+             current_list_local(ir)%order(1:n-1))) return
+        same_physical_closure=.true.
+      end function same_physical_closure
+
+      logical function same_terminal_helicity(left,right)
+        implicit none
+        integer,dimension(2),intent(in) :: left,right
+        integer :: side,pos,leg
+        integer,dimension(n,2) :: helicity
+        integer,dimension(2,2) :: roots
+        roots(:,1)=left
+        roots(:,2)=right
+        helicity=999
+        do side=1,2
+           do pos=1,n-1
+              leg=current_list_local(roots(1,side))%order(pos)
+              helicity(leg,side)=current_list_local(roots(1,side))%spin(pos)
+           enddo
+           leg=current_list_local(roots(2,side))%order(1)
+           helicity(leg,side)=current_list_local(roots(2,side))%spin(1)
+        enddo
+        same_terminal_helicity=all(helicity(:,1).eq.helicity(:,2))
+      end function same_terminal_helicity
+
+      subroutine build_sector_list(nentries,powers)
+        implicit none
+        integer,intent(in) :: nentries
+        integer,dimension(:,:),intent(in) :: powers
+        integer :: entry,sector,left,right
+        integer,dimension(2) :: candidate
+        integer,dimension(:,:),allocatable :: unique_powers
+        allocate(unique_powers(2,max(1,nentries)))
+        this%n_sectors=0
+        do entry=1,nentries
+           candidate=powers(:,entry)
+           do sector=1,this%n_sectors
+              if (all(unique_powers(:,sector).eq.candidate)) exit
+           enddo
+           if (sector.le.this%n_sectors) cycle
+           this%n_sectors=this%n_sectors+1
+           unique_powers(:,this%n_sectors)=candidate
+        enddo
+        ! Stable, deterministic order: leading QCD first, then lower EW.
+        do left=1,this%n_sectors-1
+           do right=left+1,this%n_sectors
+              if (unique_powers(1,right).gt.unique_powers(1,left) .or. &
+                   (unique_powers(1,right).eq.unique_powers(1,left) .and. &
+                    unique_powers(2,right).lt.unique_powers(2,left))) then
+                 candidate=unique_powers(:,left)
+                 unique_powers(:,left)=unique_powers(:,right)
+                 unique_powers(:,right)=candidate
+              endif
+           enddo
+        enddo
+        allocate(this%sector_powers(2,this%n_sectors))
+        this%sector_powers=unique_powers(:,1:this%n_sectors)
+        deallocate(unique_powers)
+      end subroutine build_sector_list
+
+      integer function find_sector(power)
+        implicit none
+        integer,dimension(2),intent(in) :: power
+        do find_sector=1,this%n_sectors
+           if (all(this%sector_powers(:,find_sector).eq.power)) return
+        enddo
+        write (*,*) 'Internal error: unknown amplitude coupling sector',power
+        stop 1
+      end function find_sector
 
     subroutine allocate_and_fill_spins()
       implicit none
@@ -329,7 +523,7 @@ contains
     
     subroutine allocate_and_fill_colour_permutations()
       implicit none
-      integer :: iamp,i,iproc,iamp_to_compare
+      integer :: iamp,i,iproc,iamp_to_compare,pos
       ! allocate and fill the colour orders in 'this%perm'. These are simply
       ! the orders of the elements in the 'this%current_list' (with size n-1)
       ! together with the final element). Exception: when there are colour
@@ -348,6 +542,15 @@ contains
             iamp_to_compare=1
          endif
          do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
+            if (this%imode.ne.2 .and. this%n_qqbar(iproc).ge.2) then
+               pos=0
+               do i=1,n
+                  if (pm%is_singlet(this%processes(order(i,1,iproc),iproc))) cycle
+                  pos=pos+1
+                  this%perm(pos,iamp)=order(i,1,iproc)
+               enddo
+               cycle
+            endif
             this%perm(1:n-this%n_sing(1),iamp)=[this%current_list(this%curr2amp(1,iamp))%order(1:n-1-this%n_sing(1)),&
                  this%current_list(this%curr2amp(2,iamp))%order(1)]
             if (use_symmetry .and. this%n_qqbar(iproc).eq.0 .and. iamp.gt.this%n_amps/2) then
@@ -373,24 +576,403 @@ contains
       enddo
     end subroutine allocate_and_fill_colour_permutations
 
-    subroutine group_three_line_colour_flows()
-      ! The alternative three-line canonical order is needed while building
-      ! currents, but it can close the same physical open-string flow more
-      ! than once. Keep one amplitude for each set of q[g...]qbar strings and
-      ! retain the second closure so that both contributions are evaluated.
+    subroutine remap_two_line_singlet_exchange_sectors()
+      ! A colour-singlet exchange connects each quark to the antiquark on the
+      ! same fermion line.  The recursive planar order labels that coefficient
+      ! by the complementary open-string flow used for a gluon exchange.  Move
+      ! it to the physical delta-flow row and include the fermion-order sign.
       implicit none
-      integer :: old_amp,flow,flow_count
-      integer,dimension(:),allocatable :: representative,partner
-      integer,dimension(:,:),allocatable :: old_curr2amp,old_perm,&
-           old_same_flavour_sum,old_same_flavour_sum_operation
-      logical,dimension(:),allocatable :: old_include_amp
+      integer :: iproc,isector,source,target,first_amp,last_amp,nord,iterm,&
+           new_term,nterms,term_sign,offset
+      integer,dimension(:),allocatable :: transformed
+      integer,dimension(:),allocatable :: old_term_sign,term_target,term_sector
+      integer,dimension(:,:),allocatable :: old_term_start,old_term_curr2amp,&
+           counts,cursor
 
-      allocate(representative(this%n_amps))
-      allocate(partner(this%n_amps))
+      if (this%imode.ne.2) then
+         call filter_fixed_two_line_sector_terms()
+         return
+      endif
+      if (all(this%n_qqbar(1:this%nprocs).ne.2)) return
+      allocate(old_term_start(0:this%n_amps,this%n_sectors))
+      allocate(old_term_curr2amp(2,size(this%sector_term_sign)))
+      allocate(old_term_sign(size(this%sector_term_sign)))
+      old_term_start=this%sector_term_start
+      old_term_curr2amp=this%sector_term_curr2amp
+      old_term_sign=this%sector_term_sign
+      nterms=size(old_term_sign)
+      allocate(term_target(max(1,nterms)),term_sector(max(1,nterms)))
+      allocate(counts(this%n_amps,this%n_sectors))
+      counts=0
+      new_term=0
+      do iproc=1,this%nprocs
+         if (this%n_qqbar(iproc).ne.2) cycle
+         nord=n-this%n_sing(iproc)
+         allocate(transformed(nord))
+         first_amp=this%iproc_start(iproc)
+         last_amp=this%iproc_start(iproc+1)-1
+         do isector=1,this%n_sectors
+            do source=first_amp,last_amp
+               do iterm=old_term_start(source-1,isector)+1,&
+                    old_term_start(source,isector)
+                  call transform_quark_line_flow(this%perm(:,source),&
+                       this%current_list(old_term_curr2amp(1,iterm))%ew_pairs,&
+                       iproc,transformed,term_sign)
+                  do target=first_amp,last_amp
+                     if (all(this%perm(:,target).eq.transformed)) exit
+                  enddo
+                  if (target.gt.last_amp) then
+                     write (*,*) 'Cannot find colour-singlet exchange partner flow',&
+                          this%perm(:,source),transformed
+                     stop 1
+                  endif
+                  new_term=new_term+1
+                  term_target(new_term)=target
+                  term_sector(new_term)=isector
+                  old_term_sign(iterm)=old_term_sign(iterm)*term_sign
+                  counts(target,isector)=counts(target,isector)+1
+               enddo
+            enddo
+         enddo
+         deallocate(transformed)
+      enddo
+      if (new_term.ne.nterms) then
+         write (*,*) 'Internal error while remapping two-line sector terms',&
+              new_term,nterms
+         stop 1
+      endif
+      deallocate(this%sector_term_start,this%sector_term_curr2amp,&
+           this%sector_term_sign)
+      allocate(this%sector_term_start(0:this%n_amps,this%n_sectors))
+      allocate(this%sector_term_curr2amp(2,nterms))
+      allocate(this%sector_term_sign(nterms))
+      allocate(cursor(this%n_amps,this%n_sectors))
+      offset=0
+      do isector=1,this%n_sectors
+         this%sector_term_start(0,isector)=offset
+         do target=1,this%n_amps
+            offset=offset+counts(target,isector)
+            this%sector_term_start(target,isector)=offset
+            cursor(target,isector)=offset-counts(target,isector)
+         enddo
+      enddo
+      new_term=0
+      do isector=1,this%n_sectors
+         do source=1,this%n_amps
+            do iterm=old_term_start(source-1,isector)+1,&
+                 old_term_start(source,isector)
+               new_term=new_term+1
+               target=term_target(new_term)
+               cursor(target,isector)=cursor(target,isector)+1
+               offset=cursor(target,isector)
+               this%sector_term_curr2amp(:,offset)=old_term_curr2amp(:,iterm)
+               this%sector_term_sign(offset)=old_term_sign(iterm)
+            enddo
+         enddo
+      enddo
+      this%sector_curr2amp=0
+      this%sector_present=.false.
+      this%sector_sign=1
+      this%curr2amp=0
+      do target=1,this%n_amps
+         do isector=1,this%n_sectors
+            if (counts(target,isector).eq.0) cycle
+            iterm=this%sector_term_start(target-1,isector)+1
+            this%sector_curr2amp(:,target,isector)=&
+                 this%sector_term_curr2amp(:,iterm)
+            this%sector_sign(target,isector)=this%sector_term_sign(iterm)
+            this%sector_present(target,isector)=.true.
+            if (all(this%curr2amp(:,target).eq.0)) &
+                 this%curr2amp(:,target)=this%sector_curr2amp(:,target,isector)
+         enddo
+      enddo
+      deallocate(old_term_start,old_term_curr2amp,old_term_sign,term_target,&
+           term_sector,counts,cursor)
+    end subroutine remap_two_line_singlet_exchange_sectors
+
+    subroutine filter_fixed_two_line_sector_terms()
+      ! A fixed physical colour flow is assembled from two raw planar
+      ! representations.  Keep, for each helicity and coupling sector, only
+      ! the roots whose colour-singlet endpoint transformation lands on the
+      ! prescribed flow.  This aligns QCD and EW sectors before squaring.
+      implicit none
+      integer :: source,isector,iterm,iproc,nord,nold,nkeep,offset,slot
+      integer :: root,term_sign
+      integer,dimension(:),allocatable :: keep_source,keep_sector,keep_sign
+      integer,dimension(:,:),allocatable :: keep_curr2amp,counts,cursor
+      integer,dimension(:),allocatable :: raw_word,transformed
+
+      if (all(this%n_qqbar.ne.2)) return
+      nold=size(this%sector_term_sign)
+      allocate(keep_source(max(1,nold)),keep_sector(max(1,nold)),&
+           keep_sign(max(1,nold)),keep_curr2amp(2,max(1,nold)))
+      allocate(counts(this%n_amps,this%n_sectors))
+      counts=0
+      nkeep=0
+      iproc=1
+      do source=1,this%n_amps
+         do while (source.ge.this%iproc_start(iproc+1) .and. iproc.lt.this%nprocs)
+            iproc=iproc+1
+         enddo
+         do isector=1,this%n_sectors
+            do iterm=this%sector_term_start(source-1,isector)+1,&
+                 this%sector_term_start(source,isector)
+               if (this%n_qqbar(iproc).eq.2) then
+                  nord=n-this%n_sing(iproc)
+                  allocate(raw_word(nord),transformed(nord))
+                  root=this%sector_term_curr2amp(1,iterm)
+                  raw_word(1:nord-1)=this%current_list(root)%order(1:nord-1)
+                  raw_word(nord)=this%current_list(&
+                       this%sector_term_curr2amp(2,iterm))%order(1)
+                  call transform_quark_line_flow(raw_word,&
+                       this%current_list(root)%ew_pairs,iproc,transformed,term_sign)
+                  if (.not.same_two_line_flow(transformed,this%perm(:,source),iproc)) then
+                     deallocate(raw_word,transformed)
+                     cycle
+                  endif
+                  deallocate(raw_word,transformed)
+               else
+                  term_sign=1
+               endif
+               nkeep=nkeep+1
+               keep_source(nkeep)=source
+               keep_sector(nkeep)=isector
+               keep_sign(nkeep)=this%sector_term_sign(iterm)*term_sign
+               keep_curr2amp(:,nkeep)=this%sector_term_curr2amp(:,iterm)
+               counts(source,isector)=counts(source,isector)+1
+            enddo
+         enddo
+      enddo
+
+      deallocate(this%sector_term_start,this%sector_term_curr2amp,&
+           this%sector_term_sign)
+      allocate(this%sector_term_start(0:this%n_amps,this%n_sectors))
+      allocate(this%sector_term_curr2amp(2,nkeep))
+      allocate(this%sector_term_sign(nkeep))
+      allocate(cursor(this%n_amps,this%n_sectors))
+      offset=0
+      do isector=1,this%n_sectors
+         this%sector_term_start(0,isector)=offset
+         do source=1,this%n_amps
+            offset=offset+counts(source,isector)
+            this%sector_term_start(source,isector)=offset
+            cursor(source,isector)=offset-counts(source,isector)
+         enddo
+      enddo
+      do iterm=1,nkeep
+         source=keep_source(iterm)
+         isector=keep_sector(iterm)
+         cursor(source,isector)=cursor(source,isector)+1
+         slot=cursor(source,isector)
+         this%sector_term_curr2amp(:,slot)=keep_curr2amp(:,iterm)
+         this%sector_term_sign(slot)=keep_sign(iterm)
+      enddo
+      this%curr2amp=0
+      this%sector_curr2amp=0
+      this%sector_present=.false.
+      this%sector_sign=1
+      do source=1,this%n_amps
+         do isector=1,this%n_sectors
+            if (counts(source,isector).eq.0) cycle
+            iterm=this%sector_term_start(source-1,isector)+1
+            this%sector_curr2amp(:,source,isector)=this%sector_term_curr2amp(:,iterm)
+            this%sector_sign(source,isector)=this%sector_term_sign(iterm)
+            this%sector_present(source,isector)=.true.
+            if (all(this%curr2amp(:,source).eq.0)) &
+                 this%curr2amp(:,source)=this%sector_curr2amp(:,source,isector)
+         enddo
+      enddo
+      deallocate(keep_source,keep_sector,keep_sign,keep_curr2amp,counts,cursor)
+    end subroutine filter_fixed_two_line_sector_terms
+
+    subroutine filter_fixed_three_line_sector_terms()
+      ! The recursive construction admits all terminal-preserving raw
+      ! three-string representations.  Transform each sparse root using its
+      ! actual singlet/Fierz closure history and retain only terms belonging
+      ! to the one physical flow prescribed by this fixed-order amplitude.
+      implicit none
+      integer :: source,isector,iterm,iproc,nord,nold,nkeep,offset,slot
+      integer :: root,closing,term_sign
+      integer,dimension(:),allocatable :: keep_source,keep_sector,keep_sign
+      integer,dimension(:,:),allocatable :: keep_curr2amp,counts,cursor
+      integer,dimension(:),allocatable :: raw_word,transformed
+
+      if (all(this%n_qqbar.ne.3)) return
+      nold=size(this%sector_term_sign)
+      allocate(keep_source(max(1,nold)),keep_sector(max(1,nold)),&
+           keep_sign(max(1,nold)),keep_curr2amp(2,max(1,nold)))
+      allocate(counts(this%n_amps,this%n_sectors))
+      counts=0
+      nkeep=0
+      do iproc=1,this%nprocs
+         do source=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
+            do isector=1,this%n_sectors
+               do iterm=this%sector_term_start(source-1,isector)+1,&
+                    this%sector_term_start(source,isector)
+                  term_sign=1
+                  if (this%n_qqbar(iproc).eq.3) then
+                     nord=n-this%n_sing(iproc)
+                     allocate(raw_word(nord),transformed(nord))
+                     root=this%sector_term_curr2amp(1,iterm)
+                     closing=this%sector_term_curr2amp(2,iterm)
+                     raw_word(1:nord-1)=&
+                          this%current_list(root)%order(1:nord-1)
+                     raw_word(nord)=this%current_list(closing)%order(1)
+                     if (any(this%current_list(root)%ew_pairs.ne.0) .and. &
+                          any(this%current_list(root)%gluon_links.ne.0)) then
+                        call construct_three_line_flow(raw_word,&
+                             this%current_list(root)%ew_pairs,&
+                             this%current_list(root)%gluon_pairs,&
+                             this%current_list(root)%gluon_links,&
+                             this%current_list(root)%open_quark_leg,&
+                             this%current_list(closing)%open_quark_leg,&
+                             iproc,transformed,term_sign)
+                     else
+                        call transform_quark_line_flow(raw_word,&
+                             this%current_list(root)%ew_pairs,iproc,&
+                             transformed,term_sign)
+                     endif
+                     if (.not.same_three_line_flow(transformed,&
+                          this%perm(:,source),iproc)) then
+                        deallocate(raw_word,transformed)
+                        cycle
+                     endif
+                     deallocate(raw_word,transformed)
+                  endif
+                  nkeep=nkeep+1
+                  keep_source(nkeep)=source
+                  keep_sector(nkeep)=isector
+                  keep_sign(nkeep)=this%sector_term_sign(iterm)*term_sign
+                  keep_curr2amp(:,nkeep)=this%sector_term_curr2amp(:,iterm)
+                  counts(source,isector)=counts(source,isector)+1
+               enddo
+            enddo
+         enddo
+      enddo
+
+      deallocate(this%sector_term_start,this%sector_term_curr2amp,&
+           this%sector_term_sign)
+      allocate(this%sector_term_start(0:this%n_amps,this%n_sectors))
+      allocate(this%sector_term_curr2amp(2,nkeep))
+      allocate(this%sector_term_sign(nkeep))
+      allocate(cursor(this%n_amps,this%n_sectors))
+      offset=0
+      do isector=1,this%n_sectors
+         this%sector_term_start(0,isector)=offset
+         do source=1,this%n_amps
+            offset=offset+counts(source,isector)
+            this%sector_term_start(source,isector)=offset
+            cursor(source,isector)=offset-counts(source,isector)
+         enddo
+      enddo
+      do iterm=1,nkeep
+         source=keep_source(iterm)
+         isector=keep_sector(iterm)
+         cursor(source,isector)=cursor(source,isector)+1
+         slot=cursor(source,isector)
+         this%sector_term_curr2amp(:,slot)=keep_curr2amp(:,iterm)
+         this%sector_term_sign(slot)=keep_sign(iterm)
+      enddo
+      this%curr2amp=0
+      this%sector_curr2amp=0
+      this%sector_present=.false.
+      this%sector_sign=1
+      do source=1,this%n_amps
+         do isector=1,this%n_sectors
+            if (counts(source,isector).eq.0) cycle
+            iterm=this%sector_term_start(source-1,isector)+1
+            this%sector_curr2amp(:,source,isector)=&
+                 this%sector_term_curr2amp(:,iterm)
+            this%sector_sign(source,isector)=this%sector_term_sign(iterm)
+            this%sector_present(source,isector)=.true.
+            if (all(this%curr2amp(:,source).eq.0)) &
+                 this%curr2amp(:,source)=this%sector_curr2amp(:,source,isector)
+         enddo
+      enddo
+      deallocate(keep_source,keep_sector,keep_sign,keep_curr2amp,counts,cursor)
+    end subroutine filter_fixed_three_line_sector_terms
+
+    logical function same_two_line_flow(left,right,iproc)
+      implicit none
+      integer,dimension(:),intent(in) :: left,right
+      integer,intent(in) :: iproc
+      integer :: line,candidate,other
+      integer,dimension(2) :: left_len,right_len
+      integer,dimension(n,2) :: left_lines,right_lines
+      call split_two_line_flow(left,iproc,left_len,left_lines)
+      call split_two_line_flow(right,iproc,right_len,right_lines)
+      same_two_line_flow=.true.
+      do line=1,2
+         other=0
+         do candidate=1,2
+            if (right_lines(1,candidate).eq.left_lines(1,line)) then
+               other=candidate
+               exit
+            endif
+         enddo
+         if (other.eq.0 .or. left_len(line).ne.right_len(other)) then
+            same_two_line_flow=.false.
+            return
+         endif
+         if (any(left_lines(1:left_len(line),line).ne.&
+              right_lines(1:right_len(other),other))) then
+            same_two_line_flow=.false.
+            return
+         endif
+      enddo
+    end function same_two_line_flow
+
+    subroutine split_two_line_flow(word,iproc,line_len,lines)
+      implicit none
+      integer,dimension(:),intent(in) :: word
+      integer,intent(in) :: iproc
+      integer,dimension(2),intent(out) :: line_len
+      integer,dimension(n,2),intent(out) :: lines
+      integer :: pos,line
+      line_len=0
+      lines=0
+      line=0
+      do pos=1,size(word)
+         if (is_quark_from_order(word(pos),iproc)) line=line+1
+         if (line.lt.1 .or. line.gt.2) then
+            write (*,*) 'Malformed two-line colour flow',word
+            stop 1
+         endif
+         line_len(line)=line_len(line)+1
+         lines(line_len(line),line)=word(pos)
+      enddo
+      if (line.ne.2) then
+         write (*,*) 'Incomplete two-line colour flow',word
+         stop 1
+      endif
+    end subroutine split_two_line_flow
+
+    subroutine group_three_line_colour_flows()
+      ! Collapse the alternative recursive closures onto the physical
+      ! three-open-string basis.  Coupling sectors can contain several roots
+      ! for one physical row; keep those roots in a compact sparse term map.
+      implicit none
+      integer :: old_amp,flow,flow_count,old_namps,isector,target,nterms,iterm,&
+           old_term
+      integer :: offset,root,term_sign
+      integer,dimension(:),allocatable :: representative,flow_of_old,term_target,term_sector
+      integer,dimension(:),allocatable :: term_signs,cursor
+      integer,dimension(:,:),allocatable :: old_curr2amp,old_perm,&
+           old_same_flavour_sum,old_same_flavour_sum_operation,old_sector_sign
+      integer,dimension(:,:),allocatable :: old_term_start,old_term_curr2amp
+      integer,dimension(:),allocatable :: old_term_sign
+      integer,dimension(:,:),allocatable :: term_curr2amp,counts
+      integer,dimension(:,:,:),allocatable :: old_sector_curr2amp
+      logical,dimension(:),allocatable :: old_include_amp
+      logical,dimension(:,:),allocatable :: old_sector_present
+      integer,dimension(size(this%perm,1)) :: transformed
+
+      old_namps=this%n_amps
+      allocate(representative(old_namps),flow_of_old(old_namps))
       representative=0
-      partner=0
+      flow_of_old=0
       flow_count=0
-      do old_amp=1,this%n_amps
+      do old_amp=1,old_namps
          do flow=1,flow_count
             if (same_three_line_flow(this%perm(:,old_amp),&
                  this%perm(:,representative(flow)))) exit
@@ -398,56 +980,372 @@ contains
          if (flow.gt.flow_count) then
             flow_count=flow_count+1
             representative(flow_count)=old_amp
-         elseif (partner(flow).eq.0) then
-            partner(flow)=old_amp
-         else
-            write (*,*) 'More than two closures for a three-line colour flow',flow
-            stop 1
          endif
+         flow_of_old(old_amp)=flow
       enddo
       if (flow_count.ne.this%nColOrd) then
          write (*,*) 'Unexpected three-line colour-flow closure multiplicity',&
-              flow_count,this%nColOrd,this%n_amps
+              flow_count,this%nColOrd,old_namps
          stop 1
       endif
 
-      allocate(old_curr2amp(2,this%n_amps))
-      allocate(old_perm(size(this%perm,1),this%n_amps))
-      allocate(old_include_amp(this%n_amps))
-      allocate(old_same_flavour_sum(this%n_amps,2))
-      allocate(old_same_flavour_sum_operation(this%n_amps,2))
+      allocate(old_curr2amp(2,old_namps))
+      allocate(old_perm(size(this%perm,1),old_namps))
+      allocate(old_include_amp(old_namps))
+      allocate(old_same_flavour_sum(old_namps,2))
+      allocate(old_same_flavour_sum_operation(old_namps,2))
+      allocate(old_sector_curr2amp(2,old_namps,this%n_sectors))
+      allocate(old_sector_present(old_namps,this%n_sectors))
+      allocate(old_sector_sign(old_namps,this%n_sectors))
+      allocate(old_term_start(0:old_namps,this%n_sectors))
+      allocate(old_term_curr2amp(2,size(this%sector_term_sign)))
+      allocate(old_term_sign(size(this%sector_term_sign)))
       old_curr2amp=this%curr2amp
       old_perm=this%perm
       old_include_amp=this%include_amp
       old_same_flavour_sum=this%same_flavour_sum
       old_same_flavour_sum_operation=this%same_flavour_sum_operation
-      allocate(this%three_line_partner_curr2amp(2,this%nColOrd))
-      this%three_line_partner_curr2amp=0
+      old_sector_curr2amp=this%sector_curr2amp
+      old_sector_present=this%sector_present
+      old_sector_sign=this%sector_sign
+      old_term_start=this%sector_term_start
+      old_term_curr2amp=this%sector_term_curr2amp
+      old_term_sign=this%sector_term_sign
+
+      nterms=size(old_term_sign)
+      allocate(term_target(max(1,nterms)),term_sector(max(1,nterms)))
+      allocate(term_signs(max(1,nterms)),term_curr2amp(2,max(1,nterms)))
+      allocate(counts(this%nColOrd,this%n_sectors))
+      counts=0
+      iterm=0
+      do old_amp=1,old_namps
+         do isector=1,this%n_sectors
+            do old_term=old_term_start(old_amp-1,isector)+1,&
+                 old_term_start(old_amp,isector)
+               root=old_term_curr2amp(1,old_term)
+               if (any(this%current_list(root)%ew_pairs.ne.0) .and. &
+                    any(this%current_list(root)%gluon_links.ne.0)) then
+                  call construct_three_line_flow(old_perm(:,old_amp),&
+                       this%current_list(root)%ew_pairs,&
+                       this%current_list(root)%gluon_pairs,&
+                       this%current_list(root)%gluon_links,&
+                       this%current_list(root)%open_quark_leg,&
+                       this%current_list(old_term_curr2amp(2,old_term))%open_quark_leg,&
+                       1,transformed,term_sign)
+               else
+                  call transform_quark_line_flow(old_perm(:,old_amp),&
+                       this%current_list(root)%ew_pairs,1,transformed,term_sign)
+               endif
+               do target=1,this%nColOrd
+                  if (same_three_line_flow(transformed,&
+                       old_perm(:,representative(target)))) exit
+               enddo
+               if (target.gt.this%nColOrd) then
+                  write (*,*) 'Cannot map coupling-sector root to a three-line colour flow',&
+                       old_perm(:,old_amp),transformed,this%current_list(root)%ew_pairs
+                  stop 1
+               endif
+               iterm=iterm+1
+               term_target(iterm)=target
+               term_sector(iterm)=isector
+               term_signs(iterm)=term_sign*old_term_sign(old_term)
+               term_curr2amp(:,iterm)=old_term_curr2amp(:,old_term)
+               counts(target,isector)=counts(target,isector)+1
+            enddo
+         enddo
+      enddo
+
+      deallocate(this%curr2amp,this%perm,this%include_amp,this%same_flavour_sum,&
+           this%same_flavour_sum_operation,this%sector_curr2amp,this%sector_present,&
+           this%sector_sign,this%sector_term_start,this%sector_term_curr2amp,&
+           this%sector_term_sign)
+      allocate(this%curr2amp(2,this%nColOrd))
+      allocate(this%perm(size(old_perm,1),this%nColOrd))
+      allocate(this%include_amp(this%nColOrd))
+      allocate(this%same_flavour_sum(this%nColOrd,2))
+      allocate(this%same_flavour_sum_operation(this%nColOrd,2))
+      allocate(this%sector_curr2amp(2,this%nColOrd,this%n_sectors))
+      allocate(this%sector_present(this%nColOrd,this%n_sectors))
+      allocate(this%sector_sign(this%nColOrd,this%n_sectors))
+      allocate(this%sector_term_start(0:this%nColOrd,this%n_sectors))
+      allocate(this%sector_term_curr2amp(2,nterms))
+      allocate(this%sector_term_sign(nterms))
+      this%curr2amp=0
+      this%sector_curr2amp=0
+      this%sector_present=.false.
+      this%sector_sign=1
+      offset=0
+      do isector=1,this%n_sectors
+         this%sector_term_start(0,isector)=offset
+         do flow=1,this%nColOrd
+            offset=offset+counts(flow,isector)
+            this%sector_term_start(flow,isector)=offset
+         enddo
+      enddo
+      allocate(cursor(this%nColOrd*this%n_sectors))
+      do isector=1,this%n_sectors
+         do flow=1,this%nColOrd
+            cursor((isector-1)*this%nColOrd+flow)=&
+                 this%sector_term_start(flow-1,isector)
+         enddo
+      enddo
+      do iterm=1,nterms
+         target=term_target(iterm)
+         isector=term_sector(iterm)
+         flow=(isector-1)*this%nColOrd+target
+         cursor(flow)=cursor(flow)+1
+         this%sector_term_curr2amp(:,cursor(flow))=term_curr2amp(:,iterm)
+         this%sector_term_sign(cursor(flow))=term_signs(iterm)
+      enddo
       do flow=1,this%nColOrd
-         this%curr2amp(:,flow)=old_curr2amp(:,representative(flow))
          this%perm(:,flow)=old_perm(:,representative(flow))
          this%include_amp(flow)=old_include_amp(representative(flow))
          this%same_flavour_sum(flow,:)=&
               old_same_flavour_sum(representative(flow),:)
          this%same_flavour_sum_operation(flow,:)=&
               old_same_flavour_sum_operation(representative(flow),:)
-         if (partner(flow).ne.0) then
-            this%three_line_partner_curr2amp(:,flow)=old_curr2amp(:,partner(flow))
-         endif
+         do isector=1,this%n_sectors
+            if (counts(flow,isector).eq.0) cycle
+            iterm=this%sector_term_start(flow-1,isector)+1
+            this%sector_curr2amp(:,flow,isector)=this%sector_term_curr2amp(:,iterm)
+            this%sector_sign(flow,isector)=this%sector_term_sign(iterm)
+            this%sector_present(flow,isector)=.true.
+            if (all(this%curr2amp(:,flow).eq.0)) &
+                 this%curr2amp(:,flow)=this%sector_curr2amp(:,flow,isector)
+         enddo
       enddo
       this%n_amps=this%nColOrd
       this%iproc_start(this%nprocs+1)=this%n_amps+1
+      deallocate(representative,flow_of_old,term_target,term_sector,term_signs,&
+           term_curr2amp,counts,cursor,old_curr2amp,old_perm,old_include_amp,&
+           old_same_flavour_sum,old_same_flavour_sum_operation,old_sector_curr2amp,&
+           old_sector_present,old_sector_sign,old_term_start,old_term_curr2amp,&
+           old_term_sign)
     end subroutine group_three_line_colour_flows
 
-    logical function same_three_line_flow(left,right)
+    subroutine construct_three_line_flow(word,ew_pairs,gluon_pairs,gluon_links,&
+         root_leg,closing_leg,iproc,transformed,flow_sign)
+      ! Reconstruct a three-quark-line colour tensor from its actual fermion
+      ! closures.  A type-9 q-qbar closure supplies the U(N) part of the
+      ! Fierz identity and therefore crosses the closed line with the line to
+      ! which that gluon is attached.  The recursive planar word alone is not
+      ! sufficient once a colour-singlet exchange has changed the ordering.
+      implicit none
+      integer,dimension(:),intent(in) :: word
+      integer,dimension(3),intent(in) :: ew_pairs,gluon_pairs,gluon_links
+      integer,intent(in) :: root_leg,closing_leg,iproc
+      integer,dimension(size(word)),intent(out) :: transformed
+      integer,intent(out) :: flow_sign
+      integer :: i,pos,line,nlines,pair_code,first,second,qleg,aleg,&
+           attach,attach_q,temp
+      integer,dimension(3) :: qlabel,aq_for_q
+
+      transformed=word
+      qlabel=0
+      aq_for_q=0
+      nlines=0
+      do pos=1,size(word)
+         if (is_quark_from_order(word(pos),iproc)) then
+            nlines=nlines+1
+            if (nlines.gt.3) then
+               write (*,*) 'Too many quark lines while reconstructing colour flow',word
+               stop 1
+            endif
+            qlabel(nlines)=word(pos)
+         endif
+      enddo
+      if (nlines.ne.3) then
+         write (*,*) 'Incomplete quark lines while reconstructing colour flow',word
+         stop 1
+      endif
+
+      do i=1,3
+         if (ew_pairs(i).ne.0) call add_three_line_baseline_pair(&
+              abs(ew_pairs(i)),iproc,qlabel,aq_for_q,word)
+         if (gluon_pairs(i).ne.0) call add_three_line_baseline_pair(&
+              gluon_pairs(i),iproc,qlabel,aq_for_q,word)
+      enddo
+      if (root_leg.ne.0 .and. closing_leg.ne.0) then
+         pair_code=min(root_leg,closing_leg)*(n+1)+max(root_leg,closing_leg)
+         call add_three_line_baseline_pair(pair_code,iproc,qlabel,aq_for_q,word)
+      endif
+      if (any(aq_for_q.eq.0)) then
+         write (*,*) 'Incomplete fermion-pair history for three-line colour flow',&
+              word,ew_pairs,gluon_pairs,root_leg,closing_leg,aq_for_q
+         stop 1
+      endif
+
+      do i=1,3
+         if (gluon_links(i).eq.0) cycle
+         pair_code=gluon_links(i)/(n+1)
+         attach=mod(gluon_links(i),n+1)
+         call decode_three_line_pair(pair_code,iproc,qleg,aleg)
+         if (is_quark_from_order(attach,iproc)) then
+            attach_q=attach
+         else
+            attach_q=0
+            do line=1,3
+               if (aq_for_q(line).eq.attach) then
+                  attach_q=qlabel(line)
+                  exit
+               endif
+            enddo
+         endif
+         if (attach_q.eq.0) then
+            write (*,*) 'Cannot locate gluon attachment line',word,gluon_links,attach
+            stop 1
+         endif
+         qleg=find_three_line_label(qleg,qlabel)
+         attach_q=find_three_line_label(attach_q,qlabel)
+         if (qleg.eq.0 .or. attach_q.eq.0) then
+            write (*,*) 'Cannot locate gluon Fierz endpoints',word,gluon_links
+            stop 1
+         endif
+         temp=aq_for_q(qleg)
+         aq_for_q(qleg)=aq_for_q(attach_q)
+         aq_for_q(attach_q)=temp
+      enddo
+
+      line=0
+      do pos=1,size(transformed)
+         if (is_quark_from_order(transformed(pos),iproc)) then
+            line=find_three_line_label(transformed(pos),qlabel)
+         elseif (is_antiquark_from_order(transformed(pos),iproc)) then
+            if (line.eq.0) then
+               write (*,*) 'Antiquark before quark in reconstructed colour flow',word
+               stop 1
+            endif
+            transformed(pos)=aq_for_q(line)
+         endif
+      enddo
+      flow_sign=1
+      do i=1,3
+         if (ew_pairs(i).ne.0) flow_sign=-flow_sign
+      enddo
+
+    end subroutine construct_three_line_flow
+
+    subroutine decode_three_line_pair(code,iproc,qout,aout)
+      implicit none
+      integer,intent(in) :: code,iproc
+      integer,intent(out) :: qout,aout
+      integer :: left,right
+      left=code/(n+1)
+      right=mod(code,n+1)
+      if (is_quark_from_order(left,iproc)) then
+         qout=left
+         aout=right
+      elseif (is_quark_from_order(right,iproc)) then
+         qout=right
+         aout=left
+      else
+         write (*,*) 'Closure does not contain a quark and antiquark',code,left,right
+         stop 1
+      endif
+    end subroutine decode_three_line_pair
+
+    integer function find_three_line_label(label,labels)
+      implicit none
+      integer,intent(in) :: label
+      integer,dimension(3),intent(in) :: labels
+      do find_three_line_label=1,3
+         if (labels(find_three_line_label).eq.label) return
+      enddo
+      find_three_line_label=0
+    end function find_three_line_label
+
+    subroutine add_three_line_baseline_pair(code,iproc,qlabel,aq_for_q,word)
+      implicit none
+      integer,intent(in) :: code,iproc
+      integer,dimension(3),intent(in) :: qlabel
+      integer,dimension(3),intent(inout) :: aq_for_q
+      integer,dimension(:),intent(in) :: word
+      integer :: qout,aout,qline
+      call decode_three_line_pair(code,iproc,qout,aout)
+      qline=find_three_line_label(qout,qlabel)
+      if (qline.eq.0) then
+         write (*,*) 'Cannot locate baseline quark endpoint',word,code
+         stop 1
+      endif
+      if (aq_for_q(qline).ne.0 .and. aq_for_q(qline).ne.aout) then
+         write (*,*) 'Conflicting fermion-pair history',word,code,aq_for_q(qline)
+         stop 1
+      endif
+      aq_for_q(qline)=aout
+    end subroutine add_three_line_baseline_pair
+
+    subroutine transform_quark_line_flow(word,pairs,iproc,transformed,flow_sign)
+      implicit none
+      integer,dimension(:),intent(in) :: word
+      integer,dimension(3),intent(in) :: pairs
+      integer,intent(in) :: iproc
+      integer,dimension(size(word)),intent(out) :: transformed
+      integer,intent(out) :: flow_sign
+      integer :: ipair,first,second,qleg,aleg,line,pos,nlines,other,temp
+      integer,dimension(3) :: qlabel,aqpos
+
+      transformed=word
+      flow_sign=1
+      do ipair=1,3
+         if (pairs(ipair).eq.0) cycle
+         ! Closing a colour-singlet fermion pair changes the canonical
+         ! Grassmann ordering once, irrespective of whether its antiquark
+         ! endpoint was already on the target string.
+         flow_sign=-flow_sign
+         first=abs(pairs(ipair))/(n+1)
+         second=mod(abs(pairs(ipair)),n+1)
+         if (is_quark_from_order(first,iproc)) then
+            qleg=first
+            aleg=second
+         elseif (is_quark_from_order(second,iproc)) then
+            qleg=second
+            aleg=first
+         else
+            write (*,*) 'EW closure does not contain a quark and antiquark',first,second
+            stop 1
+         endif
+         qlabel=0
+         aqpos=0
+         nlines=0
+         do pos=1,size(transformed)
+            if (is_quark_from_order(transformed(pos),iproc)) then
+               if (nlines.gt.0) aqpos(nlines)=pos-1
+               nlines=nlines+1
+               qlabel(nlines)=transformed(pos)
+            endif
+         enddo
+         aqpos(nlines)=size(transformed)
+         line=0
+         other=0
+         do pos=1,nlines
+            if (qlabel(pos).eq.qleg) line=pos
+            if (transformed(aqpos(pos)).eq.aleg) other=pos
+         enddo
+         if (line.eq.0 .or. other.eq.0) then
+            write (*,*) 'Cannot locate EW quark-pair endpoints in colour flow',&
+                 transformed,qleg,aleg
+            stop 1
+         endif
+         if (line.ne.other) then
+            temp=transformed(aqpos(line))
+            transformed(aqpos(line))=transformed(aqpos(other))
+            transformed(aqpos(other))=temp
+         endif
+      enddo
+    end subroutine transform_quark_line_flow
+
+    logical function same_three_line_flow(left,right,iproc_in)
       implicit none
       integer,dimension(:),intent(in) :: left,right
-      integer :: line,other,candidate
+      integer,intent(in),optional :: iproc_in
+      integer :: line,other,candidate,flow_iproc
       integer,dimension(3) :: left_len,right_len
       integer,dimension(n,3) :: left_lines,right_lines
 
-      call split_three_line_flow(left,left_len,left_lines)
-      call split_three_line_flow(right,right_len,right_lines)
+      flow_iproc=1
+      if (present(iproc_in)) flow_iproc=iproc_in
+      call split_three_line_flow(left,flow_iproc,left_len,left_lines)
+      call split_three_line_flow(right,flow_iproc,right_len,right_lines)
       same_three_line_flow=.true.
       do line=1,3
          other=0
@@ -473,9 +1371,10 @@ contains
       enddo
     end function same_three_line_flow
 
-    subroutine split_three_line_flow(word,line_len,lines)
+    subroutine split_three_line_flow(word,iproc,line_len,lines)
       implicit none
       integer,dimension(:),intent(in) :: word
+      integer,intent(in) :: iproc
       integer,dimension(3),intent(out) :: line_len
       integer,dimension(n,3),intent(out) :: lines
       integer :: pos,label,line,nord
@@ -486,7 +1385,7 @@ contains
       nord=size(word)
       do pos=1,nord
          label=word(pos)
-         if (is_quark_from_order(label,1)) then
+         if (is_quark_from_order(label,iproc)) then
             line=line+1
             if (line.gt.3) then
                write (*,*) 'Too many strings in three-line colour flow',word
@@ -679,20 +1578,42 @@ contains
          this%n_qqbar(iproc)=number_of_quark_lines(this%processes(1,iproc))
       enddo
       if (all(this%n_qqbar.le.2)) then
-         allocate(order(1:n,1,this%nprocs))
+         if (this%imode.ne.2 .and. any(this%n_qqbar.eq.2)) then
+            allocate(order(1:n,2,this%nprocs))
+         else
+            allocate(order(1:n,1,this%nprocs))
+         endif
       elseif (all(this%n_qqbar.le.3)) then
-         allocate(order(1:n,2,this%nprocs))
+         if (this%imode.ne.2) then
+            ! For a fixed three-line coefficient, colour-singlet closures can
+            ! map any endpoint pairing into the requested physical flow.  The
+            ! twelve entries are the six endpoint permutations, with both
+            ! orders of the two non-terminal strings.  They remain internal
+            ! recursive representations, not additional physical amplitudes.
+            allocate(order(1:n,12,this%nprocs))
+         else
+            allocate(order(1:n,2,this%nprocs))
+         endif
       else
          write (*,*) 'Cannot allocated all the needed orders'
          stop 1
       endif
       order(1:n,1,1:this%nprocs)=o(1:n,1:this%nprocs)
+      do j=2,size(order,2)
+         order(1:n,j,1:this%nprocs)=order(1:n,1,1:this%nprocs)
+      enddo
       allocate(this%n_sing(1:this%nprocs))
       allocate(this%same_flav(1:this%nprocs))
       do iproc=1,this%nprocs
          if (this%n_qqbar(iproc).eq.3) then
-            if (this%imode.eq.2) call canonicalize_three_line_order(iproc)
-            call fill_alternative_quark_order(iproc)
+            if (this%imode.eq.2) then
+               call canonicalize_three_line_order(iproc)
+               call fill_alternative_quark_order(iproc)
+            else
+               call fill_fixed_three_line_orders(iproc)
+            endif
+         elseif (this%n_qqbar(iproc).eq.2 .and. this%imode.ne.2) then
+            call fill_alternative_two_line_order(iproc)
          endif
          this%same_flav(iproc)=.false. ! This will be updated once the numerical check using 'find_same_flavour' is done
          this%n_sing(iproc)=0
@@ -892,6 +1813,162 @@ contains
          order(colored_positions(i),2,iproc)=alternative(i)
       enddo
     end subroutine fill_alternative_quark_order
+
+    subroutine fill_fixed_three_line_orders(iproc)
+      ! Enumerate every raw three-string representation which can transform
+      ! into one prescribed physical flow while keeping the closing external
+      ! antiquark fixed.  For each endpoint permutation, the two strings not
+      ! ending on the closing leg may occur in either recursive order.
+      implicit none
+      integer,intent(in) :: iproc
+      integer,parameter,dimension(3,6) :: endpoint_permutations=reshape(&
+           [1,2,3, 1,3,2, 2,1,3, 2,3,1, 3,1,2, 3,2,1],[3,6])
+      integer :: i,ncolored,nq,naq,iperm,iorient,iorder,line,last_line,&
+           nremaining,pos,prefix_pos
+      integer,dimension(3) :: q,aq,remaining,line_order
+      integer,dimension(n) :: colored_positions,colored_order,alternative
+
+      ncolored=0
+      nq=0
+      naq=0
+      q=0
+      aq=0
+      colored_positions=0
+      colored_order=0
+      do i=1,n
+         if (pm%is_singlet(this%processes(order(i,1,iproc),iproc))) cycle
+         ncolored=ncolored+1
+         colored_positions(ncolored)=i
+         colored_order(ncolored)=order(i,1,iproc)
+         if (is_quark_from_order(colored_order(ncolored),iproc)) then
+            nq=nq+1
+            if (nq.le.3) q(nq)=ncolored
+         elseif (is_antiquark_from_order(colored_order(ncolored),iproc)) then
+            naq=naq+1
+            if (naq.le.3) aq(naq)=ncolored
+         endif
+      enddo
+      if (nq.ne.3 .or. naq.ne.3 .or. q(1).ne.1 .or. &
+           aq(1).ne.q(2)-1 .or. aq(2).ne.q(3)-1 .or. &
+           aq(3).ne.ncolored) then
+         write (*,*) 'Malformed three-line fixed colour order',order(:,1,iproc)
+         stop 1
+      endif
+
+      do iperm=1,6
+         last_line=0
+         remaining=0
+         nremaining=0
+         do line=1,3
+            if (endpoint_permutations(line,iperm).eq.3) then
+               last_line=line
+            else
+               nremaining=nremaining+1
+               remaining(nremaining)=line
+            endif
+         enddo
+         if (last_line.eq.0 .or. nremaining.ne.2) then
+            write (*,*) 'Invalid internal three-line endpoint permutation',iperm
+            stop 1
+         endif
+         do iorient=1,2
+            if (iorient.eq.1) then
+               line_order=[remaining(1),remaining(2),last_line]
+            else
+               line_order=[remaining(2),remaining(1),last_line]
+            endif
+            alternative=0
+            pos=0
+            do i=1,3
+               line=line_order(i)
+               do prefix_pos=q(line),aq(line)-1
+                  pos=pos+1
+                  alternative(pos)=colored_order(prefix_pos)
+               enddo
+               pos=pos+1
+               alternative(pos)=colored_order(&
+                    aq(endpoint_permutations(line,iperm)))
+            enddo
+            if (pos.ne.ncolored .or. alternative(ncolored).ne.&
+                 colored_order(aq(3))) then
+               write (*,*) 'Cannot construct fixed three-line raw order',&
+                    iperm,iorient,alternative(1:pos)
+               stop 1
+            endif
+            iorder=2*(iperm-1)+iorient
+            order(:,iorder,iproc)=order(:,1,iproc)
+            do i=1,ncolored
+               order(colored_positions(i),iorder,iproc)=alternative(i)
+            enddo
+         enddo
+      enddo
+    end subroutine fill_fixed_three_line_orders
+
+    subroutine fill_alternative_two_line_order(iproc)
+      ! Add the complementary two-string representation without changing the
+      ! prescribed terminal leg.  This lets a fixed-order object import the
+      ! colour-singlet coefficient which is generated in the opposite raw
+      ! planar ordering.
+      implicit none
+      integer,intent(in) :: iproc
+      integer :: i,ncolored,nq,naq,first_q,second_q,first_aq,second_aq,&
+           first_len,second_len,pos
+      integer,dimension(n) :: colored_positions,colored_order,alternative
+
+      ncolored=0
+      nq=0
+      naq=0
+      first_q=0
+      second_q=0
+      first_aq=0
+      second_aq=0
+      colored_positions=0
+      colored_order=0
+      alternative=0
+      do i=1,n
+         if (pm%is_singlet(this%processes(order(i,1,iproc),iproc))) cycle
+         ncolored=ncolored+1
+         colored_positions(ncolored)=i
+         colored_order(ncolored)=order(i,1,iproc)
+         if (is_quark_from_order(colored_order(ncolored),iproc)) then
+            nq=nq+1
+            if (nq.eq.1) first_q=ncolored
+            if (nq.eq.2) second_q=ncolored
+         elseif (is_antiquark_from_order(colored_order(ncolored),iproc)) then
+            naq=naq+1
+            if (naq.eq.1) first_aq=ncolored
+            if (naq.eq.2) second_aq=ncolored
+         endif
+      enddo
+      if (nq.ne.2 .or. naq.ne.2 .or. first_q.ne.1 .or. &
+           first_aq.ne.second_q-1 .or. second_aq.ne.ncolored) then
+         write (*,*) 'Malformed two-line fixed colour order',order(:,1,iproc)
+         stop 1
+      endif
+      first_len=first_aq-first_q
+      second_len=second_aq-second_q
+      pos=0
+      ! Prefix of the second string, followed by the first antiquark.
+      alternative(1:second_len)=colored_order(second_q:second_aq-1)
+      pos=second_len
+      pos=pos+1
+      alternative(pos)=colored_order(first_aq)
+      ! Prefix of the first string, followed by the original terminal
+      ! antiquark.  Hence order(n,2,iproc)==order(n,1,iproc).
+      alternative(pos+1:pos+first_len)=colored_order(first_q:first_aq-1)
+      pos=pos+first_len
+      pos=pos+1
+      alternative(pos)=colored_order(second_aq)
+      if (pos.ne.ncolored) then
+         write (*,*) 'Cannot construct complementary two-line order',&
+              colored_order(1:ncolored),alternative(1:pos)
+         stop 1
+      endif
+      order(:,2,iproc)=order(:,1,iproc)
+      do i=1,ncolored
+         order(colored_positions(i),2,iproc)=alternative(i)
+      enddo
+    end subroutine fill_alternative_two_line_order
     
     subroutine set_max_cur()
       ! rough upper bound for the maximum number of currents
@@ -1010,13 +2087,21 @@ contains
       do i=1,pm%nint
          if ( current_list_local(ic1)%type.eq.pm%vertex_list(i)%particles(1) .and. &
               current_list_local(ic2)%type.eq.pm%vertex_list(i)%particles(2) ) then
+            ! Colour-singlet triple-vector vertices are unordered physical
+            ! vertices.  With several quark lines the two planar current
+            ! representations otherwise insert the same VVV diagram twice
+            ! (once for each ordering of its two child currents).
+            if (all(this%n_qqbar(1:this%nprocs).eq.3) .and. &
+                 pm%vertex_list(i)%type.eq.12 .and. &
+                 current_list_local(ic1)%bin.gt.current_list_local(ic2)%bin) cycle
             ichir=vertex_result_chirality(pm%vertex_list(i)%type, &
                  pm%vertex_list(i)%particles(3),pm%vertex_list(i)%coupl)
             if (ichir.eq.-99) cycle
             sgn=1d0
               call add_vertex(pm%vertex_list(i)%type, &
                             pm%vertex_list(i)%particles(3), &
-                            sgn*pm%vertex_list(i)%coupl,ichir)
+                            sgn*pm%vertex_list(i)%coupl,ichir,&
+                            pm%vertex_list(i)%n_gs,pm%vertex_list(i)%n_ew)
          endif
       enddo
     end subroutine add_if_allowed_threevertex
@@ -1119,8 +2204,7 @@ contains
             ! check that the final particle is not part of the combined
             ! current (it will be used to close the amplitude instead):
             if (btest(current_list_local(ic1)%bin+current_list_local(ic2)%bin,order(n,1,iproc)-1)) cycle
-            do_c: do c=1,2 ! check both orders for the quark-antiquark blocks when n_qqbar=3
-               if (this%n_qqbar(iproc).ne.3 .and. c.eq.2) cycle
+            do_c: do c=1,size(order,2) ! Fixed multi-line coefficients can need complementary raw orders.
                ! Check if they are compatible with the colour order of the iproc:
                do_j: do j=1,n
                   if (order(j,c,iproc).eq.ip(1)) then
@@ -1185,9 +2269,9 @@ contains
       valid_current_combination=.true.
     end function valid_current_combination
     
-    subroutine add_vertex(itype,ctype,coupl,ichir)
+    subroutine add_vertex(itype,ctype,coupl,ichir,n_gs,n_ew)
       implicit none
-      integer :: itype,ctype,ichir,ic
+      integer :: itype,ctype,ichir,ic,n_gs,n_ew
       real(kind=8),dimension(2) :: coupl
       if (isize.eq.n-1) then
          do ic=this%n_cur_start(n),this%n_cur_end(n)
@@ -1199,6 +2283,10 @@ contains
       if (this%n_vert.gt.max_vert) call increase_max_vert()
       interaction_list_local(this%n_vert)%type=itype
       interaction_list_local(this%n_vert)%chirality=ichir
+      interaction_list_local(this%n_vert)%n_gs=&
+           current_list_local(ic1)%n_gs+current_list_local(ic2)%n_gs+n_gs
+      interaction_list_local(this%n_vert)%n_ew=&
+           current_list_local(ic1)%n_ew+current_list_local(ic2)%n_ew+n_ew
       interaction_list_local(this%n_vert)%currents(1)=ic1
       interaction_list_local(this%n_vert)%currents(2)=ic2
       interaction_list_local(this%n_vert)%coupl=coupl
@@ -1231,7 +2319,8 @@ contains
       integer,intent(in) :: ic1,ic2,ctype,ichir
       integer,intent(in) :: invert
       integer,dimension(0:isize),intent(out) :: singlet_mv
-      integer :: i,n1,n2,ipos,mv12,nc1,nc2,ns1,ns2,n_mv12_1
+      integer :: i,j,n1,n2,ipos,mv12,nc1,nc2,ns1,ns2,n_mv12_1
+      integer :: n_pairs,pair_code,tmp_pair
       integer,dimension(isize) :: ord
       integer,dimension(:),allocatable :: ord1,spin1,et1,ord2,spin2,et2
       allocate(combine_currents%order(1:isize))
@@ -1239,6 +2328,267 @@ contains
       allocate(combine_currents%ext_type(1:isize))
       combine_currents%type=ctype
       combine_currents%chirality=ichir
+      combine_currents%n_gs=interaction_list_local(this%n_vert)%n_gs
+      combine_currents%n_ew=interaction_list_local(this%n_vert)%n_ew
+      combine_currents%open_quark_leg=0
+      combine_currents%ew_pairs=0
+      combine_currents%u1_pairs=0
+      combine_currents%gluon_pairs=0
+      combine_currents%u1_links=0
+      combine_currents%gluon_links=0
+      if (pm%is_quark(ctype).or.pm%is_antiquark(ctype)) then
+         if (current_list_local(ic1)%open_quark_leg.ne.0) then
+            combine_currents%open_quark_leg=current_list_local(ic1)%open_quark_leg
+         else
+            combine_currents%open_quark_leg=current_list_local(ic2)%open_quark_leg
+         endif
+      endif
+      n_pairs=0
+      do j=1,3
+         if (current_list_local(ic1)%ew_pairs(j).eq.0) cycle
+         n_pairs=n_pairs+1
+         combine_currents%ew_pairs(n_pairs)=current_list_local(ic1)%ew_pairs(j)
+      enddo
+      do j=1,3
+         if (current_list_local(ic2)%ew_pairs(j).eq.0) cycle
+         if (any(combine_currents%ew_pairs.eq.current_list_local(ic2)%ew_pairs(j))) cycle
+         n_pairs=n_pairs+1
+         if (n_pairs.gt.3) then
+            write (*,*) 'Too many colour-singlet quark-line closures'
+            stop 1
+         endif
+         combine_currents%ew_pairs(n_pairs)=current_list_local(ic2)%ew_pairs(j)
+      enddo
+      if ((interaction_list_local(this%n_vert)%type.eq.21 .or. &
+           interaction_list_local(this%n_vert)%type.eq.22) .and. &
+           current_list_local(ic1)%open_quark_leg.ne.0 .and. &
+           current_list_local(ic2)%open_quark_leg.ne.0) then
+         pair_code=min(current_list_local(ic1)%open_quark_leg,&
+              current_list_local(ic2)%open_quark_leg)*(n+1)+&
+              max(current_list_local(ic1)%open_quark_leg,&
+              current_list_local(ic2)%open_quark_leg)
+         ! Preserve which spinor-chain orientation closed the fermion pair.
+         ! The colour endpoints are the same, but the two orientations carry
+         ! different fermion-order conventions and must not be merged before
+         ! the physical-flow signs are assigned.
+         if (interaction_list_local(this%n_vert)%type.eq.22) &
+              pair_code=-pair_code
+         if (.not.any(combine_currents%ew_pairs.eq.pair_code)) then
+            n_pairs=n_pairs+1
+            if (n_pairs.gt.3) then
+               write (*,*) 'Too many colour-singlet quark-line closures'
+               stop 1
+            endif
+            combine_currents%ew_pairs(n_pairs)=pair_code
+         endif
+      endif
+      do i=1,n_pairs-1
+         do j=i+1,n_pairs
+            if (combine_currents%ew_pairs(j).lt.combine_currents%ew_pairs(i)) then
+               tmp_pair=combine_currents%ew_pairs(i)
+               combine_currents%ew_pairs(i)=combine_currents%ew_pairs(j)
+               combine_currents%ew_pairs(j)=tmp_pair
+            endif
+         enddo
+      enddo
+      n_pairs=0
+      do j=1,3
+         if (current_list_local(ic1)%gluon_links(j).eq.0) cycle
+         n_pairs=n_pairs+1
+         combine_currents%gluon_links(n_pairs)=current_list_local(ic1)%gluon_links(j)
+      enddo
+      do j=1,3
+         if (current_list_local(ic2)%gluon_links(j).eq.0) cycle
+         if (any(combine_currents%gluon_links.eq.current_list_local(ic2)%gluon_links(j))) cycle
+         n_pairs=n_pairs+1
+         if (n_pairs.gt.3) then
+            write (*,*) 'Too many gluon quark-line links'
+            stop 1
+         endif
+         combine_currents%gluon_links(n_pairs)=current_list_local(ic2)%gluon_links(j)
+      enddo
+      if (interaction_list_local(this%n_vert)%type.ge.4 .and. &
+           interaction_list_local(this%n_vert)%type.le.7 .and. &
+           (pm%is_quark(ctype).or.pm%is_antiquark(ctype))) then
+         if (pm%is_colour_flow_vector(current_list_local(ic1)%type)) then
+            do j=1,3
+               if (current_list_local(ic1)%gluon_pairs(j).eq.0) cycle
+               if (current_list_local(ic2)%open_quark_leg.eq.0) cycle
+               pair_code=current_list_local(ic1)%gluon_pairs(j)*(n+1)+&
+                    current_list_local(ic2)%open_quark_leg
+               if (any(combine_currents%gluon_links.eq.pair_code)) cycle
+               n_pairs=n_pairs+1
+               if (n_pairs.gt.3) then
+                  write (*,*) 'Too many gluon quark-line links'
+                  stop 1
+               endif
+               combine_currents%gluon_links(n_pairs)=pair_code
+            enddo
+         elseif (pm%is_colour_flow_vector(current_list_local(ic2)%type)) then
+            do j=1,3
+               if (current_list_local(ic2)%gluon_pairs(j).eq.0) cycle
+               if (current_list_local(ic1)%open_quark_leg.eq.0) cycle
+               pair_code=current_list_local(ic2)%gluon_pairs(j)*(n+1)+&
+                    current_list_local(ic1)%open_quark_leg
+               if (any(combine_currents%gluon_links.eq.pair_code)) cycle
+               n_pairs=n_pairs+1
+               if (n_pairs.gt.3) then
+                  write (*,*) 'Too many gluon quark-line links'
+                  stop 1
+               endif
+               combine_currents%gluon_links(n_pairs)=pair_code
+            enddo
+         endif
+      endif
+      do i=1,n_pairs-1
+         do j=i+1,n_pairs
+            if (combine_currents%gluon_links(j).lt.combine_currents%gluon_links(i)) then
+               tmp_pair=combine_currents%gluon_links(i)
+               combine_currents%gluon_links(i)=combine_currents%gluon_links(j)
+               combine_currents%gluon_links(j)=tmp_pair
+            endif
+         enddo
+      enddo
+      n_pairs=0
+      do j=1,3
+         if (current_list_local(ic1)%gluon_pairs(j).eq.0) cycle
+         n_pairs=n_pairs+1
+         combine_currents%gluon_pairs(n_pairs)=current_list_local(ic1)%gluon_pairs(j)
+      enddo
+      do j=1,3
+         if (current_list_local(ic2)%gluon_pairs(j).eq.0) cycle
+         if (any(combine_currents%gluon_pairs.eq.current_list_local(ic2)%gluon_pairs(j))) cycle
+         n_pairs=n_pairs+1
+         if (n_pairs.gt.3) then
+            write (*,*) 'Too many gluon quark-line closures'
+            stop 1
+         endif
+         combine_currents%gluon_pairs(n_pairs)=current_list_local(ic2)%gluon_pairs(j)
+      enddo
+      if (interaction_list_local(this%n_vert)%type.eq.9 .and. &
+           current_list_local(ic1)%open_quark_leg.ne.0 .and. &
+           current_list_local(ic2)%open_quark_leg.ne.0) then
+         pair_code=min(current_list_local(ic1)%open_quark_leg,&
+              current_list_local(ic2)%open_quark_leg)*(n+1)+&
+              max(current_list_local(ic1)%open_quark_leg,&
+              current_list_local(ic2)%open_quark_leg)
+         if (.not.any(combine_currents%gluon_pairs.eq.pair_code)) then
+            n_pairs=n_pairs+1
+            if (n_pairs.gt.3) then
+               write (*,*) 'Too many gluon quark-line closures'
+               stop 1
+            endif
+            combine_currents%gluon_pairs(n_pairs)=pair_code
+         endif
+      endif
+      do i=1,n_pairs-1
+         do j=i+1,n_pairs
+            if (combine_currents%gluon_pairs(j).lt.combine_currents%gluon_pairs(i)) then
+               tmp_pair=combine_currents%gluon_pairs(i)
+               combine_currents%gluon_pairs(i)=combine_currents%gluon_pairs(j)
+               combine_currents%gluon_pairs(j)=tmp_pair
+            endif
+         enddo
+      enddo
+      n_pairs=0
+      do j=1,3
+         if (current_list_local(ic1)%u1_links(j).eq.0) cycle
+         n_pairs=n_pairs+1
+         combine_currents%u1_links(n_pairs)=current_list_local(ic1)%u1_links(j)
+      enddo
+      do j=1,3
+         if (current_list_local(ic2)%u1_links(j).eq.0) cycle
+         if (any(combine_currents%u1_links.eq.current_list_local(ic2)%u1_links(j))) cycle
+         n_pairs=n_pairs+1
+         if (n_pairs.gt.3) then
+            write (*,*) 'Too many auxiliary-U(1) quark-line links'
+            stop 1
+         endif
+         combine_currents%u1_links(n_pairs)=current_list_local(ic2)%u1_links(j)
+      enddo
+      if (interaction_list_local(this%n_vert)%type.ge.4 .and. &
+           interaction_list_local(this%n_vert)%type.le.7 .and. &
+           (pm%is_quark(ctype).or.pm%is_antiquark(ctype))) then
+         if (current_list_local(ic1)%type.eq.99) then
+            do j=1,3
+               if (current_list_local(ic1)%u1_pairs(j).eq.0) cycle
+               if (current_list_local(ic2)%open_quark_leg.eq.0) cycle
+               pair_code=current_list_local(ic1)%u1_pairs(j)*(n+1)+&
+                    current_list_local(ic2)%open_quark_leg
+               if (any(combine_currents%u1_links.eq.pair_code)) cycle
+               n_pairs=n_pairs+1
+               if (n_pairs.gt.3) then
+                  write (*,*) 'Too many auxiliary-U(1) quark-line links'
+                  stop 1
+               endif
+               combine_currents%u1_links(n_pairs)=pair_code
+            enddo
+         elseif (current_list_local(ic2)%type.eq.99) then
+            do j=1,3
+               if (current_list_local(ic2)%u1_pairs(j).eq.0) cycle
+               if (current_list_local(ic1)%open_quark_leg.eq.0) cycle
+               pair_code=current_list_local(ic2)%u1_pairs(j)*(n+1)+&
+                    current_list_local(ic1)%open_quark_leg
+               if (any(combine_currents%u1_links.eq.pair_code)) cycle
+               n_pairs=n_pairs+1
+               if (n_pairs.gt.3) then
+                  write (*,*) 'Too many auxiliary-U(1) quark-line links'
+                  stop 1
+               endif
+               combine_currents%u1_links(n_pairs)=pair_code
+            enddo
+         endif
+      endif
+      do i=1,n_pairs-1
+         do j=i+1,n_pairs
+            if (combine_currents%u1_links(j).lt.combine_currents%u1_links(i)) then
+               tmp_pair=combine_currents%u1_links(i)
+               combine_currents%u1_links(i)=combine_currents%u1_links(j)
+               combine_currents%u1_links(j)=tmp_pair
+            endif
+         enddo
+      enddo
+      n_pairs=0
+      do j=1,3
+         if (current_list_local(ic1)%u1_pairs(j).eq.0) cycle
+         n_pairs=n_pairs+1
+         combine_currents%u1_pairs(n_pairs)=current_list_local(ic1)%u1_pairs(j)
+      enddo
+      do j=1,3
+         if (current_list_local(ic2)%u1_pairs(j).eq.0) cycle
+         if (any(combine_currents%u1_pairs.eq.current_list_local(ic2)%u1_pairs(j))) cycle
+         n_pairs=n_pairs+1
+         if (n_pairs.gt.3) then
+            write (*,*) 'Too many auxiliary-U(1) quark-line closures'
+            stop 1
+         endif
+         combine_currents%u1_pairs(n_pairs)=current_list_local(ic2)%u1_pairs(j)
+      enddo
+      if (interaction_list_local(this%n_vert)%type.eq.8 .and. &
+           current_list_local(ic1)%open_quark_leg.ne.0 .and. &
+           current_list_local(ic2)%open_quark_leg.ne.0) then
+         pair_code=min(current_list_local(ic1)%open_quark_leg,&
+              current_list_local(ic2)%open_quark_leg)*(n+1)+&
+              max(current_list_local(ic1)%open_quark_leg,&
+              current_list_local(ic2)%open_quark_leg)
+         if (.not.any(combine_currents%u1_pairs.eq.pair_code)) then
+            n_pairs=n_pairs+1
+            if (n_pairs.gt.3) then
+               write (*,*) 'Too many auxiliary-U(1) quark-line closures'
+               stop 1
+            endif
+            combine_currents%u1_pairs(n_pairs)=pair_code
+         endif
+      endif
+      do i=1,n_pairs-1
+         do j=i+1,n_pairs
+            if (combine_currents%u1_pairs(j).lt.combine_currents%u1_pairs(i)) then
+               tmp_pair=combine_currents%u1_pairs(i)
+               combine_currents%u1_pairs(i)=combine_currents%u1_pairs(j)
+               combine_currents%u1_pairs(j)=tmp_pair
+            endif
+         enddo
+      enddo
       combine_currents%bin=current_list_local(ic1)%bin+current_list_local(ic2)%bin
       combine_currents%iproc=current_list_local(ic1)%iproc.and.current_list_local(ic2)%iproc
       combine_currents%ext_cur=current_list_local(ic1)%ext_cur+current_list_local(ic2)%ext_cur
@@ -1507,17 +2857,33 @@ contains
       implicit none
       type(current),intent(in) :: new_current
       logical,intent(in) :: vertex_sign
-      logical :: sgn
-      integer :: ic,key
+      logical :: sgn,three_line_current
+      integer :: i,ic,key
       integer(kind=8) :: val
       integer :: lep1,lep2
       if (this%imode.eq.1 .or. this%imode.eq.3) then
+         three_line_current=.false.
+         do i=1,this%nprocs
+            if (new_current%iproc%test_bit(i) .and. this%n_qqbar(i).eq.3) &
+                 three_line_current=.true.
+         enddo
          ! Check if this interaction can be added to an existing current
          do ic=1,this%n_cur
             if (new_current%type.ne.current_list_local(ic)%type) cycle
             if (new_current%chirality.ne.current_list_local(ic)%chirality) cycle
+            if (new_current%n_gs.ne.current_list_local(ic)%n_gs) cycle
+            if (new_current%n_ew.ne.current_list_local(ic)%n_ew) cycle
+            if (new_current%open_quark_leg.ne.current_list_local(ic)%open_quark_leg) cycle
+            if (any(new_current%ew_pairs.ne.current_list_local(ic)%ew_pairs)) cycle
+            if (any(new_current%u1_pairs.ne.current_list_local(ic)%u1_pairs)) cycle
+            if (any(new_current%gluon_pairs.ne.current_list_local(ic)%gluon_pairs)) cycle
+            if (any(new_current%u1_links.ne.current_list_local(ic)%u1_links)) cycle
+            if (any(new_current%gluon_links.ne.current_list_local(ic)%gluon_links)) cycle
             if (new_current%bin.ne.current_list_local(ic)%bin) cycle
             if (new_current%ext_cur.ne.current_list_local(ic)%ext_cur) cycle
+            if (three_line_current) then
+               if (any(new_current%order.ne.current_list_local(ic)%order)) cycle
+            endif
             call append_current_vertex(ic,this%n_vert,vertex_sign)
             return
          enddo
@@ -1548,11 +2914,46 @@ contains
          call get_value(new_current%order,new_current%type,val)
          call solve_dict(val,key)
          ic=key_to_current(key,new_current%iproc%bitset_to_integer())
+         ! Coupling order is part of current identity.  The colour-order
+         ! dictionary predates this axis, so search the (usually very short)
+         ! equal-key family when its representative has another order.
+         if (ic.ne.0) then
+            if (current_list_local(ic)%n_gs.ne.new_current%n_gs .or. &
+                 current_list_local(ic)%n_ew.ne.new_current%n_ew .or. &
+                 current_list_local(ic)%chirality.ne.new_current%chirality .or. &
+                 current_list_local(ic)%open_quark_leg.ne.new_current%open_quark_leg .or. &
+                 any(current_list_local(ic)%ew_pairs.ne.new_current%ew_pairs) .or. &
+                 any(current_list_local(ic)%u1_pairs.ne.new_current%u1_pairs) .or. &
+                 any(current_list_local(ic)%gluon_pairs.ne.new_current%gluon_pairs) .or. &
+                 any(current_list_local(ic)%u1_links.ne.new_current%u1_links) .or. &
+                 any(current_list_local(ic)%gluon_links.ne.new_current%gluon_links)) then
+               ic=0
+               do i=1,this%n_cur
+                  if (current_list_local(i)%type.ne.new_current%type) cycle
+                  if (current_list_local(i)%bin.ne.new_current%bin) cycle
+                  if (current_list_local(i)%n_gs.ne.new_current%n_gs) cycle
+                 if (current_list_local(i)%n_ew.ne.new_current%n_ew) cycle
+                 if (current_list_local(i)%chirality.ne.new_current%chirality) cycle
+                  if (current_list_local(i)%open_quark_leg.ne.new_current%open_quark_leg) cycle
+                  if (any(current_list_local(i)%ew_pairs.ne.new_current%ew_pairs)) cycle
+                  if (any(current_list_local(i)%u1_pairs.ne.new_current%u1_pairs)) cycle
+                  if (any(current_list_local(i)%gluon_pairs.ne.new_current%gluon_pairs)) cycle
+                  if (any(current_list_local(i)%u1_links.ne.new_current%u1_links)) cycle
+                  if (any(current_list_local(i)%gluon_links.ne.new_current%gluon_links)) cycle
+                  if (any(current_list_local(i)%order(1:isize).ne.new_current%order(1:isize))) cycle
+                  if (current_list_local(i)%iproc%bitset_to_integer().ne.&
+                       new_current%iproc%bitset_to_integer()) cycle
+                  ic=i
+                  exit
+               enddo
+            endif
+         endif
          if (ic.eq.0) then
             ! initialise new current
             this%n_cur=this%n_cur+1
             if (this%n_cur.gt.max_cur) call increase_max_cur()
-            key_to_current(key,new_current%iproc%bitset_to_integer())=this%n_cur
+            if (key_to_current(key,new_current%iproc%bitset_to_integer()).eq.0) &
+                 key_to_current(key,new_current%iproc%bitset_to_integer())=this%n_cur
             ic=this%n_cur
             current_list_local(ic)=new_current
             current_list_local(ic)%mass=pm%get_mass(new_current%type)
@@ -1887,8 +3288,9 @@ contains
   subroutine write_init_amps_to_file(this,n,iunit)
     implicit none
     class(amplitude_QCD) :: this
-    integer :: n,iunit,ic,iv,isize,iamp,iproc
-    write (iunit) this%n_cur,this%n_vert,this%imode,this%nColOrd,this%max_pp,this%n_amps,this%nprocs
+    integer :: n,iunit,ic,iv,isize,iamp,iproc,nterms,itmp
+    write (iunit) this%n_cur,this%n_vert,this%imode,this%nColOrd,this%max_pp,this%n_amps,this%nprocs,this%n_sectors
+    write (iunit) this%sector_powers(:,1:this%n_sectors)
     write (iunit) this%n_cur_start(1:n)
     write (iunit) this%n_cur_end(1:n)
     write (iunit) this%n_vert_start(2:n-1)
@@ -1898,7 +3300,11 @@ contains
        do ic=this%n_cur_start(isize),this%n_cur_end(isize)
           call this%current_list(ic)%iproc%bitset_write_unformatted(iunit)
           write (iunit) this%current_list(ic)%type,this%current_list(ic)%bin,this%current_list(ic)%n_vert, &
-               this%current_list(ic)%chirality, &
+               this%current_list(ic)%chirality,this%current_list(ic)%n_gs,this%current_list(ic)%n_ew, &
+               this%current_list(ic)%open_quark_leg,this%current_list(ic)%ew_pairs, &
+               this%current_list(ic)%u1_pairs, &
+               this%current_list(ic)%gluon_pairs, &
+               this%current_list(ic)%u1_links,this%current_list(ic)%gluon_links, &
                this%current_list(ic)%mass,this%current_list(ic)%width
           write (iunit) this%current_list(ic)%vertices(1:this%current_list(ic)%n_vert)
           write (iunit) this%current_list(ic)%vertex_sign(1:this%current_list(ic)%n_vert)
@@ -1907,14 +3313,14 @@ contains
     enddo
     ! interaction_list
     do iv=1,this%n_vert
+       itmp=0
+       if (allocated(this%interaction_list(iv)%singlet_mv)) &
+            itmp=this%interaction_list(iv)%singlet_mv(0)
        write (iunit) this%interaction_list(iv)%type,this%interaction_list(iv)%chirality,&
+            this%interaction_list(iv)%n_gs,this%interaction_list(iv)%n_ew,&
             this%interaction_list(iv)%currents(1:2),&
-            this%interaction_list(iv)%coupl(1:2)
-       if (allocated(this%interaction_list(iv)%singlet_mv)) then
-          write (iunit) this%interaction_list(iv)%singlet_mv(0:this%interaction_list(iv)%singlet_mv(0))
-       else
-          write (iunit) 0
-       endif
+            this%interaction_list(iv)%coupl(1:2),itmp
+       if (itmp.gt.0) write (iunit) this%interaction_list(iv)%singlet_mv(1:itmp)
     enddo
     ! momenta array
     write (iunit) this%pp_bin_to_i(1:maskr(n))
@@ -1930,19 +3336,40 @@ contains
     do iproc=1,this%nprocs
        do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
           write (iunit) this%include_amp(iamp),this%same_flavour_sum(iamp,1:2),this%same_flavour_sum_operation(iamp,1:2)
-          write (iunit) this%spins(1:n,1,iamp)
+          if (allocated(this%spins)) then
+             write (iunit) this%spins(1:n,1,iamp)
+          else
+             write (iunit) [(0,iv=1,n)]
+          endif
           write (iunit) this%perm(1:n-this%n_sing(1),iamp)
           if (.not.this%same_flav(iproc)) write (iunit) this%curr2amp(1:2,iamp)
+          write (iunit) this%sector_present(iamp,1:this%n_sectors)
+          write (iunit) this%sector_sign(iamp,1:this%n_sectors)
+          write (iunit) this%sector_curr2amp(:,iamp,1:this%n_sectors)
+          if (allocated(this%sector_three_line_partner_curr2amp)) then
+             write (iunit) this%sector_three_line_partner_curr2amp(:,iamp,1:this%n_sectors)
+          else
+             write (iunit) reshape([(0,iv=1,2*this%n_sectors)],[2,this%n_sectors])
+          endif
        enddo
     enddo
+    nterms=size(this%sector_term_sign)
+    write (iunit) nterms
+    write (iunit) this%sector_term_start(0:this%n_amps,1:this%n_sectors)
+    if (nterms.gt.0) then
+       write (iunit) this%sector_term_curr2amp(:,1:nterms)
+       write (iunit) this%sector_term_sign(1:nterms)
+    endif
   end subroutine write_init_amps_to_file
 
   subroutine read_init_amps_from_file(this,n,iunit)
     implicit none
     class(amplitude_QCD) :: this
-    integer :: n,iunit,ic,iv,isize,iamp,iproc,itmp
+    integer :: n,iunit,ic,iv,isize,iamp,iproc,itmp,nterms
     call deallocate_all()
-    read (iunit) this%n_cur,this%n_vert,this%imode,this%nColOrd,this%max_pp,this%n_amps,this%nprocs
+    read (iunit) this%n_cur,this%n_vert,this%imode,this%nColOrd,this%max_pp,this%n_amps,this%nprocs,this%n_sectors
+    allocate(this%sector_powers(2,this%n_sectors))
+    read (iunit) this%sector_powers
     allocate(this%n_cur_start(1:n))
     allocate(this%n_cur_end(1:n))
     read (iunit) this%n_cur_start(1:n)
@@ -1957,7 +3384,12 @@ contains
        do ic=this%n_cur_start(isize),this%n_cur_end(isize)
           call this%current_list(ic)%iproc%bitset_read_unformatted(iunit)
           read (iunit) this%current_list(ic)%type,this%current_list(ic)%bin,this%current_list(ic)%n_vert, &
-               this%current_list(ic)%chirality,this%current_list(ic)%mass,this%current_list(ic)%width
+               this%current_list(ic)%chirality,this%current_list(ic)%n_gs,this%current_list(ic)%n_ew,&
+               this%current_list(ic)%open_quark_leg,this%current_list(ic)%ew_pairs,&
+               this%current_list(ic)%u1_pairs,&
+               this%current_list(ic)%gluon_pairs,&
+               this%current_list(ic)%u1_links,this%current_list(ic)%gluon_links,&
+               this%current_list(ic)%mass,this%current_list(ic)%width
           allocate(this%current_list(ic)%vertices(1:this%current_list(ic)%n_vert))
           allocate(this%current_list(ic)%vertex_sign(1:this%current_list(ic)%n_vert))
           read (iunit) this%current_list(ic)%vertices(1:this%current_list(ic)%n_vert)
@@ -1973,6 +3405,7 @@ contains
     allocate(this%interaction_list(1:this%n_vert))
     do iv=1,this%n_vert
        read (iunit) this%interaction_list(iv)%type,this%interaction_list(iv)%chirality,&
+            this%interaction_list(iv)%n_gs,this%interaction_list(iv)%n_ew,&
             this%interaction_list(iv)%currents(1:2),this%interaction_list(iv)%coupl(1:2),itmp
        if (itmp.gt.0) then
           allocate(this%interaction_list(iv)%singlet_mv(0:itmp))
@@ -2001,20 +3434,38 @@ contains
     ! amp specific information
     allocate(this%include_amp(1:this%n_amps))
     allocate(this%same_flavour_sum(1:this%n_amps,1:2))
+    allocate(this%same_flavour_sum_operation(1:this%n_amps,1:2))
     allocate(this%spins(1:n,1,1:this%n_amps))
     allocate(this%perm(1:n-this%n_sing(1),1:this%n_amps))
     do iproc=1,this%nprocs
        if (this%same_flav(iproc)) exit
     enddo
     allocate(this%curr2amp(1:2,1:this%iproc_start(iproc)-1))
+    allocate(this%sector_present(this%n_amps,this%n_sectors))
+    allocate(this%sector_sign(this%n_amps,this%n_sectors))
+    allocate(this%sector_curr2amp(2,this%n_amps,this%n_sectors))
+    allocate(this%sector_three_line_partner_curr2amp(2,this%n_amps,this%n_sectors))
     do iproc=1,this%nprocs
        do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
           read (iunit) this%include_amp(iamp),this%same_flavour_sum(iamp,1:2),this%same_flavour_sum_operation(iamp,1:2)
           read (iunit) this%spins(1:n,1,iamp)
           read (iunit) this%perm(1:n-this%n_sing(1),iamp)
           if (.not.this%same_flav(iproc)) read (iunit) this%curr2amp(1:2,iamp)
+          read (iunit) this%sector_present(iamp,1:this%n_sectors)
+          read (iunit) this%sector_sign(iamp,1:this%n_sectors)
+          read (iunit) this%sector_curr2amp(:,iamp,1:this%n_sectors)
+          read (iunit) this%sector_three_line_partner_curr2amp(:,iamp,1:this%n_sectors)
        enddo
     enddo
+    read (iunit) nterms
+    allocate(this%sector_term_start(0:this%n_amps,this%n_sectors))
+    allocate(this%sector_term_curr2amp(2,nterms))
+    allocate(this%sector_term_sign(nterms))
+    read (iunit) this%sector_term_start
+    if (nterms.gt.0) then
+       read (iunit) this%sector_term_curr2amp
+       read (iunit) this%sector_term_sign
+    endif
   contains
     subroutine deallocate_all()
       implicit none
@@ -2049,6 +3500,15 @@ contains
       if (allocated(this%spins)) deallocate(this%spins)
       if (allocated(this%perm)) deallocate(this%perm)
       if (allocated(this%curr2amp)) deallocate(this%curr2amp)
+      if (allocated(this%sector_powers)) deallocate(this%sector_powers)
+      if (allocated(this%sector_curr2amp)) deallocate(this%sector_curr2amp)
+      if (allocated(this%sector_three_line_partner_curr2amp)) &
+           deallocate(this%sector_three_line_partner_curr2amp)
+      if (allocated(this%sector_present)) deallocate(this%sector_present)
+      if (allocated(this%sector_sign)) deallocate(this%sector_sign)
+      if (allocated(this%sector_term_start)) deallocate(this%sector_term_start)
+      if (allocated(this%sector_term_curr2amp)) deallocate(this%sector_term_curr2amp)
+      if (allocated(this%sector_term_sign)) deallocate(this%sector_term_sign)
     end subroutine deallocate_all
   end subroutine read_init_amps_from_file
   
@@ -2085,10 +3545,11 @@ contains
              allocate(this%interaction_list(iv)%val_c(1:dim))
           endif
        enddo
+       if (.not.allocated(this%amps)) allocate(this%amps(1:this%n_amps))
+       if (.not.allocated(this%amps_by_order)) &
+            allocate(this%amps_by_order(1:this%n_amps,1:this%n_sectors))
        if (use_real_gluons .and. this%n_qqbar(1).eq.0) then
           if (.not. allocated(this%amps_r)) allocate(this%amps_r(1:this%n_amps))
-       else
-          if (.not. allocated(this%amps)) allocate(this%amps(1:this%n_amps))
        endif
     endif
     
@@ -2415,14 +3876,14 @@ contains
           elseif(this%interaction_list(iv)%type.eq.21) then
              if (this%current_list(this%interaction_list(iv)%currents(1))%chirality.ne.0 .or. &
                  this%current_list(this%interaction_list(iv)%currents(2))%chirality.ne.0) then
-                call LeptonAntileptonToVector_weyl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
+                call FermionAntifermionToVector_weyl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
                                                this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
                                                this%interaction_list(iv)%val_c(1:4),&
                                                this%interaction_list(iv)%coupl(1:2),&
                                                this%current_list(this%interaction_list(iv)%currents(1))%chirality,&
                                                this%current_list(this%interaction_list(iv)%currents(2))%chirality)
              else
-                call LeptonAntileptonToVector(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
+                call FermionAntifermionToVector(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
                                           this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
                                           this%interaction_list(iv)%val_c(1:4),&
                                           this%interaction_list(iv)%coupl(1:2))
@@ -2431,14 +3892,14 @@ contains
           elseif(this%interaction_list(iv)%type.eq.22) then
              if (this%current_list(this%interaction_list(iv)%currents(1))%chirality.ne.0 .or. &
                  this%current_list(this%interaction_list(iv)%currents(2))%chirality.ne.0) then
-                call AntileptonLeptonToVector_weyl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
+                call AntifermionFermionToVector_weyl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
                                                this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
                                                this%interaction_list(iv)%val_c(1:4),&
                                                this%interaction_list(iv)%coupl(1:2),&
                                                this%current_list(this%interaction_list(iv)%currents(1))%chirality,&
                                                this%current_list(this%interaction_list(iv)%currents(2))%chirality)
              else
-                call  AntileptonLeptonToVector(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
+                call AntifermionFermionToVector(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
                                           this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
                                           this%interaction_list(iv)%val_c(1:4),&
                                           this%interaction_list(iv)%coupl(1:2))
@@ -2600,94 +4061,75 @@ contains
 
     subroutine compute_amps_from_currents
       implicit none
-      integer :: iamp,iproc,idau
-      if (this%imode.eq.1 .or. this%imode.eq.3) then
-         if (use_real_gluons .and. all(this%n_qqbar(1:this%nprocs).eq.0)) then
-            do iamp=1,this%n_amps
-               this%amps_r(iamp)=sum(this%current_list(this%curr2amp(1,iamp))%val_r(1:4)* &
-                                     this%current_list(this%curr2amp(2,iamp))%val_r(1:4))
-            enddo
-         else
-            do iproc=1,this%nprocs
-               do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
-                  if (.not.this%same_flav(iproc)) then
-                     this%amps(iamp)=contract_currents(iamp)
-                  endif
-               enddo
-            enddo
-            do iproc=1,this%nprocs
-               do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
-                  if (this%same_flav(iproc)) then
-                     ! same-flavour amps are build from two different-flavour amps
-                     this%amps(iamp)=(0d0,0d0)
-                     do idau=1,2
-                        if (this%same_flavour_sum(iamp,idau).gt.0) then
-                           this%amps(iamp)=this%amps(iamp)+apply_operation(iamp,idau)
-                        endif
-                     enddo
-                  endif
-               enddo
-            enddo
-         endif
-      elseif(this%imode.eq.2) then
-         if (use_real_gluons .and. this%n_qqbar(1).eq.0) then
-            do iamp=1,this%n_amps
-               if (use_symmetry .and. this%n_qqbar(1).eq.0 .and. iamp.gt.this%n_amps/2 .and. mod(n,2).eq.1) then
-                  this%amps_r(iamp)=-sum(this%current_list(this%curr2amp(1,iamp))%val_r(1:4)* &
-                       this%current_list(this%curr2amp(2,iamp))%val_r(1:4))
+      integer :: iamp,iproc,idau,isector,iterm
+      this%amps_by_order=(0d0,0d0)
+      do iproc=1,this%nprocs
+         do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
+            if (this%same_flav(iproc)) cycle
+            do isector=1,this%n_sectors
+               if (.not.this%sector_present(iamp,isector)) cycle
+               if (allocated(this%sector_term_start)) then
+                  do iterm=this%sector_term_start(iamp-1,isector)+1,&
+                       this%sector_term_start(iamp,isector)
+                     this%amps_by_order(iamp,isector)=this%amps_by_order(iamp,isector)+&
+                          dble(this%sector_term_sign(iterm))*contract_current_pair(&
+                          this%sector_term_curr2amp(1,iterm),&
+                          this%sector_term_curr2amp(2,iterm))
+                  enddo
                else
-                  this%amps_r(iamp)=sum(this%current_list(this%curr2amp(1,iamp))%val_r(1:4)* &
-                       this%current_list(this%curr2amp(2,iamp))%val_r(1:4))
+                  this%amps_by_order(iamp,isector)=contract_sector(iamp,isector)
+                  if (allocated(this%sector_three_line_partner_curr2amp)) then
+                     if (this%sector_three_line_partner_curr2amp(1,iamp,isector).ne.0) then
+                        this%amps_by_order(iamp,isector)=this%amps_by_order(iamp,isector)+&
+                             contract_current_pair(&
+                             this%sector_three_line_partner_curr2amp(1,iamp,isector),&
+                             this%sector_three_line_partner_curr2amp(2,iamp,isector))
+                     endif
+                  endif
+                  this%amps_by_order(iamp,isector)=dble(this%sector_sign(iamp,isector))*&
+                       this%amps_by_order(iamp,isector)
                endif
+               if (use_symmetry .and. this%n_qqbar(1).eq.0 .and. &
+                    iamp.gt.this%n_amps/2 .and. mod(n,2).eq.1) &
+                    this%amps_by_order(iamp,isector)=-this%amps_by_order(iamp,isector)
             enddo
-         else
-            do iproc=1,this%nprocs
-               do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
-                  if (use_symmetry .and. this%n_qqbar(1).eq.0 .and. iamp.gt.this%n_amps/2 .and. mod(n,2).eq.1) then
-                     if (iproc.ne.1) then
-                        write (*,*) 'this can only be one process at the time'
-                        stop 1
-                     endif
-                     this%amps(iamp)=-contract_currents(iamp)
-                  else
-                     if (.not.this%same_flav(iproc)) then
-                        this%amps(iamp)=contract_currents(iamp)
-                        ! Fortran does not require short-circuit evaluation of
-                        ! .and.; keep the allocation test separate from the
-                        ! array reference (zero-sized partner maps are valid).
-                        if (allocated(this%three_line_partner_curr2amp)) then
-                           if (iamp.le.size(this%three_line_partner_curr2amp,2)) then
-                              if (this%three_line_partner_curr2amp(1,iamp).ne.0) then
-                                 this%amps(iamp)=this%amps(iamp)+contract_current_pair(&
-                                      this%three_line_partner_curr2amp(1,iamp),&
-                                      this%three_line_partner_curr2amp(2,iamp))
-                              endif
-                           endif
-                        endif
-                     endif
+         enddo
+      enddo
+      ! Same-flavour amplitudes are linear combinations of physical amplitudes;
+      ! apply exactly the same operation independently in every sector.
+      do iproc=1,this%nprocs
+         if (.not.this%same_flav(iproc)) cycle
+         do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
+            do isector=1,this%n_sectors
+               this%sector_present(iamp,isector)=.false.
+               do idau=1,2
+                  if (this%same_flavour_sum(iamp,idau).gt.0) then
+                     this%amps_by_order(iamp,isector)=this%amps_by_order(iamp,isector)+&
+                          apply_sector_operation(iamp,idau,isector)
+                     if (this%sector_present(this%same_flavour_sum(iamp,idau),isector)) &
+                          this%sector_present(iamp,isector)=.true.
                   endif
                enddo
             enddo
-            do iproc=1,this%nprocs
-               do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
-                  if (use_symmetry .and. this%n_qqbar(1).eq.0 .and. iamp.gt.this%n_amps/2 .and. mod(n,2).eq.1) then
-                     cycle
-                  else
-                     if (this%same_flav(iproc)) then
-                        ! same-flavour amps are build from two different-flavour amps
-                        this%amps(iamp)=(0d0,0d0)
-                        do idau=1,2
-                           if (this%same_flavour_sum(iamp,idau).gt.0) then
-                              this%amps(iamp)=this%amps(iamp)+apply_operation(iamp,idau)
-                           endif
-                        enddo
-                     endif
-                  endif
-               enddo
-            enddo
-         endif
-      endif
+         enddo
+      enddo
+      this%amps=sum(this%amps_by_order,dim=2)
+      if (use_real_gluons .and. all(this%n_qqbar(1:this%nprocs).eq.0)) this%amps_r=dble(this%amps)
     end subroutine compute_amps_from_currents
+
+    complex(kind=8) function contract_sector(iamp,isector)
+      implicit none
+      integer,intent(in) :: iamp,isector
+      integer :: ic1,ic2
+      ic1=this%sector_curr2amp(1,iamp,isector)
+      ic2=this%sector_curr2amp(2,iamp,isector)
+      if (use_real_gluons .and. all(this%n_qqbar(1:this%nprocs).eq.0)) then
+         contract_sector=cmplx(sum(this%current_list(ic1)%val_r(1:4)*&
+              this%current_list(ic2)%val_r(1:4)),0d0,kind=8)
+      else
+         contract_sector=contract_current_pair(ic1,ic2)
+      endif
+    end function contract_sector
 
     complex(kind=8) function contract_currents(iamp)
       implicit none
@@ -2714,6 +4156,18 @@ contains
       if (btest(this%same_flavour_sum_operation(iamp,idau),0)) apply_operation=-conjg(apply_operation)
       if (btest(this%same_flavour_sum_operation(iamp,idau),1)) apply_operation=conjg(apply_operation)
     end function apply_operation
+
+    complex(kind=8) function apply_sector_operation(iamp,idau,isector)
+      implicit none
+      integer,intent(in) :: iamp,idau,isector
+      apply_sector_operation=this%amps_by_order(this%same_flavour_sum(iamp,idau),isector)
+      if (btest(this%same_flavour_sum_operation(iamp,idau),2)) &
+           apply_sector_operation=cmplx(aimag(apply_sector_operation),dble(apply_sector_operation))
+      if (btest(this%same_flavour_sum_operation(iamp,idau),0)) &
+           apply_sector_operation=-conjg(apply_sector_operation)
+      if (btest(this%same_flavour_sum_operation(iamp,idau),1)) &
+           apply_sector_operation=conjg(apply_sector_operation)
+    end function apply_sector_operation
     
     subroutine combine_interactions(dim)
       implicit none
@@ -3828,6 +5282,8 @@ contains
           endif
           do ic2=ic1+1,this%n_cur_end(isize)
              if (.not.include_cur(ic2)) cycle
+             if (this%current_list(ic1)%n_gs.ne.this%current_list(ic2)%n_gs) cycle
+             if (this%current_list(ic1)%n_ew.ne.this%current_list(ic2)%n_ew) cycle
              if (size(this%current_list(ic1)%val_c).ne.size(this%current_list(ic2)%val_c)) cycle
              if ( sum(abs(this%current_list(ic1)%val_c-this%current_list(ic2)%val_c))/ &
                   sum(abs(this%current_list(ic1)%val_c)+abs(this%current_list(ic2)%val_c)).lt.tiny) then
@@ -3863,6 +5319,8 @@ contains
           endif
           do iv2=iv1+1,this%n_vert_end(isize)
              if (.not.include_vert(iv2)) cycle
+             if (this%interaction_list(iv1)%n_gs.ne.this%interaction_list(iv2)%n_gs) cycle
+             if (this%interaction_list(iv1)%n_ew.ne.this%interaction_list(iv2)%n_ew) cycle
              if (size(this%interaction_list(iv1)%val_c).ne.size(this%interaction_list(iv2)%val_c)) cycle
              if ( sum(abs(this%interaction_list(iv1)%val_c-this%interaction_list(iv2)%val_c))/ &
                   sum(abs(this%interaction_list(iv1)%val_c)+abs(this%interaction_list(iv2)%val_c)).lt.tiny) then
@@ -3909,8 +5367,8 @@ contains
     real(kind=8),dimension(0:3,n),intent(in) :: p
     integer,parameter :: iunit=14
     integer,dimension(n),intent(in)::hel
-    character(len=170) :: line,tmp
-    integer :: ip,ibin,i,isize,ih_in,ifinal,ic,iv,iamp,iproc,itype,j,ii,jj,idau,vkey
+    character(len=512) :: line,tmp,idx
+    integer :: ip,ibin,i,isize,ih_in,ifinal,ic,iv,iamp,iproc,itype,j,ii,jj,idau,vkey,isector,iterm
     integer :: max_current_vertices
     integer :: chir1,chir2,chiri
     integer,dimension(0:24,0:8) :: icount
@@ -3928,6 +5386,7 @@ contains
     open(file=line,unit=iunit,form='unformatted',access='stream',status='unknown')
     write(iunit) p
     write(iunit) this%amps
+    write(iunit) this%amps_by_order
     close(iunit)
     
     write(tmp,*) igroup
@@ -3942,6 +5401,7 @@ contains
     write(tmp,*) igroup
     write(line,*) iint
     write(iunit,'(2x,a)') 'public :: evaluate_amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))
+    write(iunit,'(2x,a)') 'public :: evaluate_amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_by_order'
     write(iunit,'(2x,a)') 'contains'
     write(iunit,'(2x,a)') 'subroutine evaluate_amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'(p,amps)'
     write(iunit,'(4x,a)') 'implicit none'
@@ -3949,6 +5409,25 @@ contains
     write(iunit,'(4x,a)') 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//'),intent(in) :: p'
     write(tmp,*) this%n_amps
     write(iunit,'(4x,a)') 'complex(kind=8),dimension('//trim(adjustl(tmp))//'),intent(out) :: amps'
+    write(line,*) this%n_sectors
+    write(iunit,'(4x,a)') 'complex(kind=8),dimension('//trim(adjustl(tmp))//','//&
+         trim(adjustl(line))//') :: amps_by_order'
+    write(tmp,*) igroup
+    write(line,*) iint
+    write(iunit,'(4x,a)') 'call evaluate_amp'//trim(adjustl(tmp))//'_'//&
+         trim(adjustl(line))//'_by_order(p,amps_by_order)'
+    write(iunit,'(4x,a)') 'amps=sum(amps_by_order,dim=2)'
+    write(iunit,'(2x,a)') 'end subroutine evaluate_amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))
+    write(iunit,'(a)') ''
+    write(iunit,'(2x,a)') 'subroutine evaluate_amp'//trim(adjustl(tmp))//'_'//&
+         trim(adjustl(line))//'_by_order(p,amps_by_order)'
+    write(iunit,'(4x,a)') 'implicit none'
+    write(tmp,*) n
+    write(iunit,'(4x,a)') 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//'),intent(in) :: p'
+    write(tmp,*) this%n_amps
+    write(line,*) this%n_sectors
+    write(iunit,'(4x,a)') 'complex(kind=8),dimension('//trim(adjustl(tmp))//','//&
+         trim(adjustl(line))//'),intent(out) :: amps_by_order'
     write(tmp,*) this%max_pp
     write(iunit,'(4x,a)') 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//') :: pp'
     write(tmp,*) this%n_cur
@@ -3962,10 +5441,10 @@ contains
        write(iunit,'(4x,a)') 'call compute_vertices'//trim(adjustl(tmp))//'(pp,val_c,int_c)'
        write(iunit,'(4x,a)') 'call compute_currents'//trim(adjustl(tmp))//'(pp,val_c,int_c)'
     enddo
-    write(iunit,'(4x,a)') 'call compute_amps(amps,val_c)'
+    write(iunit,'(4x,a)') 'call compute_amps_by_order(amps_by_order,val_c)'
     write(tmp,*) igroup
     write(line,*) iint
-    write(iunit,'(2x,a)') 'end subroutine evaluate_amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))
+    write(iunit,'(2x,a)') 'end subroutine evaluate_amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_by_order'
     write(iunit,'(a)') ''
     write(iunit,'(2x,a)') 'subroutine fill_momentum_array(p,pp)'
     write(iunit,'(4x,a)') 'implicit none'
@@ -4437,10 +5916,10 @@ contains
                   '[coupl(2*i-1),coupl(2*i)])'
           elseif(itype.eq.21) then
              if (vkey.eq.4) then
-                write(iunit,'(6x,a)') 'call LeptonAntileptonToVector(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(iunit,'(6x,a)') 'call FermionAntifermionToVector(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
                 write(iunit,'(8x,a)') '[coupl(2*i-1),coupl(2*i)])'
              else
-                write(iunit,'(6x,a)') 'call LeptonAntileptonToVector_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(iunit,'(6x,a)') 'call FermionAntifermionToVector_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
                 write(tmp,*) vkey/3-1
                 line='[coupl(2*i-1),coupl(2*i)],'//trim(adjustl(tmp))//','
                 write(tmp,*) mod(vkey,3)-1
@@ -4450,10 +5929,10 @@ contains
              line=''
           elseif(itype.eq.22) then
              if (vkey.eq.4) then
-                write(iunit,'(6x,a)') 'call AntileptonLeptonToVector(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(iunit,'(6x,a)') 'call AntifermionFermionToVector(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
                 write(iunit,'(8x,a)') '[coupl(2*i-1),coupl(2*i)])'
              else
-                write(iunit,'(6x,a)') 'call AntileptonLeptonToVector_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(iunit,'(6x,a)') 'call AntifermionFermionToVector_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
                 write(tmp,*) vkey/3-1
                 line='[coupl(2*i-1),coupl(2*i)],'//trim(adjustl(tmp))//','
                 write(tmp,*) mod(vkey,3)-1
@@ -4795,6 +6274,98 @@ contains
        enddo
     enddo
 
+    write(iunit,'(2x,a)') 'subroutine compute_amps_by_order(amps_by_order,val_c)'
+    write(iunit,'(4x,a)') 'implicit none'
+    write(tmp,*) this%n_amps
+    write(line,*) this%n_sectors
+    write(iunit,'(4x,a)') 'complex(kind=8),dimension('//trim(adjustl(tmp))//','//&
+         trim(adjustl(line))//'),intent(out) :: amps_by_order'
+    write(tmp,*) this%n_cur
+    write(iunit,'(4x,a)') 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(in) :: val_c'
+    write(iunit,'(4x,a)') 'amps_by_order=(0d0,0d0)'
+    do iproc=1,this%nprocs
+       do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
+          if (this%same_flav(iproc)) cycle
+          do isector=1,this%n_sectors
+             if (.not.this%sector_present(iamp,isector)) cycle
+             do iterm=this%sector_term_start(iamp-1,isector)+1,&
+                  this%sector_term_start(iamp,isector)
+                write(tmp,*) iamp
+                write(idx,*) isector
+                line='amps_by_order('//trim(adjustl(tmp))//','//trim(adjustl(idx))//')='//&
+                     'amps_by_order('//trim(adjustl(tmp))//','//trim(adjustl(idx))//')'
+                if (this%sector_term_sign(iterm).eq.1) then
+                   line=trim(adjustl(line))//'+'
+                elseif (this%sector_term_sign(iterm).eq.-1) then
+                   line=trim(adjustl(line))//'-'
+                else
+                   write(tmp,*) this%sector_term_sign(iterm)
+                   line=trim(adjustl(line))//'+'//trim(adjustl(tmp))//'.0d0*'
+                endif
+                line=trim(adjustl(line))//'ContractFermionCurrents('
+                write(tmp,*) this%sector_term_curr2amp(1,iterm)
+                line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'),'
+                write(tmp,*) this%current_list(this%sector_term_curr2amp(1,iterm))%chirality
+                line=trim(adjustl(line))//trim(adjustl(tmp))//',val_c(1,'
+                write(tmp,*) this%sector_term_curr2amp(2,iterm)
+                line=trim(adjustl(line))//trim(adjustl(tmp))//'),'
+                write(tmp,*) this%current_list(this%sector_term_curr2amp(2,iterm))%chirality
+                line=trim(adjustl(line))//trim(adjustl(tmp))//')'
+                write(iunit,'(4x,a)') trim(adjustl(line))
+             enddo
+             if (use_symmetry .and. this%n_qqbar(1).eq.0 .and. &
+                  iamp.gt.this%n_amps/2 .and. mod(n,2).eq.1) then
+                write(tmp,*) iamp
+                write(idx,*) isector
+                write(iunit,'(4x,a)') 'amps_by_order('//trim(adjustl(tmp))//','//trim(adjustl(idx))//')=-'//&
+                     'amps_by_order('//trim(adjustl(tmp))//','//trim(adjustl(idx))//')'
+             endif
+          enddo
+       enddo
+    enddo
+    do iproc=1,this%nprocs
+       if (.not.this%same_flav(iproc)) cycle
+       do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
+          do isector=1,this%n_sectors
+             write(tmp,*) iamp
+             write(idx,*) isector
+             line='amps_by_order('//trim(adjustl(tmp))//','//trim(adjustl(idx))//')='
+             do idau=1,2
+                if (this%same_flavour_sum(iamp,idau).le.0) cycle
+                write(tmp,*) this%same_flavour_sum(iamp,idau)
+                if (this%same_flavour_sum_operation(iamp,idau).eq.0) then
+                   line=trim(adjustl(line))//'+amps_by_order('//trim(adjustl(tmp))//','//trim(adjustl(idx))//')'
+                elseif (this%same_flavour_sum_operation(iamp,idau).eq.1) then
+                   line=trim(adjustl(line))//'-conjg(amps_by_order('//trim(adjustl(tmp))//','//trim(adjustl(idx))//'))'
+                elseif (this%same_flavour_sum_operation(iamp,idau).eq.2) then
+                   line=trim(adjustl(line))//'+conjg(amps_by_order('//trim(adjustl(tmp))//','//trim(adjustl(idx))//'))'
+                elseif (this%same_flavour_sum_operation(iamp,idau).eq.3) then
+                   line=trim(adjustl(line))//'-amps_by_order('//trim(adjustl(tmp))//','//trim(adjustl(idx))//')'
+                elseif (this%same_flavour_sum_operation(iamp,idau).eq.4) then
+                   line=trim(adjustl(line))//'+cmplx(aimag(amps_by_order('//trim(adjustl(tmp))//','//&
+                        trim(adjustl(idx))//')),dble(amps_by_order('//trim(adjustl(tmp))//','//trim(adjustl(idx))//')))'
+                elseif (this%same_flavour_sum_operation(iamp,idau).eq.5) then
+                   line=trim(adjustl(line))//'+cmplx(-aimag(amps_by_order('//trim(adjustl(tmp))//','//&
+                        trim(adjustl(idx))//')),dble(amps_by_order('//trim(adjustl(tmp))//','//trim(adjustl(idx))//')))'
+                elseif (this%same_flavour_sum_operation(iamp,idau).eq.6) then
+                   line=trim(adjustl(line))//'+cmplx(aimag(amps_by_order('//trim(adjustl(tmp))//','//&
+                        trim(adjustl(idx))//')),-dble(amps_by_order('//trim(adjustl(tmp))//','//trim(adjustl(idx))//')))'
+                elseif (this%same_flavour_sum_operation(iamp,idau).eq.7) then
+                   line=trim(adjustl(line))//'+cmplx(-aimag(amps_by_order('//trim(adjustl(tmp))//','//&
+                        trim(adjustl(idx))//')),-dble(amps_by_order('//trim(adjustl(tmp))//','//trim(adjustl(idx))//')))'
+                else
+                   write (*,*) 'ERROR: unknown sector operation in creating library',&
+                        this%same_flavour_sum_operation(iamp,idau)
+                   stop 1
+                endif
+             enddo
+             write(iunit,'(4x,a)') trim(adjustl(line))
+          enddo
+       enddo
+    enddo
+    write(iunit,'(2x,a)') 'end subroutine compute_amps_by_order'
+    write(iunit,'(a)') ''
+
     write(iunit,'(2x,a)') 'subroutine compute_amps(amps,val_c)'
     write(iunit,'(4x,a)') 'implicit none'
     write(tmp,*) this%n_amps
@@ -4877,7 +6448,7 @@ contains
     integer,intent(in) :: n
     integer,intent(inout) :: nhel
     integer,intent(inout),dimension(nhel) :: include_hel
-    integer :: nspin,ispin,ic,iv,iamp
+    integer :: nspin,ispin,ic,iv,iamp,isector,iterm
     logical,dimension(:),allocatable :: include_current
     integer,dimension(:,:,:),allocatable :: tmp_spin
     ! deallocate a bunch
@@ -4890,6 +6461,7 @@ contains
        if (allocated(this%interaction_list(iv)%val_r)) deallocate(this%interaction_list(iv)%val_r)
     enddo
     if (allocated(this%amps)) deallocate(this%amps)
+    if (allocated(this%amps_by_order)) deallocate(this%amps_by_order)
     if (allocated(this%amps_r)) deallocate(this%amps_r)
     
     allocate(include_current(this%n_cur))
@@ -4905,8 +6477,25 @@ contains
        if (include_hel(iamp).ge.1) then
           this%include_amp(iamp)=.true.
           if (this%same_flavour_sum(iamp,1).le.0) then
-             include_current(this%curr2amp(1,iamp))=.true.
-             include_current(this%curr2amp(2,iamp))=.true.
+             do isector=1,this%n_sectors
+                if (.not.this%sector_present(iamp,isector)) cycle
+                if (allocated(this%sector_term_start)) then
+                   do iterm=this%sector_term_start(iamp-1,isector)+1,&
+                        this%sector_term_start(iamp,isector)
+                      include_current(this%sector_term_curr2amp(1,iterm))=.true.
+                      include_current(this%sector_term_curr2amp(2,iterm))=.true.
+                   enddo
+                else
+                   include_current(this%sector_curr2amp(1,iamp,isector))=.true.
+                   include_current(this%sector_curr2amp(2,iamp,isector))=.true.
+                endif
+                if (allocated(this%sector_three_line_partner_curr2amp)) then
+                   if (this%sector_three_line_partner_curr2amp(1,iamp,isector).ne.0) then
+                      include_current(this%sector_three_line_partner_curr2amp(1,iamp,isector))=.true.
+                      include_current(this%sector_three_line_partner_curr2amp(2,iamp,isector))=.true.
+                   endif
+                endif
+             enddo
           else
              ! same-flavour amplitude.
              if (all(include_hel(this%same_flavour_sum(iamp,1:2)).eq.0)) then
@@ -4968,8 +6557,14 @@ contains
     class(amplitude_qcd) :: this
     logical,dimension(:),allocatable :: is_needed_cur,is_needed_ver
     integer,dimension(:),allocatable :: where_to_cur,where_to_ver,where_to_amp
+    integer,dimension(:),allocatable :: new_sector_term_sign
+    integer,dimension(:,:),allocatable :: old_sector_term_start,&
+         new_sector_term_start,new_sector_term_curr2amp
+    integer,dimension(:,:),allocatable :: old_sector_term_curr2amp
+    integer,dimension(:),allocatable :: old_sector_term_sign
     logical,dimension(*),optional :: include_current
-    integer :: to_skip,isize,nc,iv,n,iamp,iproc,i
+    integer :: to_skip,isize,nc,iv,n,iamp,iproc,i,isector,iterm,&
+         old_term,nterms_new,new_amp
     allocate(is_needed_cur(this%n_cur))
     allocate(is_needed_ver(this%n_vert))
     allocate(where_to_cur(this%n_cur))
@@ -5064,16 +6659,87 @@ contains
              this%curr2amp(i,where_to_amp(iamp))=where_to_cur(this%curr2amp(i,iamp))
           endif
        enddo
-    enddo
-    if (allocated(this%three_line_partner_curr2amp)) then
-       do iamp=1,this%n_amps
+       do isector=1,this%n_sectors
+          this%sector_present(where_to_amp(iamp),isector)=this%sector_present(iamp,isector)
+          this%sector_sign(where_to_amp(iamp),isector)=this%sector_sign(iamp,isector)
           do i=1,2
-             if (this%three_line_partner_curr2amp(i,iamp).ne.0) then
-                this%three_line_partner_curr2amp(i,iamp)=&
-                     where_to_cur(this%three_line_partner_curr2amp(i,iamp))
+             if (this%sector_curr2amp(i,iamp,isector).ne.0) then
+                this%sector_curr2amp(i,where_to_amp(iamp),isector)=&
+                     where_to_cur(this%sector_curr2amp(i,iamp,isector))
+             else
+                this%sector_curr2amp(i,where_to_amp(iamp),isector)=0
              endif
           enddo
        enddo
+    enddo
+    if (allocated(this%three_line_partner_curr2amp)) then
+       do iamp=1,this%n_amps
+          if (.not.this%include_amp(iamp)) cycle
+          do i=1,2
+             if (this%three_line_partner_curr2amp(i,iamp).ne.0) then
+                this%three_line_partner_curr2amp(i,where_to_amp(iamp))=&
+                     where_to_cur(this%three_line_partner_curr2amp(i,iamp))
+             else
+                this%three_line_partner_curr2amp(i,where_to_amp(iamp))=0
+             endif
+          enddo
+       enddo
+    endif
+    if (allocated(this%sector_three_line_partner_curr2amp)) then
+       do iamp=1,this%n_amps
+          if (.not.this%include_amp(iamp)) cycle
+          do isector=1,this%n_sectors
+             do i=1,2
+                if (this%sector_three_line_partner_curr2amp(i,iamp,isector).ne.0) then
+                   this%sector_three_line_partner_curr2amp(i,where_to_amp(iamp),isector)=&
+                        where_to_cur(this%sector_three_line_partner_curr2amp(i,iamp,isector))
+                else
+                   this%sector_three_line_partner_curr2amp(i,where_to_amp(iamp),isector)=0
+                endif
+             enddo
+          enddo
+       enddo
+    endif
+    if (allocated(this%sector_term_start)) then
+       allocate(old_sector_term_start(0:this%n_amps,this%n_sectors))
+       allocate(old_sector_term_curr2amp(2,size(this%sector_term_sign)))
+       allocate(old_sector_term_sign(size(this%sector_term_sign)))
+       old_sector_term_start=this%sector_term_start
+       old_sector_term_curr2amp=this%sector_term_curr2amp
+       old_sector_term_sign=this%sector_term_sign
+       nterms_new=0
+       do isector=1,this%n_sectors
+          do iamp=1,this%n_amps
+             if (.not.this%include_amp(iamp)) cycle
+             nterms_new=nterms_new+old_sector_term_start(iamp,isector)-&
+                  old_sector_term_start(iamp-1,isector)
+          enddo
+       enddo
+       allocate(new_sector_term_start(0:count(this%include_amp),this%n_sectors))
+       allocate(new_sector_term_curr2amp(2,nterms_new))
+       allocate(new_sector_term_sign(nterms_new))
+       iterm=0
+       do isector=1,this%n_sectors
+          new_sector_term_start(0,isector)=iterm
+          new_amp=0
+          do iamp=1,this%n_amps
+             if (.not.this%include_amp(iamp)) cycle
+             new_amp=new_amp+1
+             do old_term=old_sector_term_start(iamp-1,isector)+1,&
+                  old_sector_term_start(iamp,isector)
+                iterm=iterm+1
+                new_sector_term_curr2amp(:,iterm)=where_to_cur(&
+                     old_sector_term_curr2amp(:,old_term))
+                new_sector_term_sign(iterm)=old_sector_term_sign(old_term)
+             enddo
+             new_sector_term_start(new_amp,isector)=iterm
+          enddo
+       enddo
+       call move_alloc(new_sector_term_start,this%sector_term_start)
+       call move_alloc(new_sector_term_curr2amp,this%sector_term_curr2amp)
+       call move_alloc(new_sector_term_sign,this%sector_term_sign)
+       deallocate(old_sector_term_start,old_sector_term_curr2amp,&
+            old_sector_term_sign)
     endif
     do iamp=1,this%n_amps
        if (.not.this%include_amp(iamp)) cycle
@@ -5160,6 +6826,21 @@ contains
     deallocate(where_to_cur)
   end subroutine filter_dead_trees
 
+  integer function sector_index(this,n_gs,n_ew)
+    implicit none
+    class(amplitude_QCD),intent(in) :: this
+    integer,intent(in) :: n_gs,n_ew
+    integer :: isector
+    sector_index=0
+    do isector=1,this%n_sectors
+       if (this%sector_powers(1,isector).eq.n_gs .and. &
+            this%sector_powers(2,isector).eq.n_ew) then
+          sector_index=isector
+          return
+       endif
+    enddo
+  end function sector_index
+
   subroutine assign_interaction(lhs,rhs)
     ! sets non-custom 'lhs' = 'rhs' for interactions
     use particles
@@ -5169,6 +6850,8 @@ contains
     integer :: val_size
     lhs%type=rhs%type
     lhs%chirality=rhs%chirality
+    lhs%n_gs=rhs%n_gs
+    lhs%n_ew=rhs%n_ew
     lhs%currents(1:2)=rhs%currents(1:2)
     lhs%coupl(1:2)=rhs%coupl(1:2)
     if (allocated(rhs%singlet_mv)) then
@@ -5203,6 +6886,14 @@ contains
     lhs%type=rhs%type
     lhs%bin=rhs%bin
     lhs%chirality=rhs%chirality
+    lhs%n_gs=rhs%n_gs
+    lhs%n_ew=rhs%n_ew
+    lhs%open_quark_leg=rhs%open_quark_leg
+    lhs%ew_pairs=rhs%ew_pairs
+    lhs%u1_pairs=rhs%u1_pairs
+    lhs%gluon_pairs=rhs%gluon_pairs
+    lhs%u1_links=rhs%u1_links
+    lhs%gluon_links=rhs%gluon_links
     isize=popcnt(lhs%bin)
     lhs%n_vert=rhs%n_vert
     if (allocated(lhs%iproc%bits)) deallocate(lhs%iproc%bits)
@@ -5271,6 +6962,7 @@ contains
        deallocate(amp%interaction_list)
     endif
     if (allocated(amp%amps)) deallocate(amp%amps)
+    if (allocated(amp%amps_by_order)) deallocate(amp%amps_by_order)
     if (allocated(amp%amps_r)) deallocate(amp%amps_r)
     if (allocated(amp%pp)) deallocate(amp%pp)
     if (allocated(amp%diff_col_vals)) deallocate(amp%diff_col_vals)
@@ -5287,6 +6979,15 @@ contains
     if (allocated(amp%n_qqbar)) deallocate(amp%n_qqbar)
     if (allocated(amp%perm)) deallocate(amp%perm)
     if (allocated(amp%curr2amp)) deallocate(amp%curr2amp)
+    if (allocated(amp%sector_powers)) deallocate(amp%sector_powers)
+    if (allocated(amp%sector_curr2amp)) deallocate(amp%sector_curr2amp)
+    if (allocated(amp%sector_three_line_partner_curr2amp)) &
+         deallocate(amp%sector_three_line_partner_curr2amp)
+    if (allocated(amp%sector_present)) deallocate(amp%sector_present)
+    if (allocated(amp%sector_sign)) deallocate(amp%sector_sign)
+    if (allocated(amp%sector_term_start)) deallocate(amp%sector_term_start)
+    if (allocated(amp%sector_term_curr2amp)) deallocate(amp%sector_term_curr2amp)
+    if (allocated(amp%sector_term_sign)) deallocate(amp%sector_term_sign)
     if (allocated(amp%three_line_partner_curr2amp)) &
          deallocate(amp%three_line_partner_curr2amp)
     if (allocated(amp%i_col_i)) deallocate(amp%i_col_i)

@@ -8,6 +8,8 @@ program three_quark_line_reweight_regression
   integer,dimension(n,1) :: part,orders
   integer,dimension(0:3,n) :: spin
   integer,dimension(n) :: hel
+  integer :: flow,leading_sector
+  logical :: found_sparse_partner
   real(kind=dp),dimension(0:3,n) :: p
   real(kind=dp),dimension(3) :: matrix2,normalized
   real(kind=dp),parameter :: pi=3.14159265358979323846d0
@@ -42,9 +44,28 @@ program three_quark_line_reweight_regression
   call check_colour_factor_count(amp,3,27d0,6)
   call check_colour_factor_count(amp,3,-18d0,9)
   call check_colour_factor_count(amp,3,6d0,6)
-  if (.not.allocated(amp%three_line_partner_curr2amp) .or.&
-       all(amp%three_line_partner_curr2amp.eq.0)) then
-     write (*,*) 'Three-line duplicate closures were not retained'
+  if (.not.allocated(amp%sector_term_start) .or.&
+       .not.allocated(amp%sector_term_curr2amp) .or.&
+       .not.allocated(amp%sector_term_sign)) then
+     write (*,*) 'Three-line sparse coupling-sector closures are unavailable'
+     stop 1
+  endif
+  if (size(amp%sector_term_curr2amp,1).ne.2 .or.&
+       size(amp%sector_term_curr2amp,2).ne.size(amp%sector_term_sign) .or.&
+       amp%sector_term_start(amp%n_amps,amp%n_sectors).ne.&
+       size(amp%sector_term_sign)) then
+     write (*,*) 'Three-line sparse coupling-sector metadata is inconsistent'
+     stop 1
+  endif
+  leading_sector=maxloc(amp%sector_powers(1,1:amp%n_sectors),dim=1)
+  found_sparse_partner=.false.
+  do flow=1,amp%n_amps
+     if (amp%sector_term_start(flow,leading_sector)-&
+          amp%sector_term_start(flow-1,leading_sector).gt.1) &
+          found_sparse_partner=.true.
+  enddo
+  if (.not.found_sparse_partner) then
+     write (*,*) 'Three-line duplicate QCD closures were not retained sparsely'
      stop 1
   endif
 
@@ -110,25 +131,32 @@ contains
     integer :: flow
     integer,dimension(n,1) :: lc_part,lc_order
     integer,dimension(0:3,n) :: lc_spin
+    integer :: all_colour_sector,lc_sector
     real(kind=dp) :: scale
+    complex(kind=dp) :: lc_value
 
     lc_part(:,1)=part(:,1)
     lc_spin=0
     lc_spin(0,:)=1
     lc_spin(1,:)=helicities
+    all_colour_sector=leading_qcd_sector(all_colour_amp)
     do flow=1,all_colour_amp%nColOrd
        lc_order(:,1)=all_colour_amp%perm(:,flow)
        allocate(lc_amp)
        call lc_amp%init(1,n,1,lc_part,lc_spin,lc_order,model)
        call lc_amp%evaluate(n,momenta,helicities,.false.,model)
-       if (lc_amp%n_amps.ne.1) then
-          write (*,*) 'Unexpected LC amplitude multiplicity:',flow,lc_amp%n_amps
+       if (lc_amp%n_amps.lt.1) then
+          write (*,*) 'Missing fixed-order amplitude:',flow
           stop 1
        endif
-       scale=max(1d-30,abs(all_colour_amp%amps(flow)))
-       if (abs(lc_amp%amps(1)-all_colour_amp%amps(flow)).gt.1d-11*scale) then
+       lc_sector=leading_qcd_sector(lc_amp)
+       lc_value=sum(lc_amp%amps_by_order(:,lc_sector))
+       scale=max(1d-30,abs(all_colour_amp%amps_by_order(flow,all_colour_sector)))
+       if (abs(lc_value-&
+            all_colour_amp%amps_by_order(flow,all_colour_sector)).gt.1d-11*scale) then
           write (*,*) 'Grouped imode=2 flow disagrees with imode=1:',flow,&
-               lc_amp%amps(1),all_colour_amp%amps(flow)
+               lc_value,&
+               all_colour_amp%amps_by_order(flow,all_colour_sector)
           stop 1
        endif
        deallocate(lc_amp)
@@ -280,13 +308,15 @@ contains
     call second_amp%init(1,n,1,partner_part,partner_spin,second_order,model)
     call first_amp%evaluate(n,partner_p,partner_hel,.false.,model)
     call second_amp%evaluate(n,partner_p,partner_hel,.false.,model)
-    if (first_amp%n_amps.ne.1 .or. second_amp%n_amps.ne.1) then
-       write (*,*) 'Unexpected multichannel-partner amplitude multiplicity:',&
+    if (first_amp%n_amps.lt.1 .or. second_amp%n_amps.lt.1) then
+       write (*,*) 'Missing multichannel-partner amplitude:',&
             first_amp%n_amps,second_amp%n_amps
        stop 1
     endif
-    first_squared=abs(first_amp%amps(1))**2
-    second_squared=abs(second_amp%amps(1))**2
+    first_squared=abs(sum(first_amp%amps_by_order(:,&
+         leading_qcd_sector(first_amp))))**2
+    second_squared=abs(sum(second_amp%amps_by_order(:,&
+         leading_qcd_sector(second_amp))))**2
     write (*,'(a,2es24.16)') 'THREE_LINE_SAFE_MC_PARTNER=',&
          first_squared,second_squared
     scale=max(first_squared,second_squared)
@@ -337,8 +367,11 @@ contains
     real(kind=dp),dimension(3),intent(out) :: result
     integer :: iacc,irow,ival,ic,icol,ioff
     complex(kind=dp) :: weighted,sum_for_factor
+    complex(kind=dp),dimension(:),allocatable :: leading_amps
 
     result=0d0
+    allocate(leading_amps(amplitude%n_amps))
+    leading_amps=amplitude%amps_by_order(:,leading_qcd_sector(amplitude))
     ioff=amplitude%iproc_start(amplitude%nprocs)-1
     do iacc=1,3
        do irow=1,amplitude%nColOrd
@@ -348,15 +381,27 @@ contains
              do ic=amplitude%row_index(irow-1,ival,iacc)+1,&
                   amplitude%row_index(irow,ival,iacc)
                 icol=amplitude%col_index(amplitude%i_col_i(ival,iacc)+ic)
-                sum_for_factor=sum_for_factor+amplitude%amps(ioff+icol)
+                sum_for_factor=sum_for_factor+leading_amps(ioff+icol)
              enddo
              weighted=weighted+sum_for_factor*amplitude%diff_col_vals(ival,iacc)
           enddo
           result(iacc)=result(iacc)+dble(weighted*&
-               conjg(amplitude%amps(ioff+irow)))
+               conjg(leading_amps(ioff+irow)))
        enddo
     enddo
+    deallocate(leading_amps)
   end subroutine colour_squared
+
+  integer function leading_qcd_sector(amplitude)
+    implicit none
+    type(amplitude_QCD),intent(in) :: amplitude
+
+    if (.not.allocated(amplitude%amps_by_order) .or. amplitude%n_sectors.le.0) then
+       write (*,*) 'Coupling-sector amplitudes are unavailable'
+       stop 1
+    endif
+    leading_qcd_sector=maxloc(amplitude%sector_powers(1,1:amplitude%n_sectors),dim=1)
+  end function leading_qcd_sector
 
   subroutine fill_momenta(momenta)
     implicit none

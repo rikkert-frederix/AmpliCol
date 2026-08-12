@@ -394,7 +394,7 @@ class ThreeQuarkLineMultiChannelRegression(unittest.TestCase):
             header = process_list.WriteUniqueProcsIntoList(
                 [("g", "g", "g", "g")], []
             )[0]
-            self.assertEqual(header, "4 1 2")
+            self.assertEqual(header, "4 1 3 0 -1 -1 -1 -1")
         finally:
             process_list.options.clear()
             process_list.options.update(saved_options)

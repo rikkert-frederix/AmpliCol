@@ -15,6 +15,7 @@ module rw_events
      real(kind=8),dimension(3) :: overwgt
      integer,dimension(:),allocatable :: col_order
      real(kind=8),dimension(3) :: matrix2
+     logical :: keep=.true.
   end type lhef_event
   type(lhef_event),dimension(:),allocatable :: events
   integer :: nevents
@@ -22,6 +23,8 @@ module rw_events
   real(kind=8) :: EBMUP(2),XSECUP,XERRUP,XMAXUP
   character(len=1024) :: generator_string
   logical :: unwgt,keep_comments
+  integer(kind=8) :: input_seed=0_8
+  logical :: has_input_seed=.false.
 end module rw_events
 module timings
   implicit none
@@ -29,8 +32,8 @@ module timings
        t_mat_LC=0.,t_mat_NLC=0.,t_mat_full=0.,t_all=0.,t_ran=0.
 end module timings
 module overall
-  real(kind=8) :: xsec,xsec_abs,max_wgt
-  integer :: nevt
+  real(kind=8) :: xsec,xsec_abs,xsec_error,xsec_sumw2,max_wgt,max_abs_event_weight
+  integer :: nevt,nevents_output
 end module overall
 module arguments
   implicit none
@@ -44,6 +47,7 @@ program amplicol_reweight
   use timings
   use particles
   use run_parameters
+  use coupling_orders
   use overall
   implicit none
   logical,parameter :: use_only_canonical_form=.true.
@@ -78,6 +82,7 @@ program amplicol_reweight
   enddo
   call apply_final_state_widths_from_events()
   call phys_model%init_vert()
+  call resolve_legacy_automatic_selection()
 
   nprocs=0
   call setup_spin()
@@ -85,7 +90,9 @@ program amplicol_reweight
 
   xsec=0d0
   xsec_abs=0d0
+  xsec_sumw2=0d0
   max_wgt=0d0
+  max_abs_event_weight=0d0
   do nevt=1,nevents
      call map_to_canonical_form(events(nevt))
      do iproc=1,nprocs
@@ -109,38 +116,11 @@ program amplicol_reweight
      call cpu_time(tAfter)
      t_amp=t_amp+tAfter-tBefore
 
-     ioff=amps(iproc)%iproc_start(amps(iproc)%nprocs)-1
      do iacc=1,3 ! LC, NLC and full colour
         call cpu_time(tBefore)
         if (iacc.eq.3 .and. col_acc.lt.2) cycle
-        if (amps(iproc)%n_qqbar(1).eq.0 .and. use_real_gluons) then
-           ! same as in the 'else' below, except that all are real variables instead of complex. 
-           do irow=1,amps(iproc)%nColOrd
-              amp_col=0d0
-              do i=1,amps(iproc)%n_col_vals(iacc)
-                 amp2=0d0
-                 do ic=amps(iproc)%row_index(irow-1,i,iacc)+1,amps(iproc)%row_index(irow,i,iacc)
-                    icol=amps(iproc)%col_index(amps(iproc)%i_col_i(i,iacc)+ic)
-                    amp2=amp2+amps(iproc)%amps_r(ioff+icol)
-                 enddo
-                 amp_col=amp_col+amp2*amps(iproc)%diff_col_vals(i,iacc)
-              enddo
-              events(nevt)%matrix2(iacc)=events(nevt)%matrix2(iacc)+amp_col*amps(iproc)%amps_r(ioff+irow)
-           enddo
-        else
-           do irow=1,amps(iproc)%nColOrd
-              amp_col_c=(0d0,0d0)
-              do i=1,amps(iproc)%n_col_vals(iacc)
-                 amp2_c=(0d0,0d0)
-                 do ic=amps(iproc)%row_index(irow-1,i,iacc)+1,amps(iproc)%row_index(irow,i,iacc)
-                    icol=amps(iproc)%col_index(amps(iproc)%i_col_i(i,iacc)+ic)
-                    amp2_c=amp2_c+amps(iproc)%amps(ioff+icol)
-                 enddo
-                 amp_col_c=amp_col_c+amp2_c*amps(iproc)%diff_col_vals(i,iacc)
-              enddo
-              events(nevt)%matrix2(iacc)=events(nevt)%matrix2(iacc)+dble(amp_col_c*conjg(amps(iproc)%amps(ioff+irow)))
-           enddo
-        endif
+        events(nevt)%matrix2(iacc)=selected_colour_matrix2(&
+             amps(iproc),iacc,events(nevt)%AQCDUP,events(nevt)%AQEDUP)
         ! The following line can be removed since 'process_map_value'
         ! will drop out when taking the ratio w.r.t. LC.
 !        events(nevt)%matrix2(iacc)=events(nevt)%matrix2(iacc)*process_map_value
@@ -149,12 +129,24 @@ program amplicol_reweight
         if (iacc.eq.2) t_mat_NLC=t_mat_NLC+tAfter-tBefore
         if (iacc.eq.3) t_mat_full=t_mat_full+tAfter-tBefore
      enddo
-     max_wgt=max(max_wgt,events(nevt)%matrix2(3)/events(nevt)%matrix2(1))
-     xsec=xsec+events(nevt)%matrix2(3)/events(nevt)%matrix2(1)*events(nevt)%XWGTUP
-     xsec_abs=xsec_abs+abs(events(nevt)%matrix2(3)/events(nevt)%matrix2(1)*events(nevt)%XWGTUP)
+     amp2=reweight_ratio(events(nevt)%matrix2(3),events(nevt)%matrix2(1),&
+          'full-colour/leading-colour')
+     max_wgt=max(max_wgt,abs(amp2))
+     max_abs_event_weight=max(max_abs_event_weight,&
+          abs(amp2*events(nevt)%XWGTUP))
+     xsec=xsec+amp2*events(nevt)%XWGTUP
+     xsec_abs=xsec_abs+abs(amp2*events(nevt)%XWGTUP)
+     xsec_sumw2=xsec_sumw2+(amp2*events(nevt)%XWGTUP)**2
   enddo
   xsec=xsec/dble(nevents)
   xsec_abs=xsec_abs/dble(nevents)
+  if (nevents.gt.1) then
+     xsec_error=sqrt(max(0d0,(xsec_sumw2/dble(nevents)-xsec**2)/&
+          dble(nevents-1)))
+  else
+     xsec_error=0d0
+  endif
+  call prepare_output_selection()
   close(11)
 
   ! write event file
@@ -177,6 +169,166 @@ program amplicol_reweight
   write(*,*) 'Total time:',t_all
   write(*,*) 'Total FC cross section:',xsec
 contains  
+
+  subroutine resolve_legacy_automatic_selection()
+    implicit none
+    integer :: iprocess,ileg,ievent,nsing,max_as2
+    logical :: valid_selection
+
+    if (coupling_order_selection%mode.ne.coupling_order_mode_automatic) return
+    if (coupling_order_selection%resolved_as2.ne.coupling_order_unbounded) return
+    ! LHE files predating coupling-order metadata contain the historical
+    ! maximum-QCD sample.  Recover that order from their external content.
+    max_as2=-1
+    do iprocess=1,unique_nproc
+       nsing=0
+       do ileg=1,next
+          if (phys_model%is_singlet(unique_processes(ileg,iprocess))) nsing=nsing+1
+       enddo
+       max_as2=max(max_as2,2*max(0,next-2-nsing))
+    enddo
+    ! Some legacy LHE files predate the unique-process table altogether.
+    ! Their physical event records are already loaded at this point, so use
+    ! those external labels to recover the same historical leading-QCD order.
+    ! Taking the maximum keeps heterogeneous legacy samples deterministic.
+    if (max_as2.lt.0) then
+       do ievent=1,nevents
+          nsing=0
+          do ileg=1,events(ievent)%NUP
+             if (phys_model%is_singlet(events(ievent)%IDUP(ileg))) nsing=nsing+1
+          enddo
+          max_as2=max(max_as2,2*max(0,events(ievent)%NUP-2-nsing))
+       enddo
+    endif
+    call resolve_automatic_coupling_order(max_as2,valid_selection)
+    if (.not.valid_selection) then
+       write (*,*) 'Could not infer the automatic coupling order from legacy LHE metadata'
+       stop 1
+    endif
+  end subroutine resolve_legacy_automatic_selection
+
+  real(kind=8) function reweight_ratio(numerator,denominator,label)
+    use,intrinsic :: ieee_arithmetic,only: ieee_is_finite
+    implicit none
+    real(kind=8),intent(in) :: numerator,denominator
+    character(len=*),intent(in) :: label
+    real(kind=8) :: reference
+
+    if (.not.ieee_is_finite(numerator) .or. .not.ieee_is_finite(denominator)) then
+       write (*,*) 'Cannot form ',trim(label),' reweighting ratio from non-finite values',&
+            denominator,numerator
+       stop 1
+    endif
+    reference=max(1d-300,abs(numerator),abs(denominator))
+    if (abs(denominator).le.1d-14*reference) then
+       if (abs(numerator).le.1d-14*reference) then
+          reweight_ratio=0d0
+          return
+       endif
+       write (*,*) 'Cannot form ',trim(label),' reweighting ratio: denominator is zero',&
+            denominator,numerator
+       stop 1
+    endif
+    reweight_ratio=numerator/denominator
+    if (.not.ieee_is_finite(reweight_ratio)) then
+       write (*,*) 'Non-finite ',trim(label),' reweighting ratio',reweight_ratio
+       stop 1
+    endif
+  end function reweight_ratio
+
+  subroutine prepare_output_selection()
+    implicit none
+    integer :: ievent
+    real(kind=8) :: ratio
+    real(kind=8),external :: ran2
+    integer(kind=8) :: iseed
+    common /to_seed/iseed
+
+    nevents_output=nevents
+    events(:)%keep=.true.
+    if (.not.unwgt) return
+    nevents_output=0
+    do ievent=1,nevents
+       ratio=reweight_ratio(events(ievent)%matrix2(3),events(ievent)%matrix2(1),&
+            'full-colour/leading-colour')
+       events(ievent)%keep=abs(events(ievent)%XWGTUP*ratio).gt.&
+            max_abs_event_weight*ran2()
+       if (events(ievent)%keep) nevents_output=nevents_output+1
+    enddo
+    if (.not.has_input_seed) then
+       ! RANMAR multiplies the user seed by 31300 on first use.
+       input_seed=iseed/31300_8
+       has_input_seed=.true.
+    endif
+  end subroutine prepare_output_selection
+
+  real(kind=8) function selected_colour_matrix2(amplitude,iacc,alpha_s,alpha_ew)
+    implicit none
+    real(kind=8),parameter :: pi_order=3.1415926535897932384626433832795d0
+    type(amplitude_QCD),intent(in) :: amplitude
+    integer,intent(in) :: iacc
+    real(kind=8),intent(in) :: alpha_s,alpha_ew
+    complex(kind=8),dimension(:,:),allocatable :: scaled
+    complex(kind=8),dimension(:),allocatable :: combined
+    real(kind=8) :: diagonal_i,diagonal_j,gs,gew
+    integer :: isector,jsector,as2,aew2
+
+    allocate(scaled(amplitude%n_amps,amplitude%n_sectors))
+    allocate(combined(amplitude%n_amps))
+    scaled=(0d0,0d0)
+    gs=sqrt(4d0*pi_order*alpha_s)
+    gew=sqrt(8d0*pi_order*alpha_ew)
+    do isector=1,amplitude%n_sectors
+       where (amplitude%sector_present(:,isector))
+          scaled(:,isector)=amplitude%amps_by_order(:,isector)*&
+               gs**amplitude%sector_powers(1,isector)*&
+               gew**amplitude%sector_powers(2,isector)
+       endwhere
+    enddo
+
+    selected_colour_matrix2=0d0
+    do isector=1,amplitude%n_sectors
+       diagonal_i=colour_quadratic(amplitude,scaled(:,isector),iacc)
+       do jsector=isector,amplitude%n_sectors
+          as2=amplitude%sector_powers(1,isector)+amplitude%sector_powers(1,jsector)
+          aew2=amplitude%sector_powers(2,isector)+amplitude%sector_powers(2,jsector)
+          if (.not.coupling_order_selection%allows(as2,aew2)) cycle
+          if (jsector.eq.isector) then
+             selected_colour_matrix2=selected_colour_matrix2+diagonal_i
+          else
+             diagonal_j=colour_quadratic(amplitude,scaled(:,jsector),iacc)
+             combined=scaled(:,isector)+scaled(:,jsector)
+             selected_colour_matrix2=selected_colour_matrix2+&
+                  colour_quadratic(amplitude,combined,iacc)-diagonal_i-diagonal_j
+          endif
+       enddo
+    enddo
+    deallocate(scaled,combined)
+  end function selected_colour_matrix2
+
+  real(kind=8) function colour_quadratic(amplitude,values,iacc)
+    implicit none
+    type(amplitude_QCD),intent(in) :: amplitude
+    complex(kind=8),dimension(:),intent(in) :: values
+    integer,intent(in) :: iacc
+    complex(kind=8) :: row_value,colour_sum
+    integer :: irow,icol,i,ic,ioffset
+
+    colour_quadratic=0d0
+    ioffset=amplitude%iproc_start(amplitude%nprocs)-1
+    do irow=1,amplitude%nColOrd
+       colour_sum=(0d0,0d0)
+       do i=1,amplitude%n_col_vals(iacc)
+          row_value=(0d0,0d0)
+          do ic=amplitude%row_index(irow-1,i,iacc)+1,amplitude%row_index(irow,i,iacc)
+             icol=amplitude%col_index(amplitude%i_col_i(i,iacc)+ic)
+             row_value=row_value+values(ioffset+icol)
+          enddo
+          colour_sum=colour_sum+row_value*amplitude%diff_col_vals(i,iacc)
+       enddo
+       colour_quadratic=colour_quadratic+dble(colour_sum*conjg(values(ioffset+irow)))
+    enddo
+  end function colour_quadratic
 
   subroutine get_run_arguments()
     use arguments
@@ -283,8 +435,11 @@ contains
   
   subroutine read_unique_in_file()
     implicit none
-    integer :: iproc
+    integer :: iproc,mode,resolved_as2,as_min2,as_max2,aew_min2,aew_max2,ios,&
+         content_start,content_end
     character :: dummy
+    character(len=1024) :: string
+    logical :: valid_selection
     read(11,*) dummy ! <LesHouchesEvents>-tag
     read(11,*) dummy ! <header>-tag
     read(11,*) next,unique_nproc
@@ -294,6 +449,40 @@ contains
     do iproc=1,unique_nproc
        read(11,*) unique_map(iproc),unique_map_value(iproc),unique_processes(1:next,iproc)
     enddo
+    read(11,'(a)',iostat=ios) string
+    if (ios.eq.0 .and. index(adjustl(string),'<coupling_orders>').eq.1) then
+       content_start=index(string,'<coupling_orders>')+len('<coupling_orders>')
+       content_end=index(string,'</coupling_orders>')
+       if (content_end.le.content_start) then
+          write (*,*) 'Malformed coupling-order metadata in LHE header'
+          stop 1
+       endif
+       read(string(content_start:content_end-1),*,iostat=ios) mode,resolved_as2,&
+            as_min2,as_max2,aew_min2,aew_max2
+       if (ios.ne.0) then
+          write (*,*) 'Malformed coupling-order metadata in LHE header'
+          stop 1
+       endif
+       call set_coupling_order_selection(mode,as_min2,as_max2,aew_min2,aew_max2,&
+            valid_selection)
+       if (.not.valid_selection) then
+          write (*,*) 'Invalid coupling-order metadata in LHE header'
+          stop 1
+       endif
+       if (mode.eq.coupling_order_mode_automatic) then
+          call resolve_automatic_coupling_order(resolved_as2,valid_selection)
+          if (.not.valid_selection) then
+             write (*,*) 'Invalid resolved automatic coupling order in LHE header'
+             stop 1
+          endif
+       elseif (resolved_as2.ne.coupling_order_unbounded) then
+          write (*,*) 'Explicit coupling-order metadata must not contain an automatic order'
+          stop 1
+       endif
+    else
+       if (ios.eq.0) backspace(11)
+       call reset_coupling_order_selection()
+    endif
   end subroutine read_unique_in_file
   
   subroutine setup_spin()
@@ -308,9 +497,10 @@ contains
   subroutine read_event(iunit,event)
     implicit none
     type(lhef_event) :: event
-    integer :: i,iunit
+    integer :: i,iunit,ios
     character(len=1024) :: string
-    real(kind=8) :: dum
+    character(len=1024) :: line
+    logical :: found_colour
     read (iunit,'(a)') string ! <event>-tag
     read(iunit,*) event%NUP,event%IDPRUP,event%XWGTUP,event%SCALUP,event%AQEDUP,event%AQCDUP
     allocate(event%IDUP(event%NUP),event%ISTUP(event%NUP),event%MOTHUP(2,event%NUP)&
@@ -322,10 +512,36 @@ contains
             event%PUP(1,I),event%PUP(2,I),event%PUP(3,I),event%PUP(4,I),event%PUP(5,I),&
             event%VTIMUP(I),event%SPINUP(I)
     enddo
-    read(iunit,'(a)') string
-    read(string(7:),*) event%col_order(1:event%NUP)
-    read(iunit,'(a)') string
-    read(string(9:),*) event%overwgt(1:3)
+    found_colour=.false.
+    event%overwgt=0d0
+    do
+       read(iunit,'(a)',iostat=ios) string
+       if (ios.ne.0) then
+          write (*,*) 'Unexpected end of LHE event while reading metadata'
+          stop 1
+       endif
+       line=adjustl(string)
+       if (index(line,'</event>').eq.1) exit
+       if (index(line,'#color_expansion').eq.1) cycle
+       if (index(line,'#color').eq.1) then
+          read(line(len('#color')+1:),*,iostat=ios) event%col_order(1:event%NUP)
+          if (ios.ne.0) then
+             write (*,*) 'Malformed #color metadata in LHE event'
+             stop 1
+          endif
+          found_colour=.true.
+       elseif (index(line,'#overwgt').eq.1) then
+          read(line(len('#overwgt')+1:),*,iostat=ios) event%overwgt(1:3)
+          if (ios.ne.0) then
+             write (*,*) 'Malformed #overwgt metadata in LHE event'
+             stop 1
+          endif
+       endif
+    enddo
+    if (.not.found_colour) then
+       write (*,*) 'LHE event has no #color metadata and cannot be colour-reweighted'
+       stop 1
+    endif
 
 !!$    read (iunit,*,err=99,end=99) next,evt_wgt!,wgt,amp2,weight
 !!$    read (iunit,*,err=99,end=99) helicity(1:next)
@@ -333,7 +549,6 @@ contains
 !!$    do i=1,next
 !!$       read (iunit,*,err=99,end=99) iPDG(i),momenta(1:3,i),momenta(0,i)
 !!$    enddo
-    read (iunit,'(a)') string  ! </event>-tag
   end subroutine read_event
 
 
@@ -461,15 +676,13 @@ contains
     type(lhef_event),intent(in) :: event
     integer :: iunit
     real(kind=8) :: rwgt_NLC,rwgt_full,XWGTUP_new
-    real(kind=8),external :: ran2
-    rwgt_NLC=event%matrix2(2)/event%matrix2(1)
-    rwgt_full=event%matrix2(3)/event%matrix2(1)
+    if (.not.event%keep) return
+    rwgt_NLC=reweight_ratio(event%matrix2(2),event%matrix2(1),&
+         'next-to-leading-colour/leading-colour')
+    rwgt_full=reweight_ratio(event%matrix2(3),event%matrix2(1),&
+         'full-colour/leading-colour')
     if (unwgt) then
-       if (rwgt_full.gt.max_wgt*ran2()) then
-          XWGTUP_new=xsec_abs
-       else
-          return
-       endif
+       XWGTUP_new=sign(xsec_abs,event%XWGTUP*rwgt_full)
     else
        XWGTUP_new=event%XWGTUP*rwgt_full
     endif
@@ -497,16 +710,33 @@ contains
     use overall
     implicit none
     integer,intent(in) :: ounit
-    real(kind=8) :: rwgt_LCtoFC
-    rwgt_LCtoFC=xsec/XSECUP
+    integer :: iproc,output_idwtup
+    if (unwgt) then
+       output_idwtup=-3
+    else
+       output_idwtup=-4
+    endif
     write(ounit,'(a)') '<LesHouchesEvents version="3.0">'
+    write(ounit,'(a)') '<header>'
+    write(ounit,*) next,unique_nproc
+    do iproc=1,unique_nproc
+       write(ounit,*) unique_map(iproc),unique_map_value(iproc),unique_processes(1:next,iproc)
+    enddo
+    write(ounit,'(a,6(1x,i0),1x,a)') '<coupling_orders>',&
+         coupling_order_selection%mode,coupling_order_selection%resolved_as2,&
+         coupling_order_selection%as_min2,coupling_order_selection%as_max2,&
+         coupling_order_selection%aew_min2,coupling_order_selection%aew_max2,&
+         '</coupling_orders>'
+    write(ounit,'(a,1x,i12,1x,a)') '<nevents>',nevents_output,'</nevents>'
+    if (has_input_seed) write(ounit,'(a,1x,i12,1x,a)') '<seed>   ',input_seed,'</seed>'
+    write(ounit,'(a)') '</header>'
     write(ounit,'(a)') '<init>'
     write(ounit,501)IDBMUP(1),IDBMUP(2),EBMUP(1),EBMUP(2),PDFGUP(1)&
-         &,PDFGUP(2),PDFSUP(1),PDFSUP(2),IDWTUP,NPRUP
+         &,PDFGUP(2),PDFSUP(1),PDFSUP(2),output_idwtup,NPRUP
     if (unwgt) then
-       write(ounit,502)xsec,XERRUP*rwgt_LCtoFC,xsec_abs,-3
+       write(ounit,502)xsec,xsec_error,xsec_abs,LPRUP
     else
-       write(ounit,502)xsec,XERRUP*rwgt_LCtoFC,XMAXUP*max_wgt,-4
+       write(ounit,502)xsec,xsec_error,XMAXUP*max_wgt,LPRUP
     endif
     write(ounit,'(a)') trim(generator_string)
     write(ounit,'(a)') '</init>'
@@ -520,12 +750,18 @@ contains
     character(len=1024) :: string
     integer(kind=8) iseed
     common /to_seed/iseed
+    nevents=0
+    has_input_seed=.false.
+    input_seed=0_8
+    iseed=0_8
     do
        read(iunit,'(a)') string
        if (index(string,"<nevents>").ne.0) then
           read(string(10:),*) nevents
        elseif (index(string,"<seed>").ne.0) then
           read(string(10:),*) iseed
+          input_seed=iseed
+          has_input_seed=.true.
        endif
        if (index(string,"<init>").ne.0) then
           read(iunit,*) IDBMUP(1),IDBMUP(2),EBMUP(1),EBMUP(2),PDFGUP(1) &
@@ -535,6 +771,10 @@ contains
        endif
        if (index(string,"</init>").ne.0) exit
     enddo
+    if (nevents.lt.1) then
+       write (*,*) 'The input LHE file contains no events to reweight'
+       stop 1
+    endif
     allocate(events(nevents))
   end subroutine read_init_and_allocate_events
   

@@ -1,6 +1,7 @@
 module read_process_file
   use handling_processes
   use run_parameters, only: ignore_final_state_width_fix
+  use coupling_orders, only: reset_coupling_order_selection,set_coupling_order_selection
   implicit none
   integer :: sf_nprocs
   integer,dimension(:,:),allocatable :: unique_procs,processes,color_orders,multi_chans
@@ -32,15 +33,7 @@ contains
        write (*,*) 'Could not read process-file header while applying final-state widths'
        stop 1
     endif
-    version=1
-    read(buffer,*,iostat=ios) n_external,n_unique,version
-    if (ios.ne.0) then
-       read(buffer,*,iostat=ios) n_external,n_unique
-    endif
-    if (ios.ne.0 .or. n_external.lt.3 .or. n_unique.lt.1) then
-       write (*,*) 'Malformed process-file header while applying final-state widths'
-       stop 1
-    endif
+    call read_process_header(buffer,n_external,n_unique,version)
     do iproc=1,n_unique
        read(iunit,*,iostat=ios)
        if (ios.ne.0) then
@@ -139,20 +132,7 @@ contains
        write (*,*) 'Could not read the process-file header'
        stop 1
     endif
-    process_file_version=1
-    read(buff,*,iostat=ios) next,nproc_unique,process_file_version
-    if (ios.ne.0) then
-       process_file_version=1
-       read(buff,*,iostat=ios) next,nproc_unique
-       if (ios.ne.0) then
-          write (*,*) 'Malformed process-file header'
-          stop 1
-       endif
-    endif
-    if (process_file_version.lt.1 .or. process_file_version.gt.2) then
-       write (*,*) 'Unsupported process-file version',process_file_version
-       stop 1
-    endif
+    call read_process_header(buff,next,nproc_unique,process_file_version)
     ndim=3*(next-2)-4
     if (include_pdf) ndim=ndim+2
     allocate(unique_procs(1:next,1:nproc_unique))
@@ -211,7 +191,8 @@ contains
                   channel_permutations(1:next,1:ichans(0))
              if (ios.ne.0) then
                 if (process_file_version.ge.2) then
-                   write (*,*) 'Malformed version-2 subprocess row; phase-space maps are required'
+                   write (*,*) 'Malformed subprocess row; phase-space maps are required for process-file version',&
+                        process_file_version
                    stop 1
                 endif
                 ! Backward compatibility with process files written before
@@ -288,6 +269,8 @@ contains
        allocate(pgl(igroup)%iden_iproc(1:pgl(igroup)%nproc))
        allocate(pgl(igroup)%iden_processes(1:next,1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc))
        allocate(pgl(igroup)%val_procs(1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc))
+       allocate(pgl(igroup)%val_procs_abs(1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc))
+       allocate(pgl(igroup)%alias_factors(1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc))
        allocate(pgl(igroup)%multichan%channels(1:max_channels,1:pgl(igroup)%nproc))
        allocate(pgl(igroup)%multichan%channel_permutations(1:next,1:max_channels,1:pgl(igroup)%nproc))
        allocate(pgl(igroup)%multichan%number_of_channels(1:pgl(igroup)%nproc))
@@ -332,6 +315,55 @@ contains
   end subroutine read_processes_from_file
 
 
+  subroutine read_process_header(buffer,n_external,n_unique,version)
+    implicit none
+    character(len=*),intent(in) :: buffer
+    integer,intent(out) :: n_external,n_unique,version
+    integer :: ios,mode,as_min2,as_max2,aew_min2,aew_max2
+    logical :: valid_selection
+
+    version=1
+    read(buffer,*,iostat=ios) n_external,n_unique,version
+    if (ios.ne.0) then
+       version=1
+       read(buffer,*,iostat=ios) n_external,n_unique
+       if (ios.ne.0) then
+          write (*,*) 'Malformed process-file header'
+          stop 1
+       endif
+    endif
+    if (n_external.lt.3 .or. n_unique.lt.1) then
+       write (*,*) 'Invalid process counts in process-file header',n_external,n_unique
+       stop 1
+    endif
+    if (version.lt.1 .or. version.gt.3) then
+       write (*,*) 'Unsupported process-file version',version
+       stop 1
+    endif
+
+    if (version.le.2) then
+       ! Historical files contained only the leading-QCD contribution. Their
+       ! compatible interpretation is therefore the automatic maximum-aS mode.
+       call reset_coupling_order_selection()
+       return
+    endif
+
+    read(buffer,*,iostat=ios) n_external,n_unique,version,mode,as_min2,as_max2,&
+         aew_min2,aew_max2
+    if (ios.ne.0) then
+       write (*,*) 'Malformed version-3 process-file header; coupling-order metadata is required'
+       stop 1
+    endif
+    call set_coupling_order_selection(mode,as_min2,as_max2,aew_min2,aew_max2,&
+         valid_selection)
+    if (.not.valid_selection) then
+       write (*,*) 'Invalid coupling-order selection in process-file header',&
+            mode,as_min2,as_max2,aew_min2,aew_max2
+       stop 1
+    endif
+  end subroutine read_process_header
+
+
 
   subroutine check_unique_processes()
     use phase_space_gen23_mod
@@ -340,7 +372,7 @@ contains
     integer :: i,j,iproc,ih
     integer,parameter :: nevent=10
     real(kind=8),dimension(:,:),allocatable :: amp2
-    complex(kind=8),dimension(:,:),allocatable :: amp
+    complex(kind=8),dimension(:,:,:),allocatable :: amp_by_order
     real(kind=8),dimension(:),allocatable :: mass,width
     real(kind=8),dimension(pgl_unique%ndim) :: x
     real(kind=8),external :: ran2
@@ -383,10 +415,13 @@ contains
          pgl_unique%spin,pgl_unique%color_orders,phys_model)
         
     allocate(amp2(nevent,pgl_unique%nproc))
-    allocate(amp(nevent,pgl_unique%amps(1)%n_amps))
+    allocate(amp_by_order(nevent,pgl_unique%amps(1)%n_amps,&
+         pgl_unique%amps(1)%n_sectors))
     allocate(pgl_unique%passed(1))
+    allocate(pgl_unique%hel(next))
 
     pgl_unique%passed=0
+    pgl_unique%hel=0
     do while (pgl_unique%passed(1).lt.nevent)
        do i=1,pgl_unique%ndim+pgl_unique%phase_space%ndim_extra
           ps%x(i)=ran2()
@@ -409,13 +444,13 @@ contains
              amp2(pgl_unique%passed(1),iproc)=amp2(pgl_unique%passed(1),iproc)+&
                   dble(pgl_unique%amps(1)%amps(ih)*dconjg(pgl_unique%amps(1)%amps(ih)))
           enddo
-          amp(pgl_unique%passed(1),1:pgl_unique%amps(1)%n_amps)=pgl_unique%amps(1)%amps(1:pgl_unique%amps(1)%n_amps)
        endif
-       call find_same_flavour(pgl_unique,nevent,amp2(1,:))
+       amp_by_order(pgl_unique%passed(1),:,:)=pgl_unique%amps(1)%amps_by_order
+       call find_same_flavour(pgl_unique,nevent,amp2(pgl_unique%passed(1),:))
     enddo
     allocate(unique_map(1:pgl_unique%nproc))
     allocate(unique_map_value(1:pgl_unique%nproc))
-    call find_unique(pgl_unique,nevent,amp2,unique_map,unique_map_value)
+    call find_unique(pgl_unique,nevent,amp_by_order,unique_map,unique_map_value)
 
     do iproc=1,pgl_unique%nproc
        write (99,*) unique_map(iproc),unique_map_value(iproc),':',pgl_unique%processes(1:pgl_unique%next,iproc),&
@@ -426,29 +461,38 @@ contains
     deallocate(ps%p)
     deallocate(ps%x)
     deallocate(amp2)
-    deallocate(amp)
+    deallocate(amp_by_order)
   end subroutine check_unique_processes
 
-  subroutine find_unique(pgl,nevent,amp2,unique_map,unique_map_value)
+  subroutine find_unique(pgl,nevent,amp_by_order,unique_map,unique_map_value)
     implicit none
     type(phase_space_order_group),intent(in) :: pgl
     integer,intent(in) :: nevent
-    real(kind=8),dimension(nevent,pgl%nproc),intent(in) :: amp2
+    complex(kind=8),dimension(nevent,pgl%amps(1)%n_amps,&
+         pgl%amps(1)%n_sectors),intent(in) :: amp_by_order
     real(kind=8),dimension(pgl%nproc),intent(out) :: unique_map_value
     integer,dimension(pgl%nproc),intent(out) :: unique_map
-    integer :: i,j,k
-    real(kind=8),dimension(nevent) :: ratio
-    real(kind=8) :: ave
-    real(kind=8),parameter :: tiny=1d-6
+    integer :: i,j,k,first_i,last_i,first_j,last_j,ievent,iamp,isector
+    complex(kind=8) :: proportionality
+    real(kind=8) :: scale_i,scale_j,comparison_scale,component_scale
+    real(kind=8),parameter :: tiny=1d-10
+    logical :: compatible
     unique_map=-1d0
     do i=1,pgl%nproc
-       if (all(amp2(1:nevent,i).eq.0d0)) then
+       first_i=pgl%amps(1)%iproc_start(i)
+       last_i=pgl%amps(1)%iproc_start(i+1)-1
+       scale_i=maxval(abs(amp_by_order(:,first_i:last_i,:)))
+       if (scale_i.le.1d-300) then
           unique_map(i)=0
           unique_map_value(i)=0d0
           cycle
        endif
        do j=1,i-1
-          if (all(amp2(1:nevent,j).eq.0d0)) cycle
+          first_j=pgl%amps(1)%iproc_start(j)
+          last_j=pgl%amps(1)%iproc_start(j+1)-1
+          if (last_i-first_i.ne.last_j-first_j) cycle
+          scale_j=maxval(abs(amp_by_order(:,first_j:last_j,:)))
+          if (scale_j.le.1d-300) cycle
           ! A numerical relation found on the deliberately massless probe
           ! point is not a valid runtime reduction if it moves a massive
           ! species to another external leg.
@@ -457,13 +501,52 @@ contains
                   phys_model%get_mass(pgl%processes(k,j))) exit
           enddo
           if (k.le.pgl%next) cycle
-          ratio(1:nevent)=amp2(1:nevent,i)/amp2(1:nevent,j)
-          ave=sum(ratio(1:nevent))/nevent
-          if (all(abs(ratio(1:nevent)/ave-1d0).lt.tiny)) then
-             unique_map_value(i)=ave
-             unique_map(i)=j
-             exit
-          endif
+          ! A representative substitution must remain valid after arbitrary
+          ! squared-order restrictions and alpha_s running.  Require one
+          ! common complex amplitude factor across every probe point,
+          ! helicity/colour slot, and coupling sector.  Equality of only the
+          ! coherent unit-coupling square is insufficient for this purpose.
+          proportionality=(0d0,0d0)
+          comparison_scale=0d0
+          do ievent=1,nevent
+             do iamp=0,last_i-first_i
+                do isector=1,pgl%amps(1)%n_sectors
+                   if (abs(amp_by_order(ievent,first_j+iamp,isector)).gt.&
+                        comparison_scale) then
+                      comparison_scale=abs(amp_by_order(ievent,first_j+iamp,isector))
+                      proportionality=amp_by_order(ievent,first_i+iamp,isector)/&
+                           amp_by_order(ievent,first_j+iamp,isector)
+                   endif
+                enddo
+             enddo
+          enddo
+          if (comparison_scale.le.1d-300) cycle
+          compatible=.true.
+          do iamp=0,last_i-first_i
+             do isector=1,pgl%amps(1)%n_sectors
+                if (pgl%amps(1)%sector_present(first_i+iamp,isector).neqv.&
+                     pgl%amps(1)%sector_present(first_j+iamp,isector)) then
+                   compatible=.false.
+                   exit
+                endif
+                component_scale=max(&
+                     maxval(abs(amp_by_order(:,first_i+iamp,isector))),&
+                     abs(proportionality)*&
+                     maxval(abs(amp_by_order(:,first_j+iamp,isector))))
+                if (component_scale.le.1d-300) cycle
+                if (maxval(abs(amp_by_order(:,first_i+iamp,isector)-&
+                     proportionality*amp_by_order(:,first_j+iamp,isector))).gt.&
+                     tiny*component_scale) then
+                   compatible=.false.
+                   exit
+                endif
+             enddo
+             if (.not.compatible) exit
+          enddo
+          if (.not.compatible) cycle
+          unique_map_value(i)=abs(proportionality)**2
+          unique_map(i)=j
+          exit
        enddo
        if (j.eq.i) then
           unique_map(i)=-1

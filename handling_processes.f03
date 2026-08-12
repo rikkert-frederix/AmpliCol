@@ -21,14 +21,14 @@ module handling_processes
      integer,dimension(:,:),allocatable :: phase_space_permutations
      integer,dimension(:),allocatable :: iden_iproc,phase_space_orders,nhel
      integer :: nproc
-     real(kind=8),dimension(:,:),allocatable :: val_procs,idenCOandMAPfactor
+     real(kind=8),dimension(:,:),allocatable :: val_procs,val_procs_abs,alias_factors,idenCOandMAPfactor
      integer,dimension(:,:,:),allocatable :: iden_processes,same_flavour
      integer(kind=4),dimension(:,:),allocatable :: spin,hel_fac
      integer(kind=8),dimension(:),allocatable :: iden
      logical,dimension(-6:7,2) :: ipdgs
      integer(kind=4) :: next,ndim,ndim_extra
      integer,dimension(:),allocatable :: col_fac
-     real(kind=8),dimension(:),allocatable :: amp2,amp2_hel
+     real(kind=8),dimension(:),allocatable :: amp2,amp2_abs,amp2_hel,amp2_hel_abs
      integer(kind=4),dimension(:),allocatable :: hel,passed
      integer,dimension(:,:),allocatable :: include_hel
      ! cuts
@@ -94,6 +94,10 @@ contains
     integer :: i,j,k,ii,jj,kk,nevent
     real(kind=8),parameter :: tiny=1d-8
     if (keep_processes_separate) return
+    ! The numerical same-flavour shortcut predates coupling sectors and its
+    ! flat-amplitude comparison can mix distinct orders.  Keep the complete
+    ! sectorized recursion unless there is only one order.
+    if (pgl%amps(1)%n_sectors.ne.1) return
     if (.not.decompose_same_flavour_into_two_diff_flavour) return
     if (.not.allocated(pgl%same_flavour)) then
        allocate(pgl%same_flavour(nevent,pgl%nproc,2))
@@ -373,6 +377,8 @@ contains
        endif
     enddo
     allocate(pgl%val_procs(1:maxval(pgl%iden_iproc(1:pgl%nproc)),1:pgl%nproc))
+    allocate(pgl%val_procs_abs(1:maxval(pgl%iden_iproc(1:pgl%nproc)),1:pgl%nproc))
+    allocate(pgl%alias_factors(1:maxval(pgl%iden_iproc(1:pgl%nproc)),1:pgl%nproc))
     allocate(pgl%iden_processes(1:next,1:maxval(pgl%iden_iproc(1:pgl%nproc)),1:pgl%nproc))
     ! Loop again and actually fill the iden_processes()
     do iproc=1,pgl%nproc
@@ -697,13 +703,17 @@ contains
     if (allocated(pgl%iden_iproc)) deallocate(pgl%iden_iproc)
     if (allocated(pgl%phase_space_orders)) deallocate(pgl%phase_space_orders)
     if (allocated(pgl%val_procs)) deallocate(pgl%val_procs)
+    if (allocated(pgl%val_procs_abs)) deallocate(pgl%val_procs_abs)
+    if (allocated(pgl%alias_factors)) deallocate(pgl%alias_factors)
     if (allocated(pgl%idenCOandMAPfactor)) deallocate(pgl%idenCOandMAPfactor)
     if (allocated(pgl%iden_processes)) deallocate(pgl%iden_processes)
     if (allocated(pgl%spin)) deallocate(pgl%spin)
     if (allocated(pgl%iden)) deallocate(pgl%iden)
     if (allocated(pgl%col_fac)) deallocate(pgl%col_fac)
     if (allocated(pgl%amp2)) deallocate(pgl%amp2)
+    if (allocated(pgl%amp2_abs)) deallocate(pgl%amp2_abs)
     if (allocated(pgl%amp2_hel)) deallocate(pgl%amp2_hel)
+    if (allocated(pgl%amp2_hel_abs)) deallocate(pgl%amp2_hel_abs)
     if (allocated(pgl%hel)) deallocate(pgl%hel)
     if (allocated(pgl%hel_fac)) deallocate(pgl%hel_fac)
     if (allocated(pgl%include_hel)) deallocate(pgl%include_hel)

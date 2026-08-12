@@ -6,8 +6,10 @@ module particles
        configured_higgs_width=>higgs_width,ignore_final_state_width_fix
   implicit none
   integer,parameter :: model_particle_capacity = 24
-  integer,parameter :: model_vertex_capacity = 222
-  private :: append_particle, append_vertex, find_particle_index, particle_property_sign&
+  integer,parameter :: model_vertex_capacity = 260
+  private :: append_particle, append_vertex, append_qcd_vertex,append_ew_vertex&
+       &,append_ew_squared_vertex,append_order_zero_vertex&
+       &,find_particle_index, particle_property_sign&
        &, weak_coupling, weak_cosine, neutral_gauge_coupling&
        &, charged_current_coupling, particle_species_index&
        &, photon_fermion_coupling, z_fermion_coupling&
@@ -28,6 +30,11 @@ module particles
      integer :: type
      integer,dimension(3) :: particles
      real(kind=8),dimension(2) :: coupl
+     ! Amplitude-level powers of g_s and g_EW carried by this particular
+     ! vertex.  These are properties of a vertex instance, rather than of a
+     ! numerical Feynman-rule implementation: auxiliary-field decompositions
+     ! intentionally contain vertices of different orders with the same type.
+     integer :: n_gs=0,n_ew=0
   end type vertex
   type physics_model
      type(particle),dimension(:),allocatable :: particle_list
@@ -73,11 +80,12 @@ contains
     this%particle_list(l)%color_rep=color_rep
   end subroutine append_particle
 
-  subroutine append_vertex(this,l,itype,ipdgs,coupl)
+  subroutine append_vertex(this,l,itype,ipdgs,coupl,n_gs,n_ew)
     implicit none
     class(physics_model),intent(inout) :: this
     integer,intent(inout) :: l
     integer,intent(in) :: itype
+    integer,intent(in),optional :: n_gs,n_ew
     integer,dimension(3),intent(in) :: ipdgs
     real(kind=8),dimension(2),intent(in) :: coupl
     l=l+1
@@ -88,7 +96,60 @@ contains
     this%vertex_list(l)%type=itype
     this%vertex_list(l)%particles=ipdgs
     this%vertex_list(l)%coupl=coupl
+    if (present(n_gs).neqv.present(n_ew)) then
+       write (*,*) 'ERROR: both coupling-order entries must be supplied',itype,ipdgs
+       stop 1
+    elseif (present(n_gs)) then
+       this%vertex_list(l)%n_gs=n_gs
+       this%vertex_list(l)%n_ew=n_ew
+    elseif (itype.ge.0 .and. itype.le.9) then
+       this%vertex_list(l)%n_gs=1
+       this%vertex_list(l)%n_ew=0
+    else
+       this%vertex_list(l)%n_gs=0
+       this%vertex_list(l)%n_ew=1
+    endif
   end subroutine append_vertex
+
+  subroutine append_qcd_vertex(this,l,itype,ipdgs,coupl)
+    implicit none
+    class(physics_model),intent(inout) :: this
+    integer,intent(inout) :: l
+    integer,intent(in) :: itype
+    integer,dimension(3),intent(in) :: ipdgs
+    real(kind=8),dimension(2),intent(in) :: coupl
+    call append_vertex(this,l,itype,ipdgs,coupl,1,0)
+  end subroutine append_qcd_vertex
+
+  subroutine append_ew_vertex(this,l,itype,ipdgs,coupl)
+    implicit none
+    class(physics_model),intent(inout) :: this
+    integer,intent(inout) :: l
+    integer,intent(in) :: itype
+    integer,dimension(3),intent(in) :: ipdgs
+    real(kind=8),dimension(2),intent(in) :: coupl
+    call append_vertex(this,l,itype,ipdgs,coupl,0,1)
+  end subroutine append_ew_vertex
+
+  subroutine append_ew_squared_vertex(this,l,itype,ipdgs,coupl)
+    implicit none
+    class(physics_model),intent(inout) :: this
+    integer,intent(inout) :: l
+    integer,intent(in) :: itype
+    integer,dimension(3),intent(in) :: ipdgs
+    real(kind=8),dimension(2),intent(in) :: coupl
+    call append_vertex(this,l,itype,ipdgs,coupl,0,2)
+  end subroutine append_ew_squared_vertex
+
+  subroutine append_order_zero_vertex(this,l,itype,ipdgs,coupl)
+    implicit none
+    class(physics_model),intent(inout) :: this
+    integer,intent(inout) :: l
+    integer,intent(in) :: itype
+    integer,dimension(3),intent(in) :: ipdgs
+    real(kind=8),dimension(2),intent(in) :: coupl
+    call append_vertex(this,l,itype,ipdgs,coupl,0,0)
+  end subroutine append_order_zero_vertex
 
   integer function find_particle_index(this,ipdg)
     implicit none
@@ -481,34 +542,57 @@ contains
     call append_vertex(this,l,20,[25,25,25],higgs_self_coupling(this)) !!
 
     ! W-boson-W-boson to auxiliary scalar C
-    call append_vertex(this,l,17,[24,-24,127],[1d0/2d0*weak_coupling_squared(),0d0]) !!
-    call append_vertex(this,l,17,[-24,24,127],[1d0/2d0*weak_coupling_squared(),0d0]) !!
+    call append_ew_squared_vertex(this,l,17,[24,-24,127],[1d0/2d0*weak_coupling_squared(),0d0]) !!
+    call append_ew_squared_vertex(this,l,17,[-24,24,127],[1d0/2d0*weak_coupling_squared(),0d0]) !!
     ! Z-boson-Z-boson to auxiliary scalar C
-    call append_vertex(this,l,17,[23,23,127],[1d0/2d0*weak_coupling_squared()/weak_cosine_squared(),0d0]) !!
+    call append_ew_squared_vertex(this,l,17,[23,23,127],&
+         [1d0/2d0*weak_coupling_squared()/weak_cosine_squared(),0d0]) !!
     ! Auxiliary scalar A-Higgs to Higgs
-    call append_vertex(this,l,20,[125,25,25],[1d0,0d0]) !!
+    call append_order_zero_vertex(this,l,20,[125,25,25],[1d0,0d0]) !!
     ! Higgs-auxiliary scalar A to Higgs
-    call append_vertex(this,l,20,[25,125,25],[1d0,0d0]) !!
+    call append_order_zero_vertex(this,l,20,[25,125,25],[1d0,0d0]) !!
     ! Higgs-Higgs to auxiliary scalar A
-    call append_vertex(this,l,20,[25,25,125],[(-3d0/4d0)*weak_coupling_squared()*this%get_mass(25)**2/this%get_mass(24)**2,0d0]) !!
+    call append_ew_squared_vertex(this,l,20,[25,25,125],&
+         [(-3d0/4d0)*weak_coupling_squared()*this%get_mass(25)**2/this%get_mass(24)**2,0d0]) !!
     ! Auxiliary scalar C-Higgs to Higgs
-    call append_vertex(this,l,20,[127,25,25],[1d0,0d0]) !!
+    call append_order_zero_vertex(this,l,20,[127,25,25],[1d0,0d0]) !!
     ! Higgs-auxiliary scalar C to Higgs
-    call append_vertex(this,l,20,[25,127,25],[1d0,0d0]) !!
+    call append_order_zero_vertex(this,l,20,[25,127,25],[1d0,0d0]) !!
     ! Higgs-Higgs to auxiliary scalar B
-    call append_vertex(this,l,20,[25,25,126],[1d0,-10d0]) !!
+    call append_order_zero_vertex(this,l,20,[25,25,126],[1d0,-10d0]) !!
 
     ! Auxiliary scalar B-Z-boson to Z-boson
-    call append_vertex(this,l,18,[126,23,23],[-1d0/2d0*weak_coupling_squared()/weak_cosine_squared(),0d0]) !!
+    call append_ew_squared_vertex(this,l,18,[126,23,23],&
+         [-1d0/2d0*weak_coupling_squared()/weak_cosine_squared(),0d0]) !!
     ! Z-boson-auxiliary scalar B to Z-boson
-    call append_vertex(this,l,19,[23,126,23],[-1d0/2d0*weak_coupling_squared()/weak_cosine_squared(),0d0]) !!
+    call append_ew_squared_vertex(this,l,19,[23,126,23],&
+         [-1d0/2d0*weak_coupling_squared()/weak_cosine_squared(),0d0]) !!
 
     ! Auxiliary scalar B-W-boson to W-boson
-    call append_vertex(this,l,18,[126,24,24],[-1d0/2d0*weak_coupling_squared(),0d0]) !!
-    call append_vertex(this,l,18,[126,-24,-24],[-1d0/2d0*weak_coupling_squared(),0d0]) !!
+    call append_ew_squared_vertex(this,l,18,[126,24,24],[-1d0/2d0*weak_coupling_squared(),0d0]) !!
+    call append_ew_squared_vertex(this,l,18,[126,-24,-24],[-1d0/2d0*weak_coupling_squared(),0d0]) !!
     ! W-boson-auxiliary scalar B to W-boson
-    call append_vertex(this,l,19,[24,126,24],[-1d0/2d0*weak_coupling_squared(),0d0]) !!
-    call append_vertex(this,l,19,[-24,126,-24],[-1d0/2d0*weak_coupling_squared(),0d0]) !!
+    call append_ew_squared_vertex(this,l,19,[24,126,24],[-1d0/2d0*weak_coupling_squared(),0d0]) !!
+    call append_ew_squared_vertex(this,l,19,[-24,126,-24],[-1d0/2d0*weak_coupling_squared(),0d0]) !!
+
+    ! Crossed quark-antiquark electroweak currents.  The emission vertices
+    ! above are not sufficient for a recursion in which an entire quark line
+    ! first closes into a colour-singlet vector (as required by pure-EW/VBS
+    ! diagrams).  Include both colour-order orientations explicitly.
+    do i=1,6
+       call append_ew_vertex(this,l,21,[i,-i,22],photon_fermion_coupling(this,i))
+       call append_ew_vertex(this,l,22,[-i,i,22],photon_fermion_coupling(this,-i))
+       call append_ew_vertex(this,l,21,[i,-i,23],z_fermion_coupling(this,i))
+       call append_ew_vertex(this,l,22,[-i,i,23],z_fermion_coupling(this,-i))
+    enddo
+    do i=1,3
+       ! i_down + anti-i_up -> W- and the reverse fermion ordering.
+       call append_ew_vertex(this,l,21,[2*i-1,-2*i,-24],[charged_current_coupling(),0d0])
+       call append_ew_vertex(this,l,22,[-2*i,2*i-1,-24],[charged_current_coupling(),0d0])
+       ! i_up + anti-i_down -> W+ and the reverse fermion ordering.
+       call append_ew_vertex(this,l,21,[2*i,-(2*i-1),24],[charged_current_coupling(),0d0])
+       call append_ew_vertex(this,l,22,[-(2*i-1),2*i,24],[charged_current_coupling(),0d0])
+    enddo
 
     ! Lepton-antilepton to photon
     do i=1,3

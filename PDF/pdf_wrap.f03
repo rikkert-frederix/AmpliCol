@@ -62,29 +62,34 @@ contains
     iip=0
     do iproc=ip_start,ip_end
        iip=iip+1
-       pgl%val_procs(1:pgl%iden_iproc(iproc),iproc)=val(iip)*pgl%idenCOandMAPfactor(1:pgl%iden_iproc(iproc),iproc)
+       pgl%alias_factors(1:pgl%iden_iproc(iproc),iproc)=&
+            pgl%idenCOandMAPfactor(1:pgl%iden_iproc(iproc),iproc)
        if (include_pdf) then
           do ip=1,pgl%iden_iproc(iproc)
              ! first incoming particle
              if (pgl%iden_processes(1,ip,iproc).eq.21) then
-                pgl%val_procs(ip,iproc)=pgl%val_procs(ip,iproc)*PDF(0,1)
+                pgl%alias_factors(ip,iproc)=pgl%alias_factors(ip,iproc)*PDF(0,1)
              elseif(pgl%iden_processes(1,ip,iproc).eq.22) then
-                pgl%val_procs(ip,iproc)=pgl%val_procs(ip,iproc)*PDF(7,1)
+                pgl%alias_factors(ip,iproc)=pgl%alias_factors(ip,iproc)*PDF(7,1)
              else
-                pgl%val_procs(ip,iproc)=pgl%val_procs(ip,iproc)*PDF(pgl%iden_processes(1,ip,iproc),1)
+                pgl%alias_factors(ip,iproc)=pgl%alias_factors(ip,iproc)*PDF(pgl%iden_processes(1,ip,iproc),1)
              endif
              ! second incoming particle
              if (pgl%iden_processes(2,ip,iproc).eq.21) then
-                pgl%val_procs(ip,iproc)=pgl%val_procs(ip,iproc)*PDF(0,2)
+                pgl%alias_factors(ip,iproc)=pgl%alias_factors(ip,iproc)*PDF(0,2)
              elseif(pgl%iden_processes(2,ip,iproc).eq.22) then
-                pgl%val_procs(ip,iproc)=pgl%val_procs(ip,iproc)*PDF(7,2)
+                pgl%alias_factors(ip,iproc)=pgl%alias_factors(ip,iproc)*PDF(7,2)
              else
-                pgl%val_procs(ip,iproc)=pgl%val_procs(ip,iproc)*PDF(pgl%iden_processes(2,ip,iproc),2)
+                pgl%alias_factors(ip,iproc)=pgl%alias_factors(ip,iproc)*PDF(pgl%iden_processes(2,ip,iproc),2)
              endif
           enddo
        endif
+       pgl%val_procs(1:pgl%iden_iproc(iproc),iproc)=&
+            val(iip)*pgl%alias_factors(1:pgl%iden_iproc(iproc),iproc)
+       pgl%val_procs_abs(1:pgl%iden_iproc(iproc),iproc)=&
+            val_abs(iip)*abs(pgl%alias_factors(1:pgl%iden_iproc(iproc),iproc))
        val(iip)=sum(pgl%val_procs(1:pgl%iden_iproc(iproc),iproc))
-       val_abs(iip)=sum(abs(pgl%val_procs(1:pgl%iden_iproc(iproc),iproc)))
+       val_abs(iip)=sum(pgl%val_procs_abs(1:pgl%iden_iproc(iproc),iproc))
     enddo
   end subroutine include_PDF_and_identical_procs
 

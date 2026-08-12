@@ -75,8 +75,10 @@ contains
     implicit none
     integer :: i,nord,iint,ichan
     if (.not.allocated(mg_check)) allocate(mg_check(1000))
-    me_code = pgl(ichan)%amp2(:)*(4*pi*alpha_check)**(next-2-pgl(ichan)%amps(iint)%n_sing(1))&
-               *(2d0*4d0*pi*alphaEW)**pgl(ichan)%amps(iint)%n_sing(1)/dble(pgl(ichan)%iden(iint))
+    ! Coupling-order sectors are scaled before squaring.  Applying the old
+    ! n_sing-based monomial here would multiply the couplings a second time
+    ! and is not meaningful once QCD/EW interference sectors are retained.
+    me_code = pgl(ichan)%amp2(:)/dble(pgl(ichan)%iden(iint))
     call get_madgraph_results(pgl(ichan)%next,ichan,iint,mg_check,nord)
     match=.false.
     do i=1,nord

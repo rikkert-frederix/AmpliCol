@@ -1,6 +1,7 @@
 module handling_events
   use common
   use handling_processes
+  use coupling_orders, only: coupling_order_selection
   integer :: iproc_picked,iproc_iden_picked
   integer,dimension(2) :: hel_picked
   real(kind=8) :: evt_sign
@@ -97,7 +98,10 @@ contains
        if (wgt(1).ne.0d0) write(ounit,'(a)') trim(string)
     endif
     read(iunit,503)NUP,IDPRUP,XWGTUP,SCALUP,AQEDUP,AQCDUP
-    XWGTUP=wgt(1)
+    ! The integrator returns the positive sampling normalization.  Preserve
+    ! the sign selected from the subprocess/helicity interference term in the
+    ! temporary event record.
+    XWGTUP=sign(wgt(1),XWGTUP)
     if (wgt(1).ne.0d0) &
          write(ounit,503)NUP,IDPRUP,XWGTUP,SCALUP,AQEDUP,AQCDUP
     do
@@ -125,7 +129,7 @@ contains
     do iproc=1,pgl%nproc
        if (keep_processes_separate .and. iproc.ne.iint) cycle
        do i=1,pgl%iden_iproc(iproc)
-          target=target+abs(pgl%val_procs(i,iproc))
+          target=target+pgl%val_procs_abs(i,iproc)
        enddo
     enddo
     random=ran2()*target
@@ -135,7 +139,7 @@ contains
        iproc=1
     endif
     i=1
-    accum=abs(pgl%val_procs(i,iproc))
+    accum=pgl%val_procs_abs(i,iproc)
     do
        if (accum.gt.random) then
           exit
@@ -145,7 +149,7 @@ contains
              i=1
              iproc=iproc+1
           endif
-          accum=accum+abs(pgl%val_procs(i,iproc))
+          accum=accum+pgl%val_procs_abs(i,iproc)
        endif
     enddo
     iproc_picked=iproc
@@ -154,11 +158,7 @@ contains
        write (*,*) "Could not unweight process",iproc,iproc_iden_picked,pgl%iden_iproc(iproc)
        stop 1
     endif
-    if (pgl%val_procs(iproc_iden_picked,iproc_picked).lt.0d0) then
-       evt_sign=-1d0
-    else
-       evt_sign=+1d0
-    endif
+    evt_sign=sign(1d0,pgl%alias_factors(iproc_iden_picked,iproc_picked))
     if (keep_processes_separate .and. iproc_picked.ne.iint) then
        write (*,*) 'Could not unweight process correctly (keep_processes_separate=true)'
        stop 1
@@ -172,18 +172,18 @@ contains
     real(kind=8) :: random
     real(kind=8),external :: ran2
     if (keep_processes_separate) then
-       random=ran2()*pgl%amp2(1)
+       random=ran2()*pgl%amp2_abs(1)
        i=pgl%amps(iproc_picked)%iproc_start(1)
     else
-       random=ran2()*pgl%amp2(iproc_picked)
+       random=ran2()*pgl%amp2_abs(iproc_picked)
        i=pgl%amps(1)%iproc_start(iproc_picked)
     endif
     do
-       if (pgl%amp2_hel(i).gt.random) then
+       if (pgl%amp2_hel_abs(i).gt.random) then
           exit
        else
           i=i+1
-          pgl%amp2_hel(i)=pgl%amp2_hel(i)+pgl%amp2_hel(i-1)
+          pgl%amp2_hel_abs(i)=pgl%amp2_hel_abs(i)+pgl%amp2_hel_abs(i-1)
        endif
     enddo
     hel_picked(2)=i
@@ -212,6 +212,7 @@ contains
           hel_picked(1)=1
        endif
     endif
+    evt_sign=sign(1d0,evt_sign*pgl%amp2_hel(hel_picked(2)))
   end subroutine unwgt_helicity
 
   subroutine write_unique_in_file(pgl_unique,unique_map,unique_map_value,nevents)
@@ -240,6 +241,11 @@ contains
     do iproc=1,pgl_unique%nproc
        write(11,*) unique_map(iproc),unique_map_value(iproc),pgl_unique%processes(1:pgl_unique%next,iproc)
     enddo
+    write(11,'(a,6(1x,i0),1x,a)') '<coupling_orders>',&
+         coupling_order_selection%mode,coupling_order_selection%resolved_as2,&
+         coupling_order_selection%as_min2,coupling_order_selection%as_max2,&
+         coupling_order_selection%aew_min2,coupling_order_selection%aew_max2,&
+         '</coupling_orders>'
     write(11,'(a,1x,i12,1x,a)') '<nevents>',nevents,'</nevents>'
     write(11,'(a,1x,i12,1x,a)') '<seed>   ',iseed,  '</seed>'
     write(11,'(a)') '</header>'

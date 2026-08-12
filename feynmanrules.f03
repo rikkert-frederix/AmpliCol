@@ -1200,6 +1200,25 @@ contains
     wfg(1:4)=wfg(1:4)+wfg_temp(1:4)
   end subroutine AntileptonLeptonToVector
 
+  subroutine FermionAntifermionToVector(wff1,wff2,wfv,coupl)
+    ! The Lorentz rule is independent of whether the fermion is a lepton or
+    ! a quark.  Keep the historical entry point above for generated-library
+    ! compatibility, but use this physics-generic name in new recursion code.
+    implicit none
+    complex(kind=8),dimension(4),intent(in) :: wff1,wff2
+    complex(kind=8),dimension(4),intent(out) :: wfv
+    real(kind=8),dimension(2),intent(in) :: coupl
+    call LeptonAntileptonToVector(wff1,wff2,wfv,coupl)
+  end subroutine FermionAntifermionToVector
+
+  subroutine AntifermionFermionToVector(wff1,wff2,wfv,coupl)
+    implicit none
+    complex(kind=8),dimension(4),intent(in) :: wff1,wff2
+    complex(kind=8),dimension(4),intent(out) :: wfv
+    real(kind=8),dimension(2),intent(in) :: coupl
+    call AntileptonLeptonToVector(wff1,wff2,wfv,coupl)
+  end subroutine AntifermionFermionToVector
+
   subroutine QuarkAntiquarkToColourFlowU1Vector_weyl(wfq1,wfq2,wfg,coupl,chirality1,chirality2)
     implicit none
     integer,intent(in) :: chirality1,chirality2
@@ -1403,6 +1422,24 @@ contains
     wfg(3)=cImag*prefact*(coupl(1)*(-l4*a1+l3*a2)+coupl(2)*(-l1*a4+l2*a3))
     wfg(4)=prefact*(coupl(1)*(-l3*a1+l4*a2)+coupl(2)*(l1*a3-l2*a4))
   end subroutine AntileptonLeptonToVector_weyl
+
+  subroutine FermionAntifermionToVector_weyl(wff1,wff2,wfv,coupl,chirality1,chirality2)
+    implicit none
+    integer,intent(in) :: chirality1,chirality2
+    complex(kind=8),dimension(*),intent(in) :: wff1,wff2
+    complex(kind=8),dimension(4),intent(out) :: wfv
+    real(kind=8),dimension(2),intent(in) :: coupl
+    call LeptonAntileptonToVector_weyl(wff1,wff2,wfv,coupl,chirality1,chirality2)
+  end subroutine FermionAntifermionToVector_weyl
+
+  subroutine AntifermionFermionToVector_weyl(wff1,wff2,wfv,coupl,chirality1,chirality2)
+    implicit none
+    integer,intent(in) :: chirality1,chirality2
+    complex(kind=8),dimension(*),intent(in) :: wff1,wff2
+    complex(kind=8),dimension(4),intent(out) :: wfv
+    real(kind=8),dimension(2),intent(in) :: coupl
+    call AntileptonLeptonToVector_weyl(wff1,wff2,wfv,coupl,chirality1,chirality2)
+  end subroutine AntifermionFermionToVector_weyl
   
   subroutine MasslessVectorPropagator(wfg,p)
     implicit none

@@ -46,6 +46,20 @@ configurations with three or more quark lines are not included by
 default, but can be included by providing the '--include_3qqbar'
 option.
 
+Squared-amplitude coupling orders can be selected with trailing process
+qualifiers. For example, ``'p p > z 2j aS=2'`` keeps exactly the
+``alphaS**2`` contribution, while ``aEW>=2`` sets a lower electroweak-order
+bound. The operators ``=``, ``>=``, and ``<=`` are supported and bounds can
+be combined. Orders may be non-negative integers or half-integers. Without
+any qualifier, AmpliCol selects the largest ``aS`` order available across the
+complete generated sample (and therefore the smallest corresponding ``aEW``
+order). Coupling-order filters are applied after coherent amplitudes are
+squared, so interference terms (which may be negative) can be selected with
+integer or half-integer powers. ``aS=0`` selects the complete pure-EW tree
+contribution, including VBS diagrams where available; it is not a
+diagram-topology filter. Flavour-changing partonic channels, such as the
+standard same-sign VBS subprocesses, still require ``--include_cc``.
+
 
 
 2. Event generation

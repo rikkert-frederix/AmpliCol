@@ -29,10 +29,114 @@ import itertools
 import re
 import argparse
 from collections import Counter, defaultdict
+from decimal import Decimal, InvalidOperation
 import multiprocessing
 import math
 
-PROCESS_FILE_VERSION = 2
+PROCESS_FILE_VERSION = 3
+
+COUPLING_ORDER_MODE_AUTOMATIC = 0
+COUPLING_ORDER_MODE_EXPLICIT = 1
+COUPLING_ORDER_UNBOUNDED = -1
+
+
+def DefaultCouplingOrderSelection():
+    """Return the default squared-order selection written to a process file.
+
+    Automatic mode is resolved only after all amplitude sectors have been
+    constructed: it selects the globally largest available ``aS`` power.
+    Bounds store twice the physical power so that half-integer interference
+    orders can be represented and compared exactly.
+    """
+    return {
+        "mode": COUPLING_ORDER_MODE_AUTOMATIC,
+        "as_min2": COUPLING_ORDER_UNBOUNDED,
+        "as_max2": COUPLING_ORDER_UNBOUNDED,
+        "aew_min2": COUPLING_ORDER_UNBOUNDED,
+        "aew_max2": COUPLING_ORDER_UNBOUNDED,
+    }
+
+
+def _ParseDoubledCouplingOrder(value):
+    """Parse a non-negative integer or half-integer into an exact integer."""
+    if not re.fullmatch(r"(?:\d+(?:\.\d*)?|\.\d+)", value):
+        raise ValueError(
+            "Coupling orders must be non-negative integers or half-integers"
+        )
+    try:
+        doubled = Decimal(value) * 2
+    except InvalidOperation as exc:
+        raise ValueError("Invalid coupling-order value: " + value) from exc
+    if doubled != doubled.to_integral_value():
+        raise ValueError(
+            "Coupling orders must be non-negative integers or half-integers"
+        )
+    return int(doubled)
+
+
+def ParseCouplingOrderRestrictions(input_string):
+    """Remove and parse trailing squared-amplitude coupling-order tokens.
+
+    Accepted tokens are ``aS{=|>=|<=}N`` and ``aEW{=|>=|<=}N``. Multiple
+    bounds are intersected, and the first explicit token changes the selection
+    from automatic maximum-``aS`` mode to explicit mode. Coupling tokens must
+    form one contiguous suffix of the process string.
+    """
+    tokens = input_string.split()
+    modifier_start = None
+    for index, token in enumerate(tokens):
+        if re.match(r"(?i)^a(?:s|ew)", token):
+            modifier_start = index
+            break
+    if modifier_start is None:
+        return input_string, DefaultCouplingOrderSelection()
+
+    modifiers = tokens[modifier_start:]
+    pattern = re.compile(r"^(aS|aEW)(=|>=|<=)(.+)$")
+    parsed = []
+    for token in modifiers:
+        match = pattern.fullmatch(token)
+        if match is None:
+            if re.match(r"(?i)^a(?:s|ew)", token):
+                raise ValueError(
+                    "Invalid coupling-order restriction '" + token
+                    + "'; expected aS{=|>=|<=}N or aEW{=|>=|<=}N"
+                )
+            raise ValueError("Coupling-order restrictions must be trailing tokens")
+        parsed.append((match.group(1), match.group(2),
+                       _ParseDoubledCouplingOrder(match.group(3))))
+
+    selection = DefaultCouplingOrderSelection()
+    selection["mode"] = COUPLING_ORDER_MODE_EXPLICIT
+    for coupling, operator, value2 in parsed:
+        prefix = "as" if coupling == "aS" else "aew"
+        lower_key = prefix + "_min2"
+        upper_key = prefix + "_max2"
+        if operator in ("=", ">="):
+            old_lower = selection[lower_key]
+            selection[lower_key] = (
+                value2 if old_lower == COUPLING_ORDER_UNBOUNDED
+                else max(old_lower, value2)
+            )
+        if operator in ("=", "<="):
+            old_upper = selection[upper_key]
+            selection[upper_key] = (
+                value2 if old_upper == COUPLING_ORDER_UNBOUNDED
+                else min(old_upper, value2)
+            )
+
+    for prefix, label in (("as", "aS"), ("aew", "aEW")):
+        lower = selection[prefix + "_min2"]
+        upper = selection[prefix + "_max2"]
+        if (lower != COUPLING_ORDER_UNBOUNDED
+                and upper != COUPLING_ORDER_UNBOUNDED
+                and lower > upper):
+            raise ValueError("Contradictory " + label + " coupling-order restrictions")
+
+    process_string = " ".join(tokens[:modifier_start])
+    if not process_string:
+        raise ValueError("Missing collision process before coupling-order restrictions")
+    return process_string, selection
 
 
 # Global sets (make then 'frozenset' so that they are immutable):
@@ -276,6 +380,8 @@ def ParseCollision(input_string):
     are temporarily replaced by the corresponding ``z``/``w+``/``w-`` boson so
     phase-space orderings keep the lepton pair adjacent.
     """
+    input_string, coupling_orders = ParseCouplingOrderRestrictions(input_string)
+    options["coupling_orders"] = coupling_orders
     input_string=input_string.replace('bar','~')
     input_string=input_string.replace(' j',' 1j')
     parts=input_string.split(">")
@@ -300,7 +406,8 @@ def ParseCollision(input_string):
         if (sum(charges3[l] for l in lep) == 0): rest.append('z')
         if (sum(charges3[l] for l in lep) < 0): rest.append('w-')
         if (sum(charges3[l] for l in lep) > 0): rest.append('w+')
-    return {"initial_state":initial_state,"jet_count":jet_count,"rest":rest,"lep":lep}
+    return {"initial_state":initial_state,"jet_count":jet_count,"rest":rest,"lep":lep,
+            "coupling_orders":coupling_orders.copy()}
 
 def count_matching_elements(main_list,check_list):
     """Count entries of ``main_list`` whose value is present in ``check_list``."""
@@ -458,7 +565,11 @@ def CombineResults(results):
 def ParseArgument():
     """Parse command-line options and return the normalized process request."""
     parser = argparse.ArgumentParser(description="Generate the full list of processes, ordered by phase-space order")
-    parser.add_argument("process_string", type=str, help="Process to consider (e.g., 'p p > w+ z 4j', (including quotation marks))")
+    parser.add_argument(
+        "process_string", type=str,
+        help=("Process to consider, optionally followed by squared coupling-order "
+              "bounds (e.g., 'p p > w+ z 4j aS=4 aEW>=2')"),
+    )
     parser.add_argument("-FS", "--flavour_scheme", type=int, choices=range(1, 6), metavar="[1-5]",
                         help="Switch to N-flavor scheme (NFS), where N is 1-5 (default=5)")
     parser.add_argument("-3", "--include_3qqbar", action='store_true', help="Include processes with up to three quark lines (instead of just two).")
@@ -1186,7 +1297,11 @@ def WriteUniqueProcsIntoList(procs,lep):
     # in case of different flavour multiple-quark line processes, add all the possible orders:
     sorted_procs=Addqq_dfProcesses(sorted_procs)
     try:
-        line=[str(len(sorted_procs[0]))+' '+str(len(sorted_procs))+' '+str(PROCESS_FILE_VERSION)]
+        selection = options.get("coupling_orders", DefaultCouplingOrderSelection())
+        header = [len(sorted_procs[0]), len(sorted_procs), PROCESS_FILE_VERSION,
+                  selection["mode"], selection["as_min2"], selection["as_max2"],
+                  selection["aew_min2"], selection["aew_max2"]]
+        line=[' '.join(str(value) for value in header)]
     except IndexError:
         print("ERROR: no processes found. Try './process_list.py --help' to get more information on usage")
         quit()
