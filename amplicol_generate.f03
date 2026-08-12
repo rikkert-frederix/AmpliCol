@@ -19,6 +19,18 @@ program amplicol_generate
   use mg_checks
   use coupling_orders
   implicit none
+  type :: coupling_square_cache_type
+     logical,dimension(:,:),allocatable :: allowed_pairs
+     logical,dimension(:),allocatable :: active_sectors
+     real(kind=8),dimension(:),allocatable :: sector_factors
+     real(kind=8),dimension(:),allocatable :: fixed_ew_factors
+     integer :: n_allowed_pairs=0
+     integer :: single_left_sector=0
+     integer :: single_right_sector=0
+  end type coupling_square_cache_type
+  type :: group_square_cache_type
+     type(coupling_square_cache_type),dimension(:),allocatable :: amplitudes
+  end type group_square_cache_type
   integer :: iproc,iident,target_label
   real(kind=8) :: weight
   integer :: i
@@ -30,7 +42,7 @@ program amplicol_generate
   integer :: igroup
   logical,dimension(1) :: to_write
   integer,dimension(:),allocatable :: nintegrals
-  integer :: ichan,iint,itmax,ncalls0,iamp
+  integer :: ichan,iint,itmax,ncalls0,iamp,max_as_ew_order
   real(kind=8),dimension(1) :: f,f_abs
   logical :: done
   real(kind=8),dimension(:,:),allocatable :: wgts
@@ -42,6 +54,7 @@ program amplicol_generate
   logical :: timing_enabled,time_detail_point,time_point_sample
   integer(kind=8) :: timing_point
   real(kind=8) :: tLoopBefore,tLoopAfter,tSampleBefore,tSampleAfter,tFinalBefore,tFinalAfter
+  type(group_square_cache_type),dimension(:),allocatable :: coupling_square_cache
 
   call get_run_arguments()
   call read_run_parameters(input_filename)
@@ -184,8 +197,18 @@ program amplicol_generate
      if (timing_mode.eq.timing_detailed) call cpu_time(tBefore)
      if (keep_processes_separate) then
         do iamp=1,pgl(igroup)%nproc
-           call pgl(igroup)%amps(iamp)%init(1,pgl(igroup)%next,1,pgl(igroup)%processes(1,iamp),&
-                pgl(igroup)%spin,pgl(igroup)%color_orders(1,iamp),phys_model)
+           max_as_ew_order=compact_max_as_ew_order(pgl(igroup)%next,1,&
+                pgl(igroup)%processes(:,iamp:iamp))
+           if (max_as_ew_order.ge.0) then
+              call pgl(igroup)%amps(iamp)%init(1,pgl(igroup)%next,1,&
+                   pgl(igroup)%processes(:,iamp:iamp),pgl(igroup)%spin,&
+                   pgl(igroup)%color_orders(:,iamp:iamp),phys_model,&
+                   max_as_ew_order=max_as_ew_order)
+           else
+              call pgl(igroup)%amps(iamp)%init(1,pgl(igroup)%next,1,&
+                   pgl(igroup)%processes(1,iamp),pgl(igroup)%spin,&
+                   pgl(igroup)%color_orders(1,iamp),phys_model)
+           endif
            if (read_momenta) then
                    if (pgl(igroup)%amps(iamp)%n_sectors.ne.1) then
                       write (*,*) '--me_test does not yet support amplitudes with multiple coupling sectors'
@@ -201,8 +224,17 @@ program amplicol_generate
            endif
         enddo
      else
-        call pgl(igroup)%amps(1)%init(1,pgl(igroup)%next,pgl(igroup)%nproc,pgl(igroup)%processes,&
-             pgl(igroup)%spin,pgl(igroup)%color_orders,phys_model)
+        max_as_ew_order=compact_max_as_ew_order(pgl(igroup)%next,&
+             pgl(igroup)%nproc,pgl(igroup)%processes)
+        if (max_as_ew_order.ge.0) then
+           call pgl(igroup)%amps(1)%init(1,pgl(igroup)%next,pgl(igroup)%nproc,&
+                pgl(igroup)%processes,pgl(igroup)%spin,pgl(igroup)%color_orders,&
+                phys_model,max_as_ew_order=max_as_ew_order)
+        else
+           call pgl(igroup)%amps(1)%init(1,pgl(igroup)%next,pgl(igroup)%nproc,&
+                pgl(igroup)%processes,pgl(igroup)%spin,pgl(igroup)%color_orders,&
+                phys_model)
+        endif
      endif
 
      if (timing_mode.eq.timing_detailed) then
@@ -256,6 +288,7 @@ program amplicol_generate
         enddo
      enddo
   endif
+  call setup_coupling_square_caches()
 
   if (use_amplitude_library) then
      if (timing_mode.eq.timing_detailed) call cpu_time(tBefore)
@@ -386,6 +419,104 @@ program amplicol_generate
   close(99)
   
 contains
+
+  integer function compact_max_as_ew_order(next,nproc,processes)
+    ! Return the EW power of an automatic leading-QCD amplitude that can be
+    ! built on the compact QCD colour backbone, or -1 when the general route
+    ! construction is required.  It is most useful for two and three quark
+    ! lines, but the same exact cap is safe for pure-gluon and one-line
+    ! samples.  Neutral and charged gauge bosons may be radiated from the
+    ! quark lines, while optional external gluons do not change the EW order.
+    implicit none
+    integer,intent(in) :: next,nproc
+    integer,dimension(next,nproc),intent(in) :: processes
+    integer :: iproc,flavour,initial_number,final_number,nquarks,nquark_lines
+    integer :: process_ew_order,candidate_order,candidate_quark_lines
+    integer :: n_wplus,n_wminus,n_charged_vectors,n_higgs
+    integer :: n_leptons
+    integer,dimension(6) :: flavour_delta
+    logical :: compatible_flavour_change
+
+    compact_max_as_ew_order=-1
+    if (coupling_order_selection%mode.ne.coupling_order_mode_automatic) return
+    candidate_order=-1
+    candidate_quark_lines=-1
+    do iproc=1,nproc
+       nquarks=count(abs(processes(:,iproc)).ge.1 .and. &
+            abs(processes(:,iproc)).le.6)
+       if (mod(nquarks,2).ne.0) return
+       nquark_lines=nquarks/2
+       if (nquark_lines.gt.3) return
+       if (candidate_quark_lines.lt.0) then
+          candidate_quark_lines=nquark_lines
+       elseif (nquark_lines.ne.candidate_quark_lines) then
+          return
+       endif
+       if (any(.not.((abs(processes(:,iproc)).ge.1 .and. &
+            abs(processes(:,iproc)).le.6) .or. &
+            processes(:,iproc).eq.21 .or. processes(:,iproc).eq.22 .or. &
+            processes(:,iproc).eq.23 .or. abs(processes(:,iproc)).eq.24 .or. &
+            processes(:,iproc).eq.25 .or. &
+            (abs(processes(:,iproc)).ge.11 .and. &
+            abs(processes(:,iproc)).le.16)))) then
+          return
+       endif
+       if (nquark_lines.eq.0 .and. any(processes(:,iproc).ne.21)) return
+       n_wplus=count(processes(:,iproc).eq.24)
+       n_wminus=count(processes(:,iproc).eq.-24)
+       n_charged_vectors=n_wplus+n_wminus
+       n_higgs=count(processes(:,iproc).eq.25)
+       n_leptons=count(abs(processes(:,iproc)).ge.11 .and. &
+            abs(processes(:,iproc)).le.16)
+       if (n_leptons.gt.0 .and. (n_charged_vectors.gt.0 .or. n_higgs.gt.0)) return
+       do flavour=11,16
+          if (count(processes(:,iproc).eq.flavour).ne.&
+               count(processes(:,iproc).eq.-flavour)) return
+       enddo
+       if (n_higgs.gt.1 .or. &
+            (n_charged_vectors.gt.0 .and. n_higgs.gt.0)) return
+       process_ew_order=count(processes(:,iproc).eq.22 .or. &
+            processes(:,iproc).eq.23 .or. abs(processes(:,iproc)).eq.24 .or. &
+            processes(:,iproc).eq.25 .or. &
+            (abs(processes(:,iproc)).ge.11 .and. &
+            abs(processes(:,iproc)).le.16))
+       if (candidate_order.lt.0) candidate_order=process_ew_order
+       if (process_ew_order.ne.candidate_order) return
+       do flavour=1,6
+          initial_number=count(processes(1:2,iproc).eq.flavour)-&
+               count(processes(1:2,iproc).eq.-flavour)
+          final_number=count(processes(3:next,iproc).eq.flavour)-&
+               count(processes(3:next,iproc).eq.-flavour)
+          flavour_delta(flavour)=final_number-initial_number
+       enddo
+       if (n_higgs.eq.1 .and. (phys_model%get_mass(6).eq.0d0 .or. &
+            count(abs(processes(:,iproc)).eq.6).lt.2)) then
+          return
+       endif
+       if (n_higgs.eq.1 .and. nquark_lines.eq.2) then
+          if (count(abs(processes(:,iproc)).eq.6).ne.2) return
+       endif
+       if (n_charged_vectors.eq.0) then
+          if (any(flavour_delta.ne.0)) then
+             return
+          endif
+       else
+          compatible_flavour_change=.true.
+          do flavour=1,5,2
+             if (flavour_delta(flavour+1).ne.-flavour_delta(flavour)) &
+                  compatible_flavour_change=.false.
+          enddo
+          if (sum(max(flavour_delta(1:5:2),0)).gt.n_wplus) &
+               compatible_flavour_change=.false.
+          if (sum(max(-flavour_delta(1:5:2),0)).gt.n_wminus) &
+               compatible_flavour_change=.false.
+          if (sum(flavour_delta(1:5:2)).ne.n_wplus-n_wminus) &
+               compatible_flavour_change=.false.
+          if (.not.compatible_flavour_change) return
+       endif
+    enddo
+    compact_max_as_ew_order=candidate_order
+  end function compact_max_as_ew_order
 
   subroutine print_timing(iunit)
     implicit none
@@ -672,16 +803,83 @@ contains
   subroutine square_the_amps(iint,ichan)
     implicit none
     integer,intent(in) :: iint,ichan
-    integer :: iproc,ih,isector,jsector,as2,aew2,colour_factor
-    real(kind=8) :: gs,gew,helicity_value
+    integer :: iproc,ih,isector,jsector,colour_factor
+    real(kind=8) :: gs,helicity_value,diagonal_factor
     complex(kind=8) :: left_amp,right_amp
     iproc=0
     pgl(ichan)%amp2=0d0
     pgl(ichan)%amp2_abs=0d0
     pgl(ichan)%amp2_hel=0d0
     pgl(ichan)%amp2_hel_abs=0d0
+    if (coupling_square_cache(ichan)%amplitudes(iint)%n_allowed_pairs.eq.0) return
     gs=sqrt(4d0*pi*alphas)
-    gew=sqrt(2d0*4d0*pi*alphaEW)
+    do isector=1,pgl(ichan)%amps(iint)%n_sectors
+       if (.not.coupling_square_cache(ichan)%amplitudes(iint)%&
+            active_sectors(isector)) cycle
+       coupling_square_cache(ichan)%amplitudes(iint)%sector_factors(isector)=&
+            gs**pgl(ichan)%amps(iint)%sector_powers(1,isector)*&
+            coupling_square_cache(ichan)%amplitudes(iint)%fixed_ew_factors(isector)
+    enddo
+
+    ! The maximum-aS default normally leaves one diagonal sector pair.  Keep a
+    ! separate path for the more general interference-only case as well: a
+    ! selector can admit one off-diagonal pair whose contribution is signed.
+    if (coupling_square_cache(ichan)%amplitudes(iint)%n_allowed_pairs.eq.1) then
+       isector=coupling_square_cache(ichan)%amplitudes(iint)%single_left_sector
+       jsector=coupling_square_cache(ichan)%amplitudes(iint)%single_right_sector
+       if (jsector.eq.isector .and. keep_processes_separate) then
+          ! This is the production max-aS path: the group contains one physical
+          ! process, and the only selected contribution is a positive diagonal
+          ! norm.  Avoid reconstructing the same scaled complex amplitude twice
+          ! and avoid rediscovering its process index for every helicity.
+          diagonal_factor=dble(pgl(ichan)%col_fac(iint))*&
+               coupling_square_cache(ichan)%amplitudes(iint)%&
+               sector_factors(isector)**2
+          iproc=1
+          do ih=1,pgl(ichan)%amps(iint)%n_amps
+             helicity_value=0d0
+             if (pgl(ichan)%amps(iint)%sector_present(ih,isector)) then
+                left_amp=pgl(ichan)%amps(iint)%amps_by_order(ih,isector)
+                helicity_value=(dble(left_amp)**2+aimag(left_amp)**2)*&
+                     diagonal_factor*pgl(ichan)%hel_fac(ih,iint)
+             endif
+             pgl(ichan)%amp2_hel(ih)=helicity_value
+             pgl(ichan)%amp2_hel_abs(ih)=pgl(ichan)%amp2_hel(ih)
+             pgl(ichan)%amp2(iproc)=pgl(ichan)%amp2(iproc)+helicity_value
+             pgl(ichan)%amp2_abs(iproc)=pgl(ichan)%amp2_abs(iproc)+helicity_value
+          enddo
+          return
+       endif
+       do ih=1,pgl(ichan)%amps(iint)%n_amps
+          do while (pgl(ichan)%amps(iint)%iproc_start(iproc+1).eq.ih)
+             iproc=iproc+1
+          enddo
+          if (keep_processes_separate) then
+             colour_factor=pgl(ichan)%col_fac(iint)
+          else
+             colour_factor=pgl(ichan)%col_fac(iproc)
+          endif
+          helicity_value=0d0
+          if (pgl(ichan)%amps(iint)%sector_present(ih,isector) .and. &
+               pgl(ichan)%amps(iint)%sector_present(ih,jsector)) then
+             left_amp=pgl(ichan)%amps(iint)%amps_by_order(ih,isector)*&
+                  coupling_square_cache(ichan)%amplitudes(iint)%sector_factors(isector)
+             right_amp=pgl(ichan)%amps(iint)%amps_by_order(ih,jsector)*&
+                  coupling_square_cache(ichan)%amplitudes(iint)%sector_factors(jsector)
+             if (jsector.eq.isector) then
+                helicity_value=dble(left_amp*dconjg(right_amp))*colour_factor
+             else
+                helicity_value=2d0*dble(left_amp*dconjg(right_amp))*colour_factor
+             endif
+          endif
+          pgl(ichan)%amp2_hel(ih)=helicity_value*pgl(ichan)%hel_fac(ih,iint)
+          pgl(ichan)%amp2_hel_abs(ih)=abs(pgl(ichan)%amp2_hel(ih))
+          pgl(ichan)%amp2(iproc)=pgl(ichan)%amp2(iproc)+pgl(ichan)%amp2_hel(ih)
+          pgl(ichan)%amp2_abs(iproc)=pgl(ichan)%amp2_abs(iproc)+pgl(ichan)%amp2_hel_abs(ih)
+       enddo
+       return
+    endif
+
     do ih=1,pgl(ichan)%amps(iint)%n_amps
        do while (pgl(ichan)%amps(iint)%iproc_start(iproc+1).eq.ih)
           iproc=iproc+1
@@ -693,20 +891,17 @@ contains
        endif
        helicity_value=0d0
        do isector=1,pgl(ichan)%amps(iint)%n_sectors
+          if (.not.coupling_square_cache(ichan)%amplitudes(iint)%&
+               active_sectors(isector)) cycle
           if (.not.pgl(ichan)%amps(iint)%sector_present(ih,isector)) cycle
           left_amp=pgl(ichan)%amps(iint)%amps_by_order(ih,isector)*&
-               gs**pgl(ichan)%amps(iint)%sector_powers(1,isector)*&
-               gew**pgl(ichan)%amps(iint)%sector_powers(2,isector)
+               coupling_square_cache(ichan)%amplitudes(iint)%sector_factors(isector)
           do jsector=isector,pgl(ichan)%amps(iint)%n_sectors
              if (.not.pgl(ichan)%amps(iint)%sector_present(ih,jsector)) cycle
-             as2=pgl(ichan)%amps(iint)%sector_powers(1,isector)+&
-                  pgl(ichan)%amps(iint)%sector_powers(1,jsector)
-             aew2=pgl(ichan)%amps(iint)%sector_powers(2,isector)+&
-                  pgl(ichan)%amps(iint)%sector_powers(2,jsector)
-             if (.not.coupling_order_selection%allows(as2,aew2)) cycle
+             if (.not.coupling_square_cache(ichan)%amplitudes(iint)%&
+                  allowed_pairs(isector,jsector)) cycle
              right_amp=pgl(ichan)%amps(iint)%amps_by_order(ih,jsector)*&
-                  gs**pgl(ichan)%amps(iint)%sector_powers(1,jsector)*&
-                  gew**pgl(ichan)%amps(iint)%sector_powers(2,jsector)
+                  coupling_square_cache(ichan)%amplitudes(iint)%sector_factors(jsector)
              if (jsector.eq.isector) then
                 helicity_value=helicity_value+dble(left_amp*dconjg(right_amp))*colour_factor
              else
@@ -720,6 +915,65 @@ contains
        pgl(ichan)%amp2_abs(iproc)=pgl(ichan)%amp2_abs(iproc)+pgl(ichan)%amp2_hel_abs(ih)
     enddo
   end subroutine square_the_amps
+
+  subroutine setup_coupling_square_caches()
+    implicit none
+    logical,dimension(:,:),allocatable :: pair_mask
+    logical :: ok
+    integer :: ig,ia,isector,jsector,nsectors
+
+    if (allocated(coupling_square_cache)) deallocate(coupling_square_cache)
+    allocate(coupling_square_cache(ngroups))
+    do ig=1,ngroups
+       allocate(coupling_square_cache(ig)%amplitudes(size(pgl(ig)%amps)))
+       do ia=1,size(pgl(ig)%amps)
+          nsectors=pgl(ig)%amps(ia)%n_sectors
+          allocate(coupling_square_cache(ig)%amplitudes(ia)%allowed_pairs(&
+               nsectors,nsectors))
+          allocate(coupling_square_cache(ig)%amplitudes(ia)%active_sectors(nsectors))
+          allocate(coupling_square_cache(ig)%amplitudes(ia)%sector_factors(nsectors))
+          allocate(coupling_square_cache(ig)%amplitudes(ia)%fixed_ew_factors(nsectors))
+          coupling_square_cache(ig)%amplitudes(ia)%allowed_pairs=.false.
+          coupling_square_cache(ig)%amplitudes(ia)%active_sectors=.false.
+          coupling_square_cache(ig)%amplitudes(ia)%sector_factors=0d0
+          coupling_square_cache(ig)%amplitudes(ia)%fixed_ew_factors=0d0
+          call build_coupling_order_pair_mask(pgl(ig)%amps(ia)%sector_powers,&
+               pair_mask,ok)
+          if (.not.ok) then
+             write (*,*) 'Coupling-order selection must be resolved before squaring setup'
+             stop 1
+          endif
+          do isector=1,nsectors
+             do jsector=isector,nsectors
+                if (.not.(pair_mask(isector,jsector) .or. &
+                     pair_mask(jsector,isector))) cycle
+                ! Match the generator's fixed-colour square: a sector pair is
+                ! active only if at least one physical helicity slot has both
+                ! endpoints.  Full-colour reweighting uses its own Gram-matrix
+                ! contraction and does not use this cache.
+                if (.not.any(pgl(ig)%amps(ia)%sector_present(:,isector) .and. &
+                     pgl(ig)%amps(ia)%sector_present(:,jsector))) cycle
+                coupling_square_cache(ig)%amplitudes(ia)%&
+                     allowed_pairs(isector,jsector)=.true.
+                coupling_square_cache(ig)%amplitudes(ia)%active_sectors(isector)=.true.
+                coupling_square_cache(ig)%amplitudes(ia)%active_sectors(jsector)=.true.
+                coupling_square_cache(ig)%amplitudes(ia)%n_allowed_pairs=&
+                     coupling_square_cache(ig)%amplitudes(ia)%n_allowed_pairs+1
+                coupling_square_cache(ig)%amplitudes(ia)%single_left_sector=isector
+                coupling_square_cache(ig)%amplitudes(ia)%single_right_sector=jsector
+             enddo
+          enddo
+          do isector=1,nsectors
+             if (.not.coupling_square_cache(ig)%amplitudes(ia)%&
+                  active_sectors(isector)) cycle
+             coupling_square_cache(ig)%amplitudes(ia)%fixed_ew_factors(isector)=&
+                  sqrt(2d0*4d0*pi*alphaEW)**&
+                  pgl(ig)%amps(ia)%sector_powers(2,isector)
+          enddo
+          deallocate(pair_mask)
+       enddo
+    enddo
+  end subroutine setup_coupling_square_caches
   
   subroutine setup_helicity_filter(pgl,iint)
     implicit none

@@ -1,7 +1,8 @@
 module read_process_file
   use handling_processes
   use run_parameters, only: ignore_final_state_width_fix
-  use coupling_orders, only: reset_coupling_order_selection,set_coupling_order_selection
+  use coupling_orders, only: reset_coupling_order_selection,set_coupling_order_selection,&
+       coupling_order_selection,coupling_order_mode_automatic
   implicit none
   integer :: sf_nprocs
   integer,dimension(:,:),allocatable :: unique_procs,processes,color_orders,multi_chans
@@ -369,7 +370,7 @@ contains
     use phase_space_gen23_mod
     use cuts
     implicit none
-    integer :: i,j,iproc,ih
+    integer :: i,j,iproc,ih,max_as_ew_order
     integer,parameter :: nevent=10
     real(kind=8),dimension(:,:),allocatable :: amp2
     complex(kind=8),dimension(:,:,:),allocatable :: amp_by_order
@@ -411,8 +412,15 @@ contains
     allocate(ps%x(1:pgl_unique%ndim+pgl_unique%phase_space%ndim_extra))
     allocate(ps%p(0:3,1:pgl_unique%next))
     
-    call pgl_unique%amps(1)%init(1,next,pgl_unique%nproc,pgl_unique%processes,&
-         pgl_unique%spin,pgl_unique%color_orders,phys_model)
+    max_as_ew_order=compact_unique_max_as_ew_order()
+    if (max_as_ew_order.ge.0) then
+       call pgl_unique%amps(1)%init(1,next,pgl_unique%nproc,pgl_unique%processes,&
+            pgl_unique%spin,pgl_unique%color_orders,phys_model,&
+            max_as_ew_order=max_as_ew_order)
+    else
+       call pgl_unique%amps(1)%init(1,next,pgl_unique%nproc,pgl_unique%processes,&
+            pgl_unique%spin,pgl_unique%color_orders,phys_model)
+    endif
         
     allocate(amp2(nevent,pgl_unique%nproc))
     allocate(amp_by_order(nevent,pgl_unique%amps(1)%n_amps,&
@@ -463,6 +471,96 @@ contains
     deallocate(amp2)
     deallocate(amp_by_order)
   end subroutine check_unique_processes
+
+  integer function compact_unique_max_as_ew_order()
+    ! unique_procs is still in the all-outgoing canonical convention.  Return
+    ! the EW power of a compact automatic leading-QCD construction, or -1
+    ! when unique-process testing needs the complete route history.
+    implicit none
+    integer :: iproc,flavour,process_ew_order,candidate_order
+    integer :: nquarks,nquark_lines,candidate_quark_lines
+    integer :: n_wplus,n_wminus,n_charged_vectors,n_higgs
+    integer :: n_leptons
+    integer,dimension(6) :: flavour_delta
+    logical :: compatible_flavour_change
+
+    compact_unique_max_as_ew_order=-1
+    if (coupling_order_selection%mode.ne.coupling_order_mode_automatic) return
+    candidate_order=-1
+    candidate_quark_lines=-1
+    do iproc=1,nproc_unique
+       nquarks=count(abs(unique_procs(:,iproc)).ge.1 .and. &
+            abs(unique_procs(:,iproc)).le.6)
+       if (mod(nquarks,2).ne.0) return
+       nquark_lines=nquarks/2
+       if (nquark_lines.gt.3) return
+       if (candidate_quark_lines.lt.0) then
+          candidate_quark_lines=nquark_lines
+       elseif (nquark_lines.ne.candidate_quark_lines) then
+          return
+       endif
+       if (any(.not.((abs(unique_procs(:,iproc)).ge.1 .and. &
+            abs(unique_procs(:,iproc)).le.6) .or. &
+            unique_procs(:,iproc).eq.21 .or. unique_procs(:,iproc).eq.22 .or. &
+            unique_procs(:,iproc).eq.23 .or. abs(unique_procs(:,iproc)).eq.24 .or. &
+            unique_procs(:,iproc).eq.25 .or. &
+            (abs(unique_procs(:,iproc)).ge.11 .and. &
+            abs(unique_procs(:,iproc)).le.16)))) then
+          return
+       endif
+       if (nquark_lines.eq.0 .and. any(unique_procs(:,iproc).ne.21)) return
+       n_wplus=count(unique_procs(:,iproc).eq.24)
+       n_wminus=count(unique_procs(:,iproc).eq.-24)
+       n_charged_vectors=n_wplus+n_wminus
+       n_higgs=count(unique_procs(:,iproc).eq.25)
+       n_leptons=count(abs(unique_procs(:,iproc)).ge.11 .and. &
+            abs(unique_procs(:,iproc)).le.16)
+       if (n_leptons.gt.0 .and. (n_charged_vectors.gt.0 .or. n_higgs.gt.0)) return
+       do flavour=11,16
+          if (count(unique_procs(:,iproc).eq.flavour).ne.&
+               count(unique_procs(:,iproc).eq.-flavour)) return
+       enddo
+       if (n_higgs.gt.1 .or. &
+            (n_charged_vectors.gt.0 .and. n_higgs.gt.0)) return
+       process_ew_order=count(unique_procs(:,iproc).eq.22 .or. &
+            unique_procs(:,iproc).eq.23 .or. abs(unique_procs(:,iproc)).eq.24 .or. &
+            unique_procs(:,iproc).eq.25 .or. &
+            (abs(unique_procs(:,iproc)).ge.11 .and. &
+            abs(unique_procs(:,iproc)).le.16))
+       if (candidate_order.lt.0) candidate_order=process_ew_order
+       if (process_ew_order.ne.candidate_order) return
+       do flavour=1,6
+          flavour_delta(flavour)=count(unique_procs(:,iproc).eq.flavour)-&
+               count(unique_procs(:,iproc).eq.-flavour)
+       enddo
+       if (n_higgs.eq.1 .and. (phys_model%get_mass(6).eq.0d0 .or. &
+            count(abs(unique_procs(:,iproc)).eq.6).lt.2)) then
+          return
+       endif
+       if (n_higgs.eq.1 .and. nquark_lines.eq.2) then
+          if (count(abs(unique_procs(:,iproc)).eq.6).ne.2) return
+       endif
+       if (n_charged_vectors.eq.0) then
+          if (any(flavour_delta.ne.0)) then
+             return
+          endif
+       else
+          compatible_flavour_change=.true.
+          do flavour=1,5,2
+             if (flavour_delta(flavour+1).ne.-flavour_delta(flavour)) &
+                  compatible_flavour_change=.false.
+          enddo
+          if (sum(max(flavour_delta(1:5:2),0)).gt.n_wplus) &
+               compatible_flavour_change=.false.
+          if (sum(max(-flavour_delta(1:5:2),0)).gt.n_wminus) &
+               compatible_flavour_change=.false.
+          if (sum(flavour_delta(1:5:2)).ne.n_wplus-n_wminus) &
+               compatible_flavour_change=.false.
+          if (.not.compatible_flavour_change) return
+       endif
+    enddo
+    compact_unique_max_as_ew_order=candidate_order
+  end function compact_unique_max_as_ew_order
 
   subroutine find_unique(pgl,nevent,amp_by_order,unique_map,unique_map_value)
     implicit none

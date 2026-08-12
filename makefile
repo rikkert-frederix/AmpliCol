@@ -3,6 +3,8 @@
 .PHONY: test_matrix_elements test_fermi_statistics test_mixed_spinors \
 	test_three_quark_line_reweight test_three_quark_line_multichannel \
 	test_coupling_order_parser test_coupling_order_sectors test_coupling_order_pruning \
+	test_q3_maxas_compaction test_q3_maxas_mixed_compaction \
+	test_lower_line_maxas_compaction \
 	test_coupling_order_lhe_roundtrip \
 	test_find_unique_coupling_sectors test_signed_event test_run_parameters \
 	update_matrix_cases update_matrix_goldens
@@ -279,6 +281,15 @@ test_coupling_order_pruning: coupling_order_pruning_regression \
 	$(PYTHON) tests/matrix_elements/run_coupling_order_pruning_library_regression.py \
 		--generator $(CURDIR)/coupling_order_pruning_regression \
 		--compiler "$(FC)" --fflags="$(FFLAGS)"
+
+test_q3_maxas_compaction: coupling_order_pruning_regression
+	./coupling_order_pruning_regression --maxas-q3
+
+test_q3_maxas_mixed_compaction: coupling_order_pruning_regression
+	./coupling_order_pruning_regression --maxas-q3-mixed
+
+test_lower_line_maxas_compaction: coupling_order_pruning_regression
+	./coupling_order_pruning_regression --maxas-lower-lines
 
 test_coupling_order_lhe_roundtrip: amplicol_reweight \
 		tests/coupling_order_lhe_roundtrip_regression.py

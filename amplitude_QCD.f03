@@ -69,7 +69,7 @@ module amplitude_QCD_mod
      final :: finalize_amplitude_QCD ! custom deallocation of amplitude_QCD
   end type amplitude_QCD
 contains
-  subroutine init(this,imode,n,n_processes,part,spin,o,pm)
+  subroutine init(this,imode,n,n_processes,part,spin,o,pm,max_as_ew_order)
     use math_functions
     use particles
     implicit none
@@ -78,13 +78,25 @@ contains
     integer,intent(in) :: n,imode,n_processes
     integer,dimension(n,n_processes),intent(in) :: part,o
     integer,dimension(0:3,n),intent(in) :: spin
+    integer,optional,intent(in) :: max_as_ew_order
     integer,dimension(:,:,:),allocatable :: order
     type(current),dimension(:),allocatable :: current_list_local
     type(interaction),dimension(:),allocatable :: interaction_list_local
     integer :: isize,nc,isplit,n1,n2,ic1,ic2,max_cur,max_vert,max_key,ispin,iproc
+    integer :: n_external_quarks,n_external_gluons,expected_ew_order
     integer(kind=8),dimension(:),allocatable :: current_dict
     integer,dimension(:,:),allocatable :: key_to_current
+    logical :: compact_max_as_build,compact_qcd_backbone,compact_inputs_valid
+    integer :: compact_ew_order
 
+    compact_max_as_build=present(max_as_ew_order)
+    compact_qcd_backbone=.false.
+    compact_ew_order=-1
+    if (compact_max_as_build) compact_ew_order=max_as_ew_order
+    if (compact_max_as_build .and. (imode.ne.1 .or. compact_ew_order.lt.0)) then
+       write (*,*) 'The maximum-aS construction fast path requires imode=1 and a non-negative EW order'
+       stop 1
+    endif
     this%sectors_pruned_empty=.false.
     this%sectors_pruned=.false.
     if (allocated(this%sector_retained)) deallocate(this%sector_retained)
@@ -107,6 +119,44 @@ contains
     this%imode=imode
 
     call check_input_consistency(part)
+    if (compact_max_as_build) then
+       compact_inputs_valid=.not.any(this%n_qqbar.lt.0) .and. &
+            .not.any(this%n_qqbar.gt.3) .and. &
+            .not.any(.not.((abs(this%processes).ge.1 .and. &
+            abs(this%processes).le.6) .or. this%processes.eq.21 .or. &
+            this%processes.eq.22 .or. this%processes.eq.23 .or. &
+            abs(this%processes).eq.24 .or. this%processes.eq.25 .or. &
+            (abs(this%processes).ge.11 .and. abs(this%processes).le.16)))
+       do iproc=1,this%nprocs
+          n_external_quarks=count(abs(this%processes(:,iproc)).ge.1 .and. &
+               abs(this%processes(:,iproc)).le.6)
+          n_external_gluons=count(this%processes(:,iproc).eq.21)
+          if (n_external_quarks.ne.2*this%n_qqbar(iproc)) &
+               compact_inputs_valid=.false.
+          if (this%n_qqbar(iproc).eq.0) then
+             if (n_external_gluons.eq.n) then
+                expected_ew_order=0
+             else
+                compact_inputs_valid=.false.
+                expected_ew_order=-1
+             endif
+          else
+             expected_ew_order=count(this%processes(:,iproc).eq.22 .or. &
+                  this%processes(:,iproc).eq.23 .or. &
+                  abs(this%processes(:,iproc)).eq.24 .or. &
+                  this%processes(:,iproc).eq.25 .or. &
+                  (abs(this%processes(:,iproc)).ge.11 .and. &
+                  abs(this%processes(:,iproc)).le.16))
+          endif
+          if (expected_ew_order.ne.compact_ew_order) compact_inputs_valid=.false.
+       enddo
+       if ((any(this%n_qqbar.le.1) .and. any(this%n_qqbar.ge.2)) .or. &
+            .not.compact_inputs_valid) then
+          write (*,*) 'The maximum-aS construction fast path received an incompatible process group'
+          stop 1
+       endif
+       compact_qcd_backbone=all(this%n_qqbar.ge.2)
+    endif
 
     if (this%imode.eq.2) then
        call define_canonical_color_order()
@@ -180,7 +230,8 @@ contains
     if (this%imode.eq.1) call allocate_and_fill_spins()
     call allocate_and_fill_colour_permutations()
     call remap_two_line_singlet_exchange_sectors()
-    if (this%imode.ne.2) call filter_fixed_three_line_sector_terms()
+    if (this%imode.ne.2 .and. .not.compact_max_as_build) &
+         call filter_fixed_three_line_sector_terms()
     if (this%imode.eq.2 .and. this%n_qqbar(1).eq.3) then
        call group_three_line_colour_flows()
     endif
@@ -594,7 +645,11 @@ contains
            counts,cursor
 
       if (this%imode.ne.2) then
-         call filter_fixed_two_line_sector_terms()
+         ! Compact QCD-backbone amplitudes have already excluded the
+         ! colour-singlet quark-line closure whose endpoint exchange this
+         ! routine resolves.  They use only the prescribed physical planar
+         ! order, so there is nothing left to remap or filter here.
+         if (.not.compact_max_as_build) call filter_fixed_two_line_sector_terms()
          return
       endif
       if (all(this%n_qqbar(1:this%nprocs).ne.2)) return
@@ -1582,13 +1637,14 @@ contains
          this%n_qqbar(iproc)=number_of_quark_lines(this%processes(1,iproc))
       enddo
       if (all(this%n_qqbar.le.2)) then
-         if (this%imode.ne.2 .and. any(this%n_qqbar.eq.2)) then
+         if (this%imode.ne.2 .and. any(this%n_qqbar.eq.2) .and. &
+              .not.compact_max_as_build) then
             allocate(order(1:n,2,this%nprocs))
          else
             allocate(order(1:n,1,this%nprocs))
          endif
       elseif (all(this%n_qqbar.le.3)) then
-         if (this%imode.ne.2) then
+         if (this%imode.ne.2 .and. .not.compact_max_as_build) then
             ! For a fixed three-line coefficient, colour-singlet closures can
             ! map any endpoint pairing into the requested physical flow.  The
             ! twelve entries are the six endpoint permutations, with both
@@ -1613,10 +1669,13 @@ contains
             if (this%imode.eq.2) then
                call canonicalize_three_line_order(iproc)
                call fill_alternative_quark_order(iproc)
+            elseif (compact_max_as_build) then
+               call fill_alternative_quark_order(iproc)
             else
                call fill_fixed_three_line_orders(iproc)
             endif
-         elseif (this%n_qqbar(iproc).eq.2 .and. this%imode.ne.2) then
+         elseif (this%n_qqbar(iproc).eq.2 .and. this%imode.ne.2 .and. &
+              .not.compact_max_as_build) then
             call fill_alternative_two_line_order(iproc)
          endif
          this%same_flav(iproc)=.false. ! This will be updated once the numerical check using 'find_same_flavour' is done
@@ -2277,6 +2336,19 @@ contains
       implicit none
       integer :: itype,ctype,ichir,ic,n_gs,n_ew
       real(kind=8),dimension(2) :: coupl
+      if (compact_max_as_build) then
+         if (current_list_local(ic1)%n_ew+current_list_local(ic2)%n_ew+n_ew.gt.&
+              compact_ew_order) return
+         ! With at least two quark lines, the compact recursion represents a
+         ! fixed QCD colour backbone with electroweak particles radiated from
+         ! its fermion lines.  Crossed q-qbar-to-vector closures replace a QCD
+         ! link and therefore cannot enter this leading-aS sector.  Keep them
+         ! for zero/one-line amplitudes, where they can be the physical
+         ! annihilation current (for example Drell--Yan production).
+         if (compact_qcd_backbone .and. (itype.eq.21 .or. itype.eq.22) .and. &
+              current_list_local(ic1)%open_quark_leg.ne.0 .and. &
+              current_list_local(ic2)%open_quark_leg.ne.0) return
+      endif
       if (isize.eq.n-1) then
          do ic=this%n_cur_start(n),this%n_cur_end(n)
             if (ctype.eq.anti_current(current_list_local(ic)%type)) exit
@@ -2877,15 +2949,17 @@ contains
             if (new_current%chirality.ne.current_list_local(ic)%chirality) cycle
             if (new_current%n_gs.ne.current_list_local(ic)%n_gs) cycle
             if (new_current%n_ew.ne.current_list_local(ic)%n_ew) cycle
-            if (new_current%open_quark_leg.ne.current_list_local(ic)%open_quark_leg) cycle
-            if (any(new_current%ew_pairs.ne.current_list_local(ic)%ew_pairs)) cycle
-            if (any(new_current%u1_pairs.ne.current_list_local(ic)%u1_pairs)) cycle
-            if (any(new_current%gluon_pairs.ne.current_list_local(ic)%gluon_pairs)) cycle
-            if (any(new_current%u1_links.ne.current_list_local(ic)%u1_links)) cycle
-            if (any(new_current%gluon_links.ne.current_list_local(ic)%gluon_links)) cycle
+            if (.not.compact_max_as_build) then
+               if (new_current%open_quark_leg.ne.current_list_local(ic)%open_quark_leg) cycle
+               if (any(new_current%ew_pairs.ne.current_list_local(ic)%ew_pairs)) cycle
+               if (any(new_current%u1_pairs.ne.current_list_local(ic)%u1_pairs)) cycle
+               if (any(new_current%gluon_pairs.ne.current_list_local(ic)%gluon_pairs)) cycle
+               if (any(new_current%u1_links.ne.current_list_local(ic)%u1_links)) cycle
+               if (any(new_current%gluon_links.ne.current_list_local(ic)%gluon_links)) cycle
+            endif
             if (new_current%bin.ne.current_list_local(ic)%bin) cycle
             if (new_current%ext_cur.ne.current_list_local(ic)%ext_cur) cycle
-            if (three_line_current) then
+            if (three_line_current .and. .not.compact_max_as_build) then
                if (any(new_current%order.ne.current_list_local(ic)%order)) cycle
             endif
             call append_current_vertex(ic,this%n_vert,vertex_sign)
@@ -5340,6 +5414,9 @@ contains
              if (this%current_list(ic1)%n_gs.ne.this%current_list(ic2)%n_gs) cycle
              if (this%current_list(ic1)%n_ew.ne.this%current_list(ic2)%n_ew) cycle
              if (size(this%current_list(ic1)%val_c).ne.size(this%current_list(ic2)%val_c)) cycle
+             if (this%current_list(ic1)%type.ne.this%current_list(ic2)%type) cycle
+             if (this%current_list(ic1)%chirality.ne.this%current_list(ic2)%chirality) cycle
+             if (this%current_list(ic1)%bin.ne.this%current_list(ic2)%bin) cycle
              if ( sum(abs(this%current_list(ic1)%val_c-this%current_list(ic2)%val_c))/ &
                   sum(abs(this%current_list(ic1)%val_c)+abs(this%current_list(ic2)%val_c)).lt.tiny) then
                 map_cur(0,1)=map_cur(0,1)+1
@@ -5398,6 +5475,7 @@ contains
        enddo
     enddo
 
+    if (allocated(this%include_amp)) deallocate(this%include_amp)
     allocate(this%include_amp(1:this%n_amps))
     this%include_amp=.true.
     call this%filter_dead_trees(n)
