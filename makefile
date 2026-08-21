@@ -2,7 +2,7 @@
 
 .PHONY: test_matrix_elements test_fermi_statistics test_mixed_spinors \
 	test_three_quark_line_reweight test_three_quark_line_multichannel \
-	test_run_parameters update_matrix_cases update_matrix_goldens
+	test_run_parameters test_command_line_parser update_matrix_cases update_matrix_goldens
 
 FC = gfortran
 #FFLAGS= -fbounds-check -g -ffpe-trap=invalid,zero,overflow,underflow,denormal
@@ -123,6 +123,8 @@ FILES_M_TEST_MIXED_SPINOR = bitset.o color_algebra.o math_functions.o feynmanrul
 
 FILES_M_TEST_RUN_PARAMETERS = run_parameters.o particles.o run_parameters_regression.o
 
+FILES_M_TEST_COMMAND_LINE = command_line_parser.o command_line_parser_regression.o
+
 # ----------------------------------------------------------------------
 # 5. Build executables
 # ----------------------------------------------------------------------
@@ -152,6 +154,9 @@ mixed_spinor_regression: $(FILES_M_TEST_MIXED_SPINOR)
 run_parameters_regression: $(FILES_M_TEST_RUN_PARAMETERS)
 	$(FC) $(FFLAGS) -o $@ $(FILES_M_TEST_RUN_PARAMETERS)
 
+command_line_parser_regression: $(FILES_M_TEST_COMMAND_LINE)
+	$(FC) $(FFLAGS) -o $@ $(FILES_M_TEST_COMMAND_LINE)
+
 matrix_element_regression.o: tests/matrix_elements/matrix_element_regression.f03 amplitude_QCD.o particles.o
 	$(FC) $(FFLAGS) -c -I. $< -o $@
 
@@ -167,6 +172,9 @@ mixed_spinor_regression.o: \
 	$(FC) $(FFLAGS) -c -I. $< -o $@
 
 run_parameters_regression.o: tests/run_parameters_regression.f03 run_parameters.o particles.o
+	$(FC) $(FFLAGS) -c -I. $< -o $@
+
+command_line_parser_regression.o: tests/command_line_parser_regression.f03 command_line_parser.o
 	$(FC) $(FFLAGS) -c -I. $< -o $@
 
 tests/matrix_elements/cases.dat: tests/matrix_elements/generate_matrix_cases.py process_list.py
@@ -207,6 +215,12 @@ test_three_quark_line_multichannel: \
 test_run_parameters: run_parameters_regression
 	./run_parameters_regression run_card.dat tests/input/custom_run_card.dat \
 		tests/input/ignore_final_width_run_card.dat
+
+test_command_line_parser: command_line_parser_regression
+	test "$$($(CURDIR)/command_line_parser_regression)" = "F"
+	test "$$($(CURDIR)/command_line_parser_regression --combine_subprocesses)" = "T"
+	$(CURDIR)/command_line_parser_regression --help | grep -q -- '--combine_subprocesses'
+	! $(CURDIR)/command_line_parser_regression --combine_subprocesses=true >/dev/null 2>&1
 
 update_matrix_cases: tests/matrix_elements/generate_matrix_cases.py process_list.py
 	$(PYTHON) tests/matrix_elements/generate_matrix_cases.py --output tests/matrix_elements/cases.dat

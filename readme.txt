@@ -89,6 +89,7 @@ Usage: amplicol_generate <arguments>'. Possible arguments are
   --itmax=[X],      -i=[X]  : The maximum number of iterations to use (detault is 128).
   --library=[X],    -l=[X]  : To create or use a library for the amplitudes, set [X] to 'create' or 'use', respectively. (To use a library, re-compile code with 'make amplicol_generate_library' after a library has been created). Default is 'none'.
   --tag=[X],        -t=[X]  : Event file (and log file) names will be prepended with a tag '[X]_'.
+  --combine_subprocesses    : Combine subprocesses sharing a phase-space group into one integrand (default: keep them separate).
 *****************************
 
 Most important are the '--nevents=X' to set the number of events to
@@ -138,8 +139,10 @@ library source code).
 Masses, effective widths, and weak-coupling parameters are compiled
 into an amplitude library. AmpliCol records these values and rejects an
 incompatible input card when '--library=use' is requested; recreate the
-library with the new card in that case. Collider, cut, scale and PDF
-settings may be changed without recreating the amplitude library.
+library with the new card in that case. An amplitude library must be
+created and used with the same '--combine_subprocesses' setting.
+Collider, cut, scale and PDF settings may be changed without recreating
+the amplitude library.
 
 
 3. Reweighting

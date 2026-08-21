@@ -241,6 +241,17 @@ contains
        read(14) pgl(igroup)%color_orders
     enddo
     close(14)
+    do igroup=1,ngroups
+       if (keep_processes_separate .and.&
+            size(pgl(igroup)%amps).ne.pgl(igroup)%nproc) then
+          write (*,*) 'Amplitude library was created with --combine_subprocesses; use that option or recreate it'
+          stop 1
+       elseif ((.not.keep_processes_separate) .and.&
+            size(pgl(igroup)%amps).ne.1) then
+          write (*,*) 'Amplitude library was created without --combine_subprocesses; recreate it with that option'
+          stop 1
+       endif
+    enddo
     call apply_final_state_widths_from_loaded_groups()
     ! Phase-space dimensionality and PDF flavour masks are run settings, not
     ! properties of the compiled matrix elements.  Reconstruct them so that a

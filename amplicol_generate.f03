@@ -725,11 +725,13 @@ contains
     integer :: i
     character(len=256) :: argv
     character(len=80) :: library,timing_arg
+    logical :: combine_subprocesses
     integer :: timing_sample_arg
     integer(kind=8) iseed
     common /to_seed/iseed
     call parse_argument(filename,input_filename,ncalls0,itmax,PS_choice,iseed,library,tag,&
-         timing_arg,timing_sample_arg)
+         combine_subprocesses,timing_arg,timing_sample_arg)
+    keep_processes_separate=.not.combine_subprocesses
 
     logfile="Outputs/"//trim(adjustl(tag))//"log_file.txt"
     open(unit=99,file=logfile,status='unknown')

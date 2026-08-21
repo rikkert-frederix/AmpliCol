@@ -33,7 +33,7 @@ contains
        do iproc=2,pgl(ichan)%nproc
           if (any(pgl(ichan)%phase_space_permutations(:,iproc).ne.&
                pgl(ichan)%phase_space_permutations(:,1))) then
-             write (*,*) 'keep_processes_separate=false is incompatible with different phase-space permutations'
+             write (*,*) '--combine_subprocesses is incompatible with different phase-space permutations'
              stop 1
           endif
        enddo
