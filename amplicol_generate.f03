@@ -21,6 +21,7 @@ program amplicol_generate
   real(kind=8) :: weight
   integer :: i
   real(kind=8),dimension(:),allocatable :: mass,width
+  real(kind=8),dimension(:),allocatable :: resonance_mass,resonance_width
   character(len=80) :: filename,logfile,tag
   character(len=256) :: input_filename
   integer(kind=4) :: PS_choice
@@ -82,6 +83,11 @@ program amplicol_generate
   write (99,*) 'Initialise phase-space groups and amplitudes '//trim(formatted)
   do igroup=1,ngroups
      if (pgl(igroup)%nproc.eq.0) cycle
+     if (pgl(igroup)%nresonances.gt.0 .and.&
+          (PS_choice.eq.2 .or. PS_choice.eq.3)) then
+        write (*,*) 'Resonance mappings require the gen23 phase space (PS_choice 1 or 4)',igroup
+        stop 1
+     endif
      ! allocate the amplitudes and the phase-space for each of the integration channels
      if (PS_choice.eq.1) then
         allocate(phase_space_gen23 :: pgl(igroup)%phase_space)
@@ -91,6 +97,20 @@ program amplicol_generate
         allocate(phase_space_genpt :: pgl(igroup)%phase_space)
      elseif (PS_choice.eq.4) then
         allocate(phase_space_gen23 :: pgl(igroup)%phase_space)
+     endif
+
+     if (pgl(igroup)%nresonances.gt.0) then
+        allocate(resonance_mass(pgl(igroup)%nresonances))
+        allocate(resonance_width(pgl(igroup)%nresonances))
+        do i=1,pgl(igroup)%nresonances
+           resonance_mass(i)=phys_model%get_mass(pgl(igroup)%resonance_pdgs(i))
+           resonance_width(i)=phys_model%get_width(pgl(igroup)%resonance_pdgs(i))
+        enddo
+        call pgl(igroup)%phase_space%configure_resonances(&
+             pgl(igroup)%nresonances,pgl(igroup)%resonance_pdgs,&
+             pgl(igroup)%resonance_masks,resonance_mass,resonance_width)
+        deallocate(resonance_mass)
+        deallocate(resonance_width)
      endif
 
      allocate(mass(pgl(igroup)%next))

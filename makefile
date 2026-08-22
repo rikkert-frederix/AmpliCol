@@ -2,7 +2,9 @@
 
 .PHONY: test_matrix_elements test_fermi_statistics test_mixed_spinors \
 	test_three_quark_line_reweight test_three_quark_line_multichannel \
-	test_run_parameters test_command_line_parser update_matrix_cases update_matrix_goldens
+	test_run_parameters test_command_line_parser test_resonance_phase_space \
+	test_process_list_resonances \
+	update_matrix_cases update_matrix_goldens
 
 FC = gfortran
 #FFLAGS= -fbounds-check -g -ffpe-trap=invalid,zero,overflow,underflow,denormal
@@ -125,6 +127,9 @@ FILES_M_TEST_RUN_PARAMETERS = run_parameters.o particles.o run_parameters_regres
 
 FILES_M_TEST_COMMAND_LINE = command_line_parser.o command_line_parser_regression.o
 
+FILES_M_TEST_RESONANCE_PS = phase_space.o LUPdecompose.o phase_space_gen23.o \
+	run_parameters.o resonance_phase_space_regression.o
+
 # ----------------------------------------------------------------------
 # 5. Build executables
 # ----------------------------------------------------------------------
@@ -157,6 +162,9 @@ run_parameters_regression: $(FILES_M_TEST_RUN_PARAMETERS)
 command_line_parser_regression: $(FILES_M_TEST_COMMAND_LINE)
 	$(FC) $(FFLAGS) -o $@ $(FILES_M_TEST_COMMAND_LINE)
 
+resonance_phase_space_regression: $(FILES_M_TEST_RESONANCE_PS)
+	$(FC) $(FFLAGS) -o $@ $(FILES_M_TEST_RESONANCE_PS)
+
 matrix_element_regression.o: tests/matrix_elements/matrix_element_regression.f03 amplitude_QCD.o particles.o
 	$(FC) $(FFLAGS) -c -I. $< -o $@
 
@@ -176,6 +184,9 @@ run_parameters_regression.o: tests/run_parameters_regression.f03 run_parameters.
 
 command_line_parser_regression.o: tests/command_line_parser_regression.f03 command_line_parser.o
 	$(FC) $(FFLAGS) -c -I. $< -o $@
+
+resonance_phase_space_regression.o: tests/resonance_phase_space_regression.f03 phase_space_gen23.o
+	$(FC) $(FFLAGS) -c -I. -IPhaseSpace $< -o $@
 
 tests/matrix_elements/cases.dat: tests/matrix_elements/generate_matrix_cases.py process_list.py
 	$(PYTHON) tests/matrix_elements/generate_matrix_cases.py --output $@
@@ -212,6 +223,10 @@ test_three_quark_line_multichannel: \
 		process_list.py tests/process_list_three_quark_multichannel_regression.py
 	$(PYTHON) tests/process_list_three_quark_multichannel_regression.py
 
+test_process_list_resonances: \
+		process_list.py tests/process_list_resonance_regression.py
+	$(PYTHON) tests/process_list_resonance_regression.py
+
 test_run_parameters: run_parameters_regression
 	./run_parameters_regression run_card.dat tests/input/custom_run_card.dat \
 		tests/input/ignore_final_width_run_card.dat
@@ -221,6 +236,9 @@ test_command_line_parser: command_line_parser_regression
 	test "$$($(CURDIR)/command_line_parser_regression --combine_subprocesses)" = "T"
 	$(CURDIR)/command_line_parser_regression --help | grep -q -- '--combine_subprocesses'
 	! $(CURDIR)/command_line_parser_regression --combine_subprocesses=true >/dev/null 2>&1
+
+test_resonance_phase_space: resonance_phase_space_regression
+	./resonance_phase_space_regression
 
 update_matrix_cases: tests/matrix_elements/generate_matrix_cases.py process_list.py
 	$(PYTHON) tests/matrix_elements/generate_matrix_cases.py --output tests/matrix_elements/cases.dat

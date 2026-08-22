@@ -1,0 +1,25 @@
+&amplicol
+  sqrts=700d0
+  scale_choice=3
+  include_pdf=.false.
+  use_lhapdf=.false.
+  ignore_final_state_width_fix=.false.
+  pTj_min=-1d0
+  DRjj_min=-1d0
+  etaj_max=-1d0
+  sqrt_sjj_min=-1d0
+  pTa_min=-1d0
+  DRaa_min=-1d0
+  etaa_max=-1d0
+  sqrt_saa_min=-1d0
+  pTl_min=-1d0
+  DRll_min=-1d0
+  etal_max=-1d0
+  sqrt_sll_min=-1d0
+  DRja_min=-1d0
+  sqrt_sja_min=-1d0
+  DRjl_min=-1d0
+  sqrt_sjl_min=-1d0
+  DRla_min=-1d0
+  sqrt_sla_min=-1d0
+/

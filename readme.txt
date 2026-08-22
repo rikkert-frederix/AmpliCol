@@ -21,7 +21,7 @@ required information. Usage of the code is as follows:
 
 *****************************
 $ ./process_list.py -h
-usage: process_list.py [-h] [-FS [1-5]] [-3] [-s] [-cc] [-res] process_string
+usage: process_list.py [-h] [-FS [1-5]] [-3] [-s] [-cc] process_string
 
 Generate the full list of processes, ordered by phase-space order
 
@@ -35,7 +35,6 @@ options:
   -3, --include_3qqbar  Include processes with up to 3 quark lines
   -s, --serial          Do not use multi-processes (parallel execution). Useful for debugging.
   -cc, --include_cc     Include flavour-changing processes
-  -res, --resonance     Treat the lepton pair as a resonance
 *****************************
 
 Note that, you should NOT use 'p p > j j j' as process_string for
@@ -46,6 +45,16 @@ configurations with three or more quark lines are not included by
 default, but can be included by providing the '--include_3qqbar'
 option.
 
+Resonance histories are discovered automatically for every concrete
+subprocess. Supported mappings include leptonic Z/W currents (including
+single- and double-resonant four-lepton alternatives), H -> ZZ/WW ->
+leptons, and t -> b W (or the charge-conjugate decay), with an explicit
+W or a nested leptonic W decay. Competing WW and ZZ histories remain
+separate multichannel densities of the same complete matrix element;
+no diagrams or interference terms are removed. The generated version-3
+process file records the original request/options and, for each density,
+the resonance PDG and occurrence-tagged external descendants.
+
 
 
 2. Event generation
@@ -55,6 +64,10 @@ generate events at leading-colour accuracy for that process. The
 Amplicol code is a fortran code that can be compiled with
 
 make amplicol_generate
+
+Groups carrying resonance metadata require the gen23 phase space
+('--phasespace=1' or '--phasespace=4'). HAAG and pT-based phase spaces
+are rejected for such process files.
 
 It requires 'LHAPDF' as an external dependency, for which it is
 expected that the correct link commands are provided through
@@ -71,7 +84,9 @@ the physical final state is set to zero globally before any subprocess
 amplitude is built. This prevents an on-shell external state from also
 carrying a finite width in another subprocess. Set
 'ignore_final_state_width_fix=.true.' in the input card to retain the
-configured nominal width instead.
+configured nominal width instead. A species that is also required by a
+recorded internal resonance mapping retains its nominal width, because
+the model currently stores widths per species rather than per occurrence.
 
 The possible arguments when running the event generation code are:
 

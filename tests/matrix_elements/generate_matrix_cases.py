@@ -66,9 +66,14 @@ FAMILIES = (
 
 def parse_process_file(path: Path, family: str) -> list[tuple[str, int, int, int, str, list[int], list[int]]]:
     lines = path.read_text().splitlines()
-    n_external, n_unique = map(int, lines[0].split()[:2])
+    n_external, n_unique, version = map(int, lines[0].split())
+    if version != 3:
+        raise ValueError(f"expected process-file version 3, found {version}")
 
-    idx = 1 + n_unique
+    idx = 1
+    while idx < len(lines) and lines[idx].startswith("#"):
+        idx += 1
+    idx += n_unique
     while idx < len(lines) and not lines[idx].strip():
         idx += 1
     n_groups = int(lines[idx].split()[0])
@@ -81,7 +86,9 @@ def parse_process_file(path: Path, family: str) -> list[tuple[str, int, int, int
         header = lines[idx].split()
         group_id = int(header[0])
         n_rows = int(header[1])
+        n_resonances = int(header[3 + n_external])
         idx += 1
+        idx += n_resonances
 
         for row_id in range(1, n_rows + 1):
             parts = lines[idx].split()

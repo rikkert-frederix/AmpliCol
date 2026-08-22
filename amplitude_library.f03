@@ -66,7 +66,7 @@ contains
     close(14)
     filename='Library/amplitudes.bin'
     open(unit=14,file=filename,form='unformatted',access='stream',status='unknown')
-    write(14) 4 ! binary amplitude-library format version
+    write(14) 5 ! binary amplitude-library format version
     stored_model_signature=phys_model%model_signature()
     write(14) stored_model_signature
     write(14) pgl_unique%next,pgl_unique%nproc
@@ -102,6 +102,11 @@ contains
        write(14) shape(pgl(igroup)%phase_space_permutations),pgl(igroup)%phase_space_permutations
        write(14) size(pgl(igroup)%iden_iproc),pgl(igroup)%iden_iproc
        write(14) size(pgl(igroup)%phase_space_orders),pgl(igroup)%phase_space_orders
+       write(14) pgl(igroup)%nresonances
+       if (pgl(igroup)%nresonances.gt.0) then
+          write(14) pgl(igroup)%resonance_pdgs
+          write(14) pgl(igroup)%resonance_masks
+       endif
        write(14) size(pgl(igroup)%nhel),pgl(igroup)%nhel
        write(14) pgl(igroup)%nproc
        write(14) shape(pgl(igroup)%val_procs),pgl(igroup)%val_procs
@@ -130,7 +135,7 @@ contains
     filename='Library/amplitudes.bin'
     open(unit=14,file=filename,form='unformatted',access='stream',status='old')
     read(14) library_version
-    if (library_version.ne.4) then
+    if (library_version.ne.5) then
        write (*,*) 'Amplitude library has an incompatible binary format; recreate it'
        stop 1
     endif
@@ -201,6 +206,13 @@ contains
        read(14) dim1
        allocate(pgl(igroup)%phase_space_orders(dim1))
        read(14) pgl(igroup)%phase_space_orders
+       read(14) pgl(igroup)%nresonances
+       allocate(pgl(igroup)%resonance_pdgs(pgl(igroup)%nresonances))
+       allocate(pgl(igroup)%resonance_masks(pgl(igroup)%nresonances))
+       if (pgl(igroup)%nresonances.gt.0) then
+          read(14) pgl(igroup)%resonance_pdgs
+          read(14) pgl(igroup)%resonance_masks
+       endif
        read(14) dim1
        allocate(pgl(igroup)%nhel(dim1))
        read(14) pgl(igroup)%nhel

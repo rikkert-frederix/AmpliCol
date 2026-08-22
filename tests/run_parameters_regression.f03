@@ -102,6 +102,14 @@ program run_parameters_regression
      write (*,*) 'Could not find HWW vertex'
      stop 1
   endif
+  do i=1,model%nint
+     if (model%vertex_list(i)%type.eq.21 .and.&
+          all(model%vertex_list(i)%particles.eq.[12,-12,23])) exit
+  enddo
+  if (i.gt.model%nint .or. model%vertex_list(i)%coupl(1).eq.0d0) then
+     write (*,*) 'Could not find the Z-neutrino vertex needed by ZZ histories'
+     stop 1
+  endif
 
   ! Top and W occur only in subprocess 2, and Z only in subprocess 3.
   ! A Higgs in an incoming slot must retain its nominal width.

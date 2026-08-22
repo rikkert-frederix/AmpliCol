@@ -20,6 +20,8 @@ module handling_processes
      integer,dimension(:,:),allocatable :: processes,color_orders
      integer,dimension(:,:),allocatable :: phase_space_permutations
      integer,dimension(:),allocatable :: iden_iproc,phase_space_orders,nhel
+     integer,dimension(:),allocatable :: resonance_pdgs,resonance_masks
+     integer :: nresonances=0
      integer :: nproc
      real(kind=8),dimension(:,:),allocatable :: val_procs,idenCOandMAPfactor
      integer,dimension(:,:,:),allocatable :: iden_processes,same_flavour
@@ -696,6 +698,8 @@ contains
     if (allocated(pgl%phase_space_permutations)) deallocate(pgl%phase_space_permutations)
     if (allocated(pgl%iden_iproc)) deallocate(pgl%iden_iproc)
     if (allocated(pgl%phase_space_orders)) deallocate(pgl%phase_space_orders)
+    if (allocated(pgl%resonance_pdgs)) deallocate(pgl%resonance_pdgs)
+    if (allocated(pgl%resonance_masks)) deallocate(pgl%resonance_masks)
     if (allocated(pgl%val_procs)) deallocate(pgl%val_procs)
     if (allocated(pgl%idenCOandMAPfactor)) deallocate(pgl%idenCOandMAPfactor)
     if (allocated(pgl%iden_processes)) deallocate(pgl%iden_processes)

@@ -1,9 +1,9 @@
 module phase_space_gen23_mod
   !  use common
   use phase_space_base
-  use run_parameters, only: z_mass,z_width
   implicit none
   type,extends(phase_space_type),public :: phase_space_gen23
+     integer(kind=4),dimension(:),allocatable :: decay_left,decay_right
    contains
      procedure :: init => gen23_init
      procedure :: generate_momenta => gen23_generate_momenta
@@ -187,6 +187,11 @@ contains
     if (verbose) then
        write (99,*) "Additional random numbers needed:",ndim_extra
     endif
+    if (this%nresonances.gt.0) then
+       call setup_resonance_tree(this)
+       this%ndim_extra=0
+       if (verbose) write (99,*) 'Using recursive resonance phase-space tree'
+    endif
     if (present(flat)) then
        if (flat) then
           ip=0d0
@@ -306,7 +311,177 @@ contains
     if (allocated(this%ycut)) deallocate(this%ycut)
     if (allocated(this%drcut)) deallocate(this%drcut)
     if (allocated(this%sqrt_s_min)) deallocate(this%sqrt_s_min)
+    if (allocated(this%decay_left)) deallocate(this%decay_left)
+    if (allocated(this%decay_right)) deallocate(this%decay_right)
+    if (allocated(this%resonance_pdgs)) deallocate(this%resonance_pdgs)
+    if (allocated(this%resonance_masks)) deallocate(this%resonance_masks)
+    if (allocated(this%resonance_masses)) deallocate(this%resonance_masses)
+    if (allocated(this%resonance_widths)) deallocate(this%resonance_widths)
+    this%nresonances=0
   end subroutine gen23_cleanup
+
+  subroutine setup_resonance_tree(this)
+    ! Build a binary decay tree in which every requested resonance descendant
+    ! mask is an explicit node.  Laminar histories permit arbitrary nesting
+    ! and any number of disjoint branches.
+    implicit none
+    class(phase_space_gen23),intent(inout) :: this
+    integer(kind=4) :: i,j,root,overlap
+    root=maskr(this%next)-3
+    allocate(this%decay_left(0:maskr(this%next)))
+    allocate(this%decay_right(0:maskr(this%next)))
+    this%decay_left=0
+    this%decay_right=0
+    do i=1,this%nresonances
+       if (popcnt(this%resonance_masks(i)).lt.2 .or.&
+            iand(this%resonance_masks(i),root).ne.this%resonance_masks(i)) then
+          write (*,*) 'Invalid resonance descendant mask',this%resonance_pdgs(i),&
+               this%resonance_masks(i)
+          stop 1
+       endif
+       do j=1,i-1
+          overlap=iand(this%resonance_masks(i),this%resonance_masks(j))
+          if (this%resonance_masks(i).eq.this%resonance_masks(j) .or.&
+               (overlap.ne.0 .and. overlap.ne.this%resonance_masks(i) .and.&
+               overlap.ne.this%resonance_masks(j))) then
+             write (*,*) 'Resonance descendant masks must be distinct and laminar'
+             stop 1
+          endif
+       enddo
+    enddo
+    call build_decay_node(root)
+  contains
+    recursive subroutine build_decay_node(node)
+      integer(kind=4),intent(in) :: node
+      integer(kind=4),dimension(this%next+this%nresonances) :: items
+      integer(kind=4) :: nitems,covered,resmask,combined,parent,tmp
+      integer :: ir,jr,ibit,item_index,sort_index
+      logical :: direct_child
+      nitems=0
+      covered=0
+      do ir=1,this%nresonances
+         resmask=this%resonance_masks(ir)
+         if (resmask.eq.node .or. iand(resmask,node).ne.resmask) cycle
+         direct_child=.true.
+         do jr=1,this%nresonances
+            if (jr.eq.ir) cycle
+            if (this%resonance_masks(jr).eq.node) cycle
+            if (iand(resmask,this%resonance_masks(jr)).eq.resmask .and.&
+                 resmask.ne.this%resonance_masks(jr) .and.&
+                 iand(this%resonance_masks(jr),node).eq.this%resonance_masks(jr)) then
+               direct_child=.false.
+               exit
+            endif
+         enddo
+         if (.not.direct_child) cycle
+         if (iand(covered,resmask).ne.0) then
+            write (*,*) 'Overlapping direct resonance children in decay tree',node
+            stop 1
+         endif
+         nitems=nitems+1
+         items(nitems)=resmask
+         covered=ior(covered,resmask)
+         call build_decay_node(resmask)
+      enddo
+      do ibit=2,this%next-1
+         if (.not.btest(node,ibit)) cycle
+         if (btest(covered,ibit)) cycle
+         nitems=nitems+1
+         items(nitems)=ibset(0,ibit)
+      enddo
+      if (nitems.lt.2) then
+         write (*,*) 'Could not split resonance decay node',node,nitems
+         stop 1
+      endif
+      do item_index=2,nitems
+         tmp=items(item_index)
+         sort_index=item_index-1
+         do while (sort_index.ge.1)
+            if (order_position(items(sort_index)).le.order_position(tmp)) exit
+            items(sort_index+1)=items(sort_index)
+            sort_index=sort_index-1
+         enddo
+         items(sort_index+1)=tmp
+      enddo
+      combined=items(nitems)
+      do item_index=nitems-1,1,-1
+         parent=ior(items(item_index),combined)
+         if (this%decay_left(parent).ne.0 .and.&
+              (this%decay_left(parent).ne.items(item_index) .or.&
+              this%decay_right(parent).ne.combined)) then
+            write (*,*) 'Inconsistent binary resonance decay tree',parent
+            stop 1
+         endif
+         this%decay_left(parent)=items(item_index)
+         this%decay_right(parent)=combined
+         combined=parent
+      enddo
+      if (combined.ne.node) then
+         write (*,*) 'Incomplete binary resonance decay tree',node,combined
+         stop 1
+      endif
+    end subroutine build_decay_node
+
+    integer function order_position(item)
+      integer(kind=4),intent(in) :: item
+      integer :: position,label
+      order_position=this%next+1
+      do position=1,this%next
+         label=this%order(position)
+         if (btest(item,label-1)) then
+            order_position=position
+            return
+         endif
+      enddo
+    end function order_position
+  end subroutine setup_resonance_tree
+
+  integer function resonance_index(this,mask)
+    class(phase_space_gen23),intent(in) :: this
+    integer(kind=4),intent(in) :: mask
+    integer :: i
+    resonance_index=0
+    do i=1,this%nresonances
+       if (this%resonance_masks(i).eq.mask) then
+          resonance_index=i
+          return
+       endif
+    enddo
+  end function resonance_index
+
+  subroutine random_to_breit_wigner(x,smin,smax,mass,width,s,jac)
+    implicit none
+    real(kind=8),intent(in) :: x,smin,smax,mass,width
+    real(kind=8),intent(out) :: s
+    real(kind=8),intent(inout) :: jac
+    real(kind=8) :: theta_min,theta_max,theta,mass_width
+    mass_width=mass*width
+    theta_min=atan((smin-mass**2)/mass_width)
+    theta_max=atan((smax-mass**2)/mass_width)
+    theta=theta_min+(theta_max-theta_min)*x
+    s=mass**2+mass_width*tan(theta)
+    jac=jac*(theta_max-theta_min)*mass_width/cos(theta)**2
+  end subroutine random_to_breit_wigner
+
+  subroutine breit_wigner_to_random(s,smin,smax,mass,width,x,jac)
+    implicit none
+    real(kind=8),intent(in) :: s,smin,smax,mass,width
+    real(kind=8),intent(out) :: x
+    real(kind=8),intent(inout) :: jac
+    real(kind=8) :: theta_min,theta_max,theta,mass_width,tolerance
+    tolerance=1d-10*max(1d0,abs(smin),abs(smax))
+    if (s.lt.smin-tolerance .or. s.gt.smax+tolerance) then
+       jac=-1d0
+       return
+    endif
+    mass_width=mass*width
+    theta_min=atan((smin-mass**2)/mass_width)
+    theta_max=atan((smax-mass**2)/mass_width)
+    theta=atan((min(max(s,smin),smax)-mass**2)/mass_width)
+    x=(theta-theta_min)/(theta_max-theta_min)
+    x=min(max(x,0d0),1d0)
+    jac=jac*(theta_max-theta_min)*mass_width/cos(theta)**2
+  end subroutine breit_wigner_to_random
 
   subroutine gen23_generate_momenta(this,ps)
     ! Wrapper for the routine that generates the momenta.
@@ -322,24 +497,18 @@ contains
     ix=0
     ix_e=this%ndim
 
-!!$       call generate_bw_mass(this%next-1)
-!!$       this%next=this%next-1
-!!$       call setup_PS_cuts(this)
-
     invm=this%invm
     if (includePDF) then
        call generate_initial_state
     else
        sqrtshat=this%sqrts
     endif
-    call generate_momenta
-!!$       this%next=this%next+1
-!!$    if (ps%jac.lt.0d0) return
-!!$
-!!$       call decay_bw(this%next-1,this%next-1,this%next)
-!!$       ! Add factors of 2*pi (since this%next was reduced by 1)
-!!$       ps%jac=ps%jac/((2d0*pi)**3)
-       if (debug) call test_momenta
+    if (this%nresonances.gt.0) then
+       call generate_resonance_momenta
+    else
+       call generate_momenta
+    endif
+    if (debug) call test_momenta
 
     do i=1,this%next
        if (includePDF) then
@@ -351,52 +520,6 @@ contains
        endif
     enddo
   contains
-    subroutine generate_bw_mass(ires)
-      implicit none
-      integer,intent(in) :: ires
-      real(kind=8) :: A,B,smin,smax,qmass,qwidth,y
-      smin=50d0**2
-      smax=this%sqrts**2
-      qmass=z_mass
-      qwidth=z_width
-      A=atan((qmass-smin/qmass)/qwidth)
-      B=atan((qmass-smax/qmass)/qwidth)
-      ix=ix+1
-      call random_to_var(ps%x(ix),0d0,B,A,y,ps%jac)
-      this%invm(ibset(0,ires-1))=qmass*(qmass-qwidth*tan(y))
-      ps%jac=ps%jac*qmass*qwidth/(cos(y))**2
-    end subroutine generate_bw_mass
-    subroutine decay_bw(ires,id1,id2)
-      ! decay the BW
-      implicit none
-      integer,intent(in) :: ires,id1,id2
-      integer :: i,j,k
-      real(kind=8),dimension(0:3,this%next) :: pp_tmp
-      if (ires.gt.id1 .or. ires.gt.id2) then
-         write (*,*) 'ERROR in decay_BW',ires,id1,id2
-      endif
-      ! shift the already generated momenta to make place for the
-      ! daughters of the resonance
-      j=0
-      k=0
-      do i=1,this%next-2
-         j=j+1
-         k=k+1
-         if (k.eq.id1) k=k+1
-         if (k.eq.id2) k=k+1
-         if (i.eq.ires) j=j+1 ! skip ires
-         pp_tmp(0:3,k)=pp(0:3,ibset(0,j-1))
-      enddo
-      pp(0:3,ibset(0,id1-1)+ibset(0,id2-1))=pp(0:3,ibset(0,ires-1))
-      invm(ibset(0,id1-1)+ibset(0,id2-1))=invm(ibset(0,ires-1))
-      do i=1,this%next
-         pp(0:3,ibset(0,i-1))=pp_tmp(0:3,i)
-      enddo
-      ! Set the decay products of the BW as massless particles
-      invm(ibset(0,id1-1))=0d0
-      invm(ibset(0,id2-1))=0d0
-      call gens_one_step(ibset(0,id1-1),ibset(0,id2-1))
-    end subroutine decay_bw
     subroutine generate_initial_state
       implicit none
       real(kind=8) :: tau
@@ -412,10 +535,17 @@ contains
       implicit none
       real(kind=8),intent(out) :: tau
       real(kind=8) :: smin,smax,shat
+      integer :: ires
       smin=max(this%invm_min(maskr(this%next)-3),this%ETmin(maskr(this%next)-3)**2)
       smax=this%sqrts**2
       ix=ix+1
-      call random_to_var(ps%x(ix),ip_shat,smin,smax,shat,ps%jac)
+      ires=resonance_index(this,maskr(this%next)-3)
+      if (ires.gt.0) then
+         call random_to_breit_wigner(ps%x(ix),smin,smax,&
+              this%resonance_masses(ires),this%resonance_widths(ires),shat,ps%jac)
+      else
+         call random_to_var(ps%x(ix),ip_shat,smin,smax,shat,ps%jac)
+      endif
       tau=shat/smax
       ps%jac=ps%jac/smax
     end subroutine generate_tau
@@ -556,6 +686,49 @@ contains
       ! Add flux factor
       ps%jac=ps%jac/(2d0*sqrtshat**2)
     end subroutine generate_momenta
+
+    subroutine generate_resonance_momenta
+      implicit none
+      integer(kind=4) :: root
+      root=maskr(this%next)-3
+      pp(0,1)=sqrtshat/2d0
+      pp(0,2)=sqrtshat/2d0
+      pp(1:2,1)=0d0
+      pp(1:2,2)=0d0
+      pp(3,1)=sqrtshat/2d0
+      pp(3,2)=-sqrtshat/2d0
+      pp(0:3,root)=0d0
+      pp(0,root)=sqrtshat
+      invm(3)=sqrtshat**2
+      invm(root)=sqrtshat**2
+      call decay_resonance_node(root)
+      if (ps%jac.le.0d0) return
+      ps%jac=ps%jac/((2d0*pi)**(3*(this%next-2)-4))
+      ps%jac=ps%jac/(2d0*sqrtshat**2)
+      if (debug .and. ix.ne.this%ndim) then
+         write (*,*) 'Resonance map used an inconsistent number of dimensions',ix,this%ndim
+         stop 1
+      endif
+    end subroutine generate_resonance_momenta
+
+    recursive subroutine decay_resonance_node(node)
+      implicit none
+      integer(kind=4),intent(in) :: node
+      integer(kind=4) :: left,right
+      if (popcnt(node).le.1) return
+      left=this%decay_left(node)
+      right=this%decay_right(node)
+      if (left.eq.0 .or. right.eq.0 .or. ior(left,right).ne.node .or.&
+           iand(left,right).ne.0) then
+         write (*,*) 'Invalid resonance decay node during generation',node,left,right
+         stop 1
+      endif
+      call gens_one_step(left,right)
+      if (ps%jac.le.0d0) return
+      if (popcnt(left).gt.1) call decay_resonance_node(left)
+      if (ps%jac.le.0d0) return
+      if (popcnt(right).gt.1) call decay_resonance_node(right)
+    end subroutine decay_resonance_node
 
     subroutine test_momenta
       ! Writes the momenta to the screen.
@@ -977,7 +1150,7 @@ contains
 
     subroutine generate_mass(i,shatmin,shatmax)
       implicit none
-      integer :: i
+      integer :: i,ires
       real(kind=8) :: shatmin,shatmax
       if (this%invm_min(i).ne.0d0) shatmin=max(shatmin,this%invm_min(i))
       if (this%invm_max(i).ne.0d0) shatmax=min(shatmax,this%invm_max(i))
@@ -987,7 +1160,13 @@ contains
          return
       endif
       ix=ix+1
-      call random_to_var(ps%x(ix),ip_mass,shatmin,shatmax,invm(i),ps%jac)
+      ires=resonance_index(this,i)
+      if (ires.gt.0) then
+         call random_to_breit_wigner(ps%x(ix),shatmin,shatmax,&
+              this%resonance_masses(ires),this%resonance_widths(ires),invm(i),ps%jac)
+      else
+         call random_to_var(ps%x(ix),ip_mass,shatmin,shatmax,invm(i),ps%jac)
+      endif
     end subroutine generate_mass
 
     subroutine mom2cx(esum,mass1,mass2,costh1,phi1,p1,p2)
@@ -1075,7 +1254,7 @@ contains
       endif
       p1(3) = -(m1**2+ma2-t-2d0*p1(0)*E_acms)/(2d0*p_acms)
       pt2=pp2-p1(3)**2
-      if (pt2/esum2.lt.-tiny) then
+      if (pt2.lt.-tiny*max(1d0,esum2,abs(pp2))) then
          write (*,*) 'Error #13 in genps_fks.f: relative pt^2 smaller than 0',pt2,esum2
          stop 1
       elseif (pt2.lt.0d0) then
@@ -1155,17 +1334,11 @@ contains
     integer :: ix
     real(kind=8),dimension(0:3,0:maskr(this%next)) :: pp
     real(kind=8),dimension(maskr(this%next)) :: invm
-    real(kind=8),dimension(0:3,2) :: p_tmp
     if (debug) write (*,*) 'computing x from momenta'
     ps%jac=1d0
     ix=0
     
-!!$       p_tmp(0:3,1)=ps%p(0:3,this%next-1)
-!!$       p_tmp(0:3,2)=ps%p(0:3,this%next)
-!!$       ps%p(0:3,this%next-1)=p_tmp(0:3,1)+p_tmp(0:3,2)
-!!$       call generate_bw_mass_inverse(this%next-1)
-!!$       this%next=this%next-1
-       call setup_PS_cuts(this)
+    call setup_PS_cuts(this)
        
        invm=this%invm
 
@@ -1180,50 +1353,13 @@ contains
       sqrtshat=this%sqrts
     endif
     ! The final-state momenta configuration gives all the other random numbers
-    call compute_x_final_state
+    if (this%nresonances.gt.0) then
+       call compute_x_resonance_final_state
+    else
+       call compute_x_final_state
+    endif
 
-!!$       this%next=this%next+1
-!!$       pp(0:3,ibset(0,this%next-2))=p_tmp(0:3,1)
-!!$       pp(0:3,ibset(0,this%next-1))=p_tmp(0:3,2)
-!!$       pp(0:3,ibset(0,this%next-1)+ibset(0,this%next-2))=p_tmp(0:3,1)+p_tmp(0:3,2)
-!!$       invm(ibset(0,this%next-1)+ibset(0,this%next-2))=invm(ibset(0,this%next-2))
-!!$       invm(ibset(0,this%next-2))=0d0
-!!$       invm(ibset(0,this%next-1))=0d0
-!!$       call decay_bw_inverse(this%next-1,this%next-1,this%next)
-!!$       ! Add factors of 2*pi (since this%next was reduced by 1)
-!!$       ps%jac=ps%jac/((2d0*pi)**3)
-!!$       ps%p(0:3,this%next-1)=p_tmp(0:3,1)
-!!$       ps%p(0:3,this%next)=p_tmp(0:3,2)
-    
   contains
-    subroutine generate_bw_mass_inverse(ires)
-      implicit none
-      integer,intent(in) :: ires
-      real(kind=8) :: A,B,smin,smax,qmass,qwidth,y
-      smin=50d0**2
-      smax=this%sqrts**2
-      qmass=z_mass
-      qwidth=z_width
-      A=atan((qmass-smin/qmass)/qwidth)
-      B=atan((qmass-smax/qmass)/qwidth)
-      ix=ix+1
-      this%invm(ibset(0,ires-1))=dot(ps%p(0:3,ires),ps%p(0:3,ires))
-      y=atan((qmass-this%invm(ibset(0,ires-1))/qmass)/qwidth)
-      call var_to_random(y,0d0,B,A,ps%x(ix),ps%jac)
-      if (ps%jac.lt.0d0) return
-      ps%jac=ps%jac*qmass*qwidth/(cos(y))**2
-    end subroutine generate_bw_mass_inverse
-    subroutine decay_bw_inverse(ires,id1,id2)
-      implicit none
-      integer,intent(in) :: ires,id1,id2
-      integer :: i,j,k
-      real(kind=8),dimension(0:3,this%next) :: pp_tmp
-      if (ires.gt.id1 .or. ires.gt.id2) then
-         write (*,*) 'ERROR in decay_BW',ires,id1,id2
-      endif
-      call gens_one_step_inverse(ibset(0,id1-1),ibset(0,id2-1))
-    end subroutine decay_bw_inverse
-       
     subroutine compute_x_initial_state
       implicit none
       real(kind=8) :: tau
@@ -1235,12 +1371,19 @@ contains
       implicit none
       real(kind=8),intent(out) :: tau
       real(kind=8) :: smin,smax,shat
+      integer :: ires
       smin=max(this%invm_min(maskr(this%next)-3),this%ETmin(maskr(this%next)-3)**2)
       smax=this%sqrts**2
       shat=dot(pp(0:3,3),pp(0:3,3))
       sqrtshat=sqrt(shat)
       ix=ix+1
-      call var_to_random(shat,ip_shat,smin,smax,ps%x(ix),ps%jac)
+      ires=resonance_index(this,maskr(this%next)-3)
+      if (ires.gt.0) then
+         call breit_wigner_to_random(shat,smin,smax,&
+              this%resonance_masses(ires),this%resonance_widths(ires),ps%x(ix),ps%jac)
+      else
+         call var_to_random(shat,ip_shat,smin,smax,ps%x(ix),ps%jac)
+      endif
       if (ps%jac.lt.0d0) return
       tau=shat/smax
       ps%jac=ps%jac/smax
@@ -1363,6 +1506,41 @@ contains
       ps%jac=ps%jac/(2d0*sqrtshat**2)
 
     end subroutine compute_x_final_state
+
+    subroutine compute_x_resonance_final_state
+      implicit none
+      integer(kind=4) :: root
+      root=maskr(this%next)-3
+      invm(3)=sqrtshat**2
+      invm(root)=sqrtshat**2
+      call invert_resonance_node(root)
+      if (ps%jac.lt.0d0) return
+      ps%jac=ps%jac/((2d0*pi)**(3*(this%next-2)-4))
+      ps%jac=ps%jac/(2d0*sqrtshat**2)
+      if (debug .and. ix.ne.this%ndim) then
+         write (*,*) 'Inverse resonance map used inconsistent dimensions',ix,this%ndim
+         stop 1
+      endif
+    end subroutine compute_x_resonance_final_state
+
+    recursive subroutine invert_resonance_node(node)
+      implicit none
+      integer(kind=4),intent(in) :: node
+      integer(kind=4) :: left,right
+      if (popcnt(node).le.1) return
+      left=this%decay_left(node)
+      right=this%decay_right(node)
+      if (left.eq.0 .or. right.eq.0 .or. ior(left,right).ne.node .or.&
+           iand(left,right).ne.0) then
+         write (*,*) 'Invalid resonance decay node during inversion',node,left,right
+         stop 1
+      endif
+      call gens_one_step_inverse(left,right)
+      if (ps%jac.lt.0d0) return
+      if (popcnt(left).gt.1) call invert_resonance_node(left)
+      if (ps%jac.lt.0d0) return
+      if (popcnt(right).gt.1) call invert_resonance_node(right)
+    end subroutine invert_resonance_node
     subroutine gent_one_step_inverse(i,ir,ib)
       implicit none
       integer(kind=4),intent(in) :: i,ir,ib
@@ -1474,7 +1652,7 @@ contains
       endif
       ! boost p(i) and p(ir) to the p(i+ir) rest frame
       esum=sqrt(invm(i+ir))
-      p_boost(0)=-pp(0,i+ir)
+      p_boost(0)=pp(0,i+ir)
       p_boost(1:3)=-pp(1:3,i+ir)
       call boostm(pp(0:3,i),p_boost,esum,p_i)
       ! compute the angles from the momenta and use that to get the random numbers
@@ -1779,7 +1957,7 @@ contains
     end subroutine var_to_random
     subroutine generate_mass_inverse(i,shatmin,shatmax)
       implicit none
-      integer :: i
+      integer :: i,ires
       real(kind=8) :: shatmin,shatmax
       if (this%invm_min(i).ne.0d0) shatmin=max(shatmin,this%invm_min(i))
       if (this%invm_max(i).ne.0d0) shatmax=min(shatmax,this%invm_max(i))
@@ -1788,7 +1966,13 @@ contains
          write (*,*) 'mi- i',i,shatmin,shatmax,invm(i)
       endif
       ix=ix+1
-      call var_to_random(invm(i),ip_mass,shatmin,shatmax,ps%x(ix),ps%jac)
+      ires=resonance_index(this,i)
+      if (ires.gt.0) then
+         call breit_wigner_to_random(invm(i),shatmin,shatmax,&
+              this%resonance_masses(ires),this%resonance_widths(ires),ps%x(ix),ps%jac)
+      else
+         call var_to_random(invm(i),ip_mass,shatmin,shatmax,ps%x(ix),ps%jac)
+      endif
       if (ps%jac.lt.0d0) return
     end subroutine generate_mass_inverse
 
@@ -2105,7 +2289,7 @@ contains
     endif
     Pii(3) = -(m2**2-t-2d0*Pii(0)*E_acms)/(2d0*p_acms)
     pt2=pp2-Pii(3)**2
-    if (pt2/esum2.lt.-tiny) then
+    if (pt2.lt.-tiny*max(1d0,esum2,abs(pp2))) then
        write (*,*) 'Error #16 in genps_fks.f: relative pt^2 smaller than 0',pt2
        stop 1
     elseif (pt2.lt.0d0) then

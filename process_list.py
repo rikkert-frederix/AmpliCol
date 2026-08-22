@@ -32,7 +32,7 @@ from collections import Counter, defaultdict
 import multiprocessing
 import math
 
-PROCESS_FILE_VERSION = 2
+PROCESS_FILE_VERSION = 3
 
 
 # Global sets (make then 'frozenset' so that they are immutable):
@@ -56,6 +56,59 @@ family={'g':0,'d':1,'u':1,'s':11,'c':11,'b':21,'t':21,'d~':-1,'u~':-1,'s~':-11,'
 
 options = {}
 process_order_to_index = {}
+channel_resonances = {}
+process_provenance = ""
+_resonance_history_cache = {}
+
+
+def _build_three_point_vertices():
+    """Return the physical cubic vertices needed for resonance discovery.
+
+    Particles are represented in the all-outgoing convention used by the
+    process builder.  Auxiliary fields used to factorise four-point vertices
+    are deliberately absent: they are not physical Breit--Wigner poles.
+    """
+    vertices = {(21, 21, 21), (24, -24, 22), (24, -24, 23),
+                (24, -24, 25), (23, 23, 25), (25, 25, 25)}
+    for flavour in range(1, 7):
+        vertices.add((21, flavour, -flavour))
+        vertices.add((22, flavour, -flavour))
+        vertices.add((23, flavour, -flavour))
+    vertices.add((25, 6, -6))
+    for down in (1, 3, 5):
+        up = down + 1
+        vertices.add((24, down, -up))
+        vertices.add((-24, -down, up))
+    for charged, neutrino in ((11, 12), (13, 14), (15, 16)):
+        vertices.add((22, charged, -charged))
+        vertices.add((23, charged, -charged))
+        vertices.add((23, neutrino, -neutrino))
+        vertices.add((24, charged, -neutrino))
+        vertices.add((-24, -charged, neutrino))
+    return tuple(vertices)
+
+
+THREE_POINT_VERTICES = _build_three_point_vertices()
+
+
+def _anti_pdg(pdg):
+    """Return the antiparticle PDG for the physical fields used here."""
+    return pdg if pdg in (21, 22, 23, 25) else -pdg
+
+
+def _build_current_combinations():
+    """Map two outgoing currents to every current allowed by a cubic vertex."""
+    combinations = defaultdict(set)
+    for vertex in THREE_POINT_VERTICES:
+        for current_index in range(3):
+            current = _anti_pdg(vertex[current_index])
+            children = [vertex[index] for index in range(3)
+                        if index != current_index]
+            combinations[tuple(sorted(children))].add(current)
+    return {key: frozenset(value) for key, value in combinations.items()}
+
+
+CURRENT_COMBINATIONS = _build_current_combinations()
 
 def SwitchFlavourScheme(FS):
     """Set which quark flavours are treated as massless proton/jet content.
@@ -101,10 +154,7 @@ def ProcessProcess(proc):
     """
     phase_space_orders_local = {}
 
-    # All n! possible colour orderings:
-    all_possible_color_ord = list(itertools.permutations(range(len(proc))))
-    # Restrict them to the ones compatible with the process under consideration:
-    valid_color_ord = [perm for perm in all_possible_color_ord if ValidColorOrd(proc, perm)]
+    valid_color_ord = GenerateValidColorOrders(proc)
     # In case we have identical final state particles, there can be
     # multiple colour orderings that are identical. Filter those out:
     unique_color_ord = [perm for perm in valid_color_ord if UniqueColorOrd(proc, perm)]
@@ -129,6 +179,42 @@ def ProcessProcess(proc):
         else:
             phase_space_orders_local[channel_key] = [(ordered_proc, ordered_perm, [])]
     return phase_space_orders_local
+
+
+def GenerateValidColorOrders(proc):
+    """Generate valid orders without permuting singlets through invalid slots.
+
+    A brute-force permutation of every external occurrence scales as ``n!``
+    and becomes prohibitive as soon as explicit four- or six-lepton decays are
+    kept in the process.  First construct the much smaller coloured skeleton,
+    then use the existing singlet-placement routine to insert every singlet
+    permutation after an antiquark.  The final validity check keeps this
+    exactly equivalent to the historical enumeration.
+    """
+    coloured = tuple(index for index, particle in enumerate(proc)
+                     if particle in all_coloured)
+    singlet_labels = tuple(index for index, particle in enumerate(proc)
+                           if particle not in all_coloured)
+    valid = set()
+    for coloured_order in itertools.permutations(coloured):
+        if not ValidColorOrd(proc, coloured_order):
+            continue
+        if not singlet_labels:
+            valid.add(coloured_order)
+            continue
+        antiquark_positions = [
+            position for position, label in enumerate(coloured_order)
+            if proc[label] in antiquarks
+        ]
+        if not antiquark_positions:
+            continue
+        insertion = antiquark_positions[-1] + 1
+        seed = coloured_order[:insertion] + singlet_labels + \
+            coloured_order[insertion:]
+        for order, _ in SingletMultiChannelOrders(proc, seed):
+            if ValidColorOrd(proc, order):
+                valid.add(order)
+    return tuple(sorted(valid))
 
 
 def ValidColorOrd(proc,perm):
@@ -272,9 +358,8 @@ def ParseCollision(input_string):
 
     Non-proton initial states are crossed to the final-state convention used
     by the colour-ordering logic. A final token like ``3j`` is interpreted as
-    three inclusive massless-QCD jets. With ``--resonance``, explicit leptons
-    are temporarily replaced by the corresponding ``z``/``w+``/``w-`` boson so
-    phase-space orderings keep the lepton pair adjacent.
+    three inclusive massless-QCD jets.  Decay products remain explicit;
+    resonance histories are discovered later for each concrete subprocess.
     """
     input_string=input_string.replace('bar','~')
     input_string=input_string.replace(' j',' 1j')
@@ -289,18 +374,7 @@ def ParseCollision(input_string):
     jet_match=re.match(r"(\d+)j",final_state[-1]) if final_state else None
     jet_count=int(jet_match.group(1)) if jet_match else 0
     rest=final_state[:-1] if jet_match else final_state
-    lep=[]
-    if (options['include_resonance']):
-        i=0
-        for k in rest:
-            if (abs(int(pdgs[k])) >= 11 and abs(int(pdgs[k])) <= 16): 
-                lep.append(k)
-        for l in lep:
-            rest.remove(l)
-        if (sum(charges3[l] for l in lep) == 0): rest.append('z')
-        if (sum(charges3[l] for l in lep) < 0): rest.append('w-')
-        if (sum(charges3[l] for l in lep) > 0): rest.append('w+')
-    return {"initial_state":initial_state,"jet_count":jet_count,"rest":rest,"lep":lep}
+    return {"initial_state":initial_state,"jet_count":jet_count,"rest":rest}
 
 def count_matching_elements(main_list,check_list):
     """Count entries of ``main_list`` whose value is present in ``check_list``."""
@@ -309,6 +383,240 @@ def count_matching_elements(main_list,check_list):
     main_counts=Counter(main_list)
     count=sum(main_counts[item] for item in check_list if item in main_counts)
     return count
+
+
+def _is_lepton_pdg(pdg):
+    return 11 <= abs(pdg) <= 16
+
+
+def _current_builder(external_pdgs):
+    """Create a memoised tree-current finder for occurrence-tagged legs."""
+    cache = {}
+
+    def currents(mask):
+        if mask in cache:
+            return cache[mask]
+        if mask == 0:
+            result = frozenset()
+        elif mask & (mask - 1) == 0:
+            index = mask.bit_length() - 1
+            result = frozenset((external_pdgs[index],))
+        else:
+            found = set()
+            anchor = mask & -mask
+            subset = (mask - 1) & mask
+            while subset:
+                other = mask ^ subset
+                if other and subset & anchor:
+                    left = currents(subset)
+                    right = currents(other)
+                    for first in left:
+                        for second in right:
+                            found.update(CURRENT_COMBINATIONS.get(
+                                tuple(sorted((first, second))), ()))
+                subset = (subset - 1) & mask
+            result = frozenset(found)
+        cache[mask] = result
+        return result
+
+    return currents
+
+
+def _has_higgs_vector_split(mask, currents):
+    """Check that a Higgs current is specifically reachable through VV."""
+    anchor = mask & -mask
+    subset = (mask - 1) & mask
+    while subset:
+        other = mask ^ subset
+        if other and subset & anchor:
+            left = currents(subset)
+            right = currents(other)
+            if (23 in left and 23 in right) or \
+                    (24 in left and -24 in right) or \
+                    (-24 in left and 24 in right):
+                return True
+        subset = (subset - 1) & mask
+    return False
+
+
+def _compatible_resonances(first, second):
+    """Return whether two descendant sets form a laminar family."""
+    first_labels = frozenset(first[1])
+    second_labels = frozenset(second[1])
+    overlap = first_labels & second_labels
+    return not overlap or first_labels <= second_labels or \
+        second_labels <= first_labels
+
+
+def _canonical_history(entries):
+    """Canonical inner-to-outer ordering for one resonance history."""
+    return tuple(sorted(set(entries), key=lambda item: (
+        len(item[1]), item[1], item[0]
+    )))
+
+
+def DiscoverResonanceHistories(process):
+    """Discover physical tree-level resonance histories for ``process``.
+
+    External occurrences, rather than particle names, label descendants.  A
+    current is retained only when the complementary external legs can supply
+    the antiparticle current, which excludes poles that cannot occur in a
+    complete tree diagram for the concrete subprocess.
+    """
+    if process in _resonance_history_cache:
+        return _resonance_history_cache[process]
+
+    external_pdgs = tuple(int(pdgs[particle]) for particle in process)
+    final_indices = tuple(range(2, len(process)))
+    final_leptons = tuple(index for index in final_indices
+                          if _is_lepton_pdg(external_pdgs[index]))
+    has_top_decay_seed = any(
+        external_pdgs[index] in (5, -5, 24, -24)
+        for index in final_indices
+    )
+    if len(final_leptons) < 2 and not has_top_decay_seed:
+        result = ((),)
+        _resonance_history_cache[process] = result
+        return result
+
+    currents = _current_builder(external_pdgs)
+    full_mask = (1 << len(process)) - 1
+    final_mask = full_mask ^ 3
+    candidates = set()
+    subset = final_mask
+    while subset:
+        if subset.bit_count() >= 2:
+            labels = tuple(index for index in final_indices
+                           if subset & (1 << index))
+            values = currents(subset)
+            complement_values = currents(full_mask ^ subset)
+            all_leptons = all(_is_lepton_pdg(external_pdgs[index])
+                              for index in labels)
+
+            if all_leptons:
+                for resonance in (23, 24, -24):
+                    if resonance in values and \
+                            _anti_pdg(resonance) in complement_values:
+                        candidates.add((resonance, labels))
+
+            higgs_to_leptons = all_leptons and len(labels) >= 4
+            if higgs_to_leptons and 25 in values and \
+                    25 in complement_values and \
+                    _has_higgs_vector_split(subset, currents):
+                candidates.add((25, labels))
+
+            for resonance, bottom, weak_boson in (
+                    (6, 5, 24), (-6, -5, -24)):
+                if resonance not in values or \
+                        _anti_pdg(resonance) not in complement_values:
+                    continue
+                for bottom_label in labels:
+                    if external_pdgs[bottom_label] != bottom:
+                        continue
+                    daughters = subset ^ (1 << bottom_label)
+                    daughter_labels = tuple(
+                        index for index in final_indices
+                        if daughters & (1 << index)
+                    )
+                    explicit_w = len(daughter_labels) == 1 and \
+                        external_pdgs[daughter_labels[0]] == weak_boson
+                    leptonic_w = daughter_labels and all(
+                        _is_lepton_pdg(external_pdgs[index])
+                        for index in daughter_labels
+                    )
+                    if (explicit_w or leptonic_w) and \
+                            weak_boson in currents(daughters):
+                        candidates.add((resonance, labels))
+                        break
+        subset = (subset - 1) & final_mask
+
+    candidates = tuple(sorted(candidates, key=lambda item: (
+        len(item[1]), item[1], item[0]
+    )))
+    histories = {()}
+    histories.update((candidate,) for candidate in candidates)
+
+    # All compatible combinations of two-body poles provide the alternative
+    # WW/ZZ pairings and, for six leptons, triple-resonance histories.
+    two_body = tuple(candidate for candidate in candidates
+                     if len(candidate[1]) == 2 and
+                     abs(candidate[0]) in (23, 24))
+
+    def add_disjoint_combinations(pool, prefix=(), start=0):
+        for index in range(start, len(pool)):
+            candidate = pool[index]
+            if all(not (set(candidate[1]) & set(item[1])) for item in prefix):
+                combined = prefix + (candidate,)
+                if len(combined) >= 2:
+                    histories.add(_canonical_history(combined))
+                add_disjoint_combinations(pool, combined, index + 1)
+
+    add_disjoint_combinations(two_body)
+
+    # A broad Z/W current, Higgs, or top can coexist with nested pair poles.
+    # This captures Z/W->4l, H->ZZ/WW and t->bW->b l nu while keeping the
+    # number of adaptive grids controlled for high multiplicities.
+    for parent in candidates:
+        if len(parent[1]) <= 2:
+            continue
+        parent_labels = set(parent[1])
+        nested = tuple(candidate for candidate in two_body
+                       if set(candidate[1]) < parent_labels)
+        nested_combinations = [()]
+        for candidate in nested:
+            additions = []
+            for combination in nested_combinations:
+                if all(not (set(candidate[1]) & set(item[1]))
+                       for item in combination):
+                    additions.append(combination + (candidate,))
+            nested_combinations.extend(additions)
+        for combination in nested_combinations:
+            if combination:
+                histories.add(_canonical_history((parent,) + combination))
+
+    # Disjoint broad poles are simultaneous histories as well.  In
+    # particular, a dileptonic ttbar subprocess needs the t and tbar poles in
+    # one density, with either or both nested W poles retained.
+    broad = tuple(candidate for candidate in candidates
+                  if len(candidate[1]) > 2)
+    broad_combinations = []
+
+    def collect_broad_combinations(prefix=(), start=0):
+        for index in range(start, len(broad)):
+            candidate = broad[index]
+            if all(not (set(candidate[1]) & set(item[1]))
+                   for item in prefix):
+                combined = prefix + (candidate,)
+                if len(combined) >= 2:
+                    broad_combinations.append(combined)
+                collect_broad_combinations(combined, index + 1)
+
+    collect_broad_combinations()
+    for parents in broad_combinations:
+        histories.add(_canonical_history(parents))
+        compatible_pairs = tuple(
+            candidate for candidate in two_body
+            if all(_compatible_resonances(candidate, parent)
+                   for parent in parents)
+        )
+        pair_combinations = [()]
+        for candidate in compatible_pairs:
+            additions = []
+            for combination in pair_combinations:
+                if all(not (set(candidate[1]) & set(item[1]))
+                       for item in combination):
+                    additions.append(combination + (candidate,))
+            pair_combinations.extend(additions)
+        for combination in pair_combinations:
+            if combination:
+                histories.add(_canonical_history(parents + combination))
+
+    result = tuple(sorted(histories, key=lambda history: (
+        len(history), tuple((len(item[1]), item[1], item[0])
+                            for item in history)
+    )))
+    _resonance_history_cache[process] = result
+    return result
 
 def ValidProc(proc):
     """Apply process-level physics and code-support constraints."""
@@ -457,6 +765,7 @@ def CombineResults(results):
                 
 def ParseArgument():
     """Parse command-line options and return the normalized process request."""
+    global process_provenance
     parser = argparse.ArgumentParser(description="Generate the full list of processes, ordered by phase-space order")
     parser.add_argument("process_string", type=str, help="Process to consider (e.g., 'p p > w+ z 4j', (including quotation marks))")
     parser.add_argument("-FS", "--flavour_scheme", type=int, choices=range(1, 6), metavar="[1-5]",
@@ -464,7 +773,6 @@ def ParseArgument():
     parser.add_argument("-3", "--include_3qqbar", action='store_true', help="Include processes with up to three quark lines (instead of just two).")
     parser.add_argument("-s", "--serial", action='store_true', help="Do not use multi-processes (parallel execution). Useful for debugging.")
     parser.add_argument("-cc", "--include_cc", action='store_true', help="Include flavour-changing processes")
-    parser.add_argument("-res", "--resonance", action='store_true', help="Treat the lepton pair as a resonance")
     args=parser.parse_args()
     if (args.flavour_scheme):
         SwitchFlavourScheme(args.flavour_scheme)
@@ -476,14 +784,12 @@ def ParseArgument():
         options["include_cc_processes"] = True
     else:
         options["include_cc_processes"] = False
-    if args.resonance:
-        options["include_resonance"] = True
-    else:
-        options["include_resonance"] = False
     if args.serial:
         options["serial"] = True
     else:
         options["serial"] = False
+    options["flavour_scheme"] = args.flavour_scheme or 5
+    process_provenance = args.process_string
     return ParseCollision(args.process_string)
 
 def IdenticalParticleSymmetryFactor(proc):
@@ -1032,24 +1338,130 @@ def BuildTopologyAwareMultiChannels():
 def DetermineMultiChannelPartnersAndSymmetryFactor():
     """Finalize each subprocess record with channels and symmetry factors."""
     BuildTopologyAwareMultiChannels()
+    AddResonanceMultiChannels()
 
 
-def ExpandLegPermutation(permutation, index):
-    """Replace one fixed label by two identity-mapped decay-product labels."""
-    if permutation[index] != index:
-        raise ValueError("a resonance label must be fixed by the QCD map")
-    expanded = [None] * (len(permutation) + 1)
-    for base_label, target_label in enumerate(permutation):
-        if base_label == index:
-            continue
-        expanded_base = base_label + (base_label > index)
-        expanded_target = target_label + (target_label > index)
-        expanded[expanded_base] = expanded_target
-    expanded[index] = index
-    expanded[index + 1] = index + 1
-    if sorted(expanded) != list(range(len(expanded))):
-        raise ValueError("expanded leg map is not a permutation")
-    return tuple(expanded)
+def _history_in_density_labels(history, base_to_target):
+    """Translate target occurrence labels into one density's base labels."""
+    target_to_base = [None] * len(base_to_target)
+    for base_label, target_label in enumerate(base_to_target):
+        target_to_base[target_label] = base_label
+    translated = []
+    for resonance, labels in history:
+        translated.append((resonance, tuple(sorted(
+            target_to_base[label] for label in labels
+        ))))
+    return _canonical_history(translated)
+
+
+def AddResonanceMultiChannels():
+    """Add automatic resonance densities to every existing MIS component.
+
+    The matrix-element process and colour order are never changed.  Each
+    existing density is cloned for the physical histories supported by its
+    target subprocess; the stored external-leg map translates occurrence
+    labels into that density's canonical labelling.  Every clone remains a
+    full-support map and all clones are linked as multichannel partners.
+    """
+    global phase_space_orders, all_keys_sorted, channel_resonances
+
+    old_keys = tuple(all_keys_sorted)
+    old_rows = tuple(tuple(phase_space_orders[key]) for key in old_keys)
+    signatures_by_channel = [set() for _ in old_keys]
+    for channel, rows in enumerate(old_rows):
+        for row in rows:
+            process = row[0]
+            permutation = row[4]
+            signatures_by_channel[channel].add(())
+            representative = min(row[2])
+            if channel != representative:
+                continue
+            for history in DiscoverResonanceHistories(process):
+                if not history:
+                    continue
+                signatures_by_channel[channel].add(
+                    _history_in_density_labels(history, permutation)
+                )
+
+    registry = {}
+    new_keys = []
+    for channel, old_key in enumerate(old_keys):
+        signatures = sorted(signatures_by_channel[channel], key=lambda history: (
+            len(history), tuple((len(item[1]), item[1], item[0])
+                                for item in history)
+        ))
+        for history in signatures:
+            new_key = old_key + (history,)
+            registry[(channel, history)] = new_key
+            new_keys.append(new_key)
+
+    channel_number = {key: index for index, key in enumerate(new_keys)}
+    rebuilt = {key: [] for key in new_keys}
+    for source_channel, rows in enumerate(old_rows):
+        for row in rows:
+            process, order, old_partners, factor, permutation, \
+                old_partner_permutations = row
+            physical_histories = DiscoverResonanceHistories(process)
+            partner_records = []
+            # Keep every original QCD/singlet map as a nonresonant density.
+            for partner, partner_permutation in zip(
+                    old_partners, old_partner_permutations):
+                key = registry[(partner, ())]
+                partner_records.append((channel_number[key], partner_permutation))
+
+            # A recursive resonance density does not need to be repeated for
+            # every singlet placement of the same coefficient.  Attach one
+            # copy of each physical history to the component's deterministic
+            # representative; all rows still see it in the same MIS sum.
+            representative = min(old_partners)
+            representative_index = old_partners.index(representative)
+            representative_permutation = old_partner_permutations[
+                representative_index
+            ]
+            for history in physical_histories:
+                if not history:
+                    continue
+                signature = _history_in_density_labels(
+                    history, representative_permutation
+                )
+                try:
+                    key = registry[(representative, signature)]
+                except KeyError as error:
+                    raise ValueError(
+                        "resonance history is missing from its multichannel "
+                        f"representative: channel={representative} "
+                        f"history={signature}"
+                    ) from error
+                partner_records.append((
+                    channel_number[key], representative_permutation
+                ))
+            partner_records.sort(key=lambda item: (item[0], item[1]))
+            partners = tuple(item[0] for item in partner_records)
+            partner_permutations = tuple(item[1] for item in partner_records)
+
+            source_histories = [()]
+            if source_channel == representative:
+                source_histories.extend(
+                    history for history in physical_histories if history
+                )
+            for history in source_histories:
+                signature = _history_in_density_labels(history, permutation)
+                key = registry[(source_channel, signature)]
+                rebuilt[key].append((
+                    process,
+                    order,
+                    partners,
+                    factor,
+                    permutation,
+                    partner_permutations,
+                ))
+
+    all_keys_sorted = new_keys
+    phase_space_orders = rebuilt
+    channel_resonances = {
+        key: key[-1] for key in all_keys_sorted
+    }
+    build_process_index()
 
 
 def ConvertProcToString(proc):
@@ -1100,7 +1512,7 @@ def sort_by_pdg_codes2(proc):
     process=proc[0]
     return sort_by_pdg_codes(process)
 
-def WriteAllProcsIntoList(lep):
+def WriteAllProcsIntoList():
     """Serialize the phase-space groups and subprocess rows.
 
     This is the second block in ``processes.txt``. Each group starts with the
@@ -1115,42 +1527,16 @@ def WriteAllProcsIntoList(lep):
     for internal_key in all_keys_sorted:
         key = PhaseSpaceOrderFromKey(internal_key)
         rows = phase_space_orders[internal_key]
-        # Re-shuffle the physical phase-space order if a resonance placeholder
-        # is expanded into its two decay products.  Keep rows in a list rather
-        # than a dictionary: independent topology grids may intentionally have
-        # identical numerical phase-space headers.
-        if options['include_resonance']:
-            first = rows[0]
-            if 'z' in first[0]:
-                j = key.index(first[0].index("z"))
-                new = (first[0].index("z"), first[0].index("z") + 1)
-                key = key[0:j] + new + key[j+1:]
-        output_channels.append((key, rows))
+        resonances = channel_resonances.get(internal_key, ())
+        output_channels.append((key, resonances, rows))
 
-    for i,(key,rows) in enumerate(output_channels):
-        towrite.append(str(i+1)+'   '+str(len(rows))+'   '+str(max(len(proc[2]) for proc in rows))+'   '+' '.join([str(k+1) for k in key]))
+    for i,(key,resonances,rows) in enumerate(output_channels):
+        towrite.append(str(i+1)+'   '+str(len(rows))+'   '+str(max(len(proc[2]) for proc in rows))+'   '+' '.join([str(k+1) for k in key])+'   '+str(len(resonances)))
+        for resonance, labels in resonances:
+            towrite.append(str(resonance)+'   '+str(len(labels))+'   '+' '.join(str(label+1) for label in labels))
         # order the processes in the process_list, so that we get a neat processes.txt file:
         process_list=sorted(rows,key=sort_by_pdg_codes2)
         for proc in process_list:
-            if (options['include_resonance']):
-                if 'z' in proc[0]:
-                    ib = proc[0].index("z")
-                    t = proc[0][:ib] + tuple(lep) + proc[0][ib+1:]
-                    proc = (t,) + proc[1:]
-                    j = proc[1].index(ib)
-                    new = tuple([ib,ib+1])
-                    t = proc[1][0:j] + new + proc[1][j+1:]
-                    proc = (proc[0],) + (t,) + proc[2:]
-                    if len(proc) >= 6:
-                        permutation = ExpandLegPermutation(proc[4], ib)
-                        partner_permutations = tuple(
-                            ExpandLegPermutation(item, ib)
-                            for item in proc[5]
-                        )
-                        proc = proc[:4] + (
-                            permutation,
-                            partner_permutations,
-                        )
             process_line=ConvertProcToString(proc)
             towrite.append(process_line)
         towrite.append('')
@@ -1176,13 +1562,9 @@ def Addqq_dfProcesses(sorted_procs):
         i+=1
     return sorted_procs
 
-def WriteUniqueProcsIntoList(procs,lep):
+def WriteUniqueProcsIntoList(procs):
     """Serialize the unique-process block at the top of ``processes.txt``."""
     sorted_procs=sorted([sorted(proc,key=lambda x: sort_particles[x]) for proc in procs],key=sort_by_pdg_codes)
-    if (options['include_resonance']):
-        for proc in sorted_procs:
-            if 'z' in proc:
-                proc[proc.index("z"):proc.index("z")+1] = lep
     # in case of different flavour multiple-quark line processes, add all the possible orders:
     sorted_procs=Addqq_dfProcesses(sorted_procs)
     try:
@@ -1190,6 +1572,11 @@ def WriteUniqueProcsIntoList(procs,lep):
     except IndexError:
         print("ERROR: no processes found. Try './process_list.py --help' to get more information on usage")
         quit()
+    line.append('# process: '+process_provenance)
+    line.append('# options: flavour_scheme='+str(options['flavour_scheme'])+
+                ' include_3qqbar='+str(options['include_3qqbar_processes']).lower()+
+                ' include_cc='+str(options['include_cc_processes']).lower()+
+                ' resonance_discovery=automatic')
     for proc in sorted_procs:
         line.append(' '.join(pdgs[p] for p in proc))
     line.append('')
@@ -1243,7 +1630,6 @@ if __name__ == "__main__":
     # are treated as anti-quarks when considering
     # e.g. colour-ordering)
     process=ParseArgument()
-    lep = process["lep"]
     all_unique_procs=GenerateAllUniqueProcs(process)
     all_procs=GenerateAllProcs(all_unique_procs,process)
     # At this stage, we have two sets:
@@ -1273,8 +1659,8 @@ if __name__ == "__main__":
     # Check the consistency of the generated processes
     CheckConsistency()
     # write to disk
-    towriteunique=WriteUniqueProcsIntoList(all_unique_procs,lep)
-    towriteallprocs=WriteAllProcsIntoList(lep) # puts the phase_space_orders dictionary in a writable list
+    towriteunique=WriteUniqueProcsIntoList(all_unique_procs)
+    towriteallprocs=WriteAllProcsIntoList() # puts the phase_space_orders dictionary in a writable list
     
     with open('processes.txt','w') as f:
         f.write('\n'.join(towriteunique))

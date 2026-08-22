@@ -17,11 +17,20 @@ contains
     character(len=*),intent(in) :: filename
     character(len=65536) :: buffer
     integer :: iunit,ios,n_external,n_unique,version,iproc,igroup,ngroup_file
-    integer :: group_index,nproc_in_group,max_channels,nchannels
+    integer :: group_index,nproc_in_group,max_channels,nchannels,nresonances,iresonance
+    integer :: resonance_pdg,iresonance_species
+    integer,dimension(4),parameter :: resonance_species=[6,23,24,25]
+    logical,dimension(4) :: mapped_species
+    real(kind=8),dimension(4) :: nominal_widths
     integer,dimension(:),allocatable :: phase_order,channels
     integer,dimension(:,:),allocatable :: physical_process
 
     if (ignore_final_state_width_fix) return
+    mapped_species=.false.
+    do iresonance_species=1,size(resonance_species)
+       nominal_widths(iresonance_species)=phys_model%get_width(&
+            resonance_species(iresonance_species))
+    enddo
     open(newunit=iunit,file=trim(filename),status='old',action='read',iostat=ios)
     if (ios.ne.0) then
        write (*,*) 'Could not open process file while applying final-state widths: ',trim(filename)
@@ -32,13 +41,19 @@ contains
        write (*,*) 'Could not read process-file header while applying final-state widths'
        stop 1
     endif
-    version=1
     read(buffer,*,iostat=ios) n_external,n_unique,version
-    if (ios.ne.0) then
-       read(buffer,*,iostat=ios) n_external,n_unique
-    endif
     if (ios.ne.0 .or. n_external.lt.3 .or. n_unique.lt.1) then
        write (*,*) 'Malformed process-file header while applying final-state widths'
+       stop 1
+    endif
+    if (version.ne.3) then
+       write (*,*) 'Only version-3 process files are supported; regenerate processes.txt'
+       stop 1
+    endif
+    read(iunit,'(a)',iostat=ios) buffer
+    read(iunit,'(a)',iostat=ios) buffer
+    if (ios.ne.0) then
+       write (*,*) 'Missing process provenance in version-3 process file'
        stop 1
     endif
     do iproc=1,n_unique
@@ -63,12 +78,29 @@ contains
     allocate(phase_order(n_external))
     allocate(physical_process(n_external,1))
     do igroup=1,ngroup_file
-       read(iunit,*,iostat=ios) group_index,nproc_in_group,max_channels,phase_order
+       read(iunit,*,iostat=ios) group_index,nproc_in_group,max_channels,phase_order,nresonances
        if (ios.ne.0 .or. group_index.ne.igroup .or. nproc_in_group.lt.1 .or.&
-            max_channels.lt.1) then
+            max_channels.lt.1 .or. nresonances.lt.0) then
           write (*,*) 'Malformed phase-space group while applying final-state widths',igroup
           stop 1
        endif
+       do iresonance=1,nresonances
+          read(iunit,'(a)',iostat=ios) buffer
+          if (ios.ne.0) then
+             write (*,*) 'Malformed resonance record while applying final-state widths',igroup
+             stop 1
+          endif
+          read(buffer,*,iostat=ios) resonance_pdg
+          if (ios.ne.0) then
+             write (*,*) 'Malformed resonance PDG while applying final-state widths',igroup
+             stop 1
+          endif
+          do iresonance_species=1,size(resonance_species)
+             if (abs(resonance_pdg).eq.resonance_species(iresonance_species)) then
+                mapped_species(iresonance_species)=.true.
+             endif
+          enddo
+       enddo
        do iproc=1,nproc_in_group
           read(iunit,'(a)',iostat=ios) buffer
           if (ios.ne.0 .or. len_trim(buffer).eq.len(buffer)) then
@@ -98,16 +130,42 @@ contains
        endif
     enddo
     close(iunit)
+    ! The physics model stores one width per species.  An external occurrence
+    ! can therefore only be made stable globally.  Restore the nominal width
+    ! for species that also occur as mapped internal resonances; otherwise the
+    ! corresponding Breit-Wigner and matrix-element propagator would be lost.
+    do iresonance_species=1,size(resonance_species)
+       if (mapped_species(iresonance_species)) call phys_model%set_width(&
+            resonance_species(iresonance_species),nominal_widths(iresonance_species))
+    enddo
     deallocate(phase_order)
     deallocate(physical_process)
   end subroutine apply_final_state_widths_from_process_file
 
   subroutine apply_final_state_widths_from_loaded_groups()
     implicit none
-    integer :: igroup,iproc,iident
+    integer :: igroup,iproc,iident,iresonance,iresonance_species
+    integer,dimension(4),parameter :: resonance_species=[6,23,24,25]
+    logical,dimension(4) :: mapped_species
+    real(kind=8),dimension(4) :: nominal_widths
     integer,dimension(:,:),allocatable :: physical_processes
 
     if (ignore_final_state_width_fix) return
+    mapped_species=.false.
+    do iresonance_species=1,size(resonance_species)
+       nominal_widths(iresonance_species)=phys_model%get_width(&
+            resonance_species(iresonance_species))
+    enddo
+    do igroup=1,ngroups
+       do iresonance=1,pgl(igroup)%nresonances
+          do iresonance_species=1,size(resonance_species)
+             if (abs(pgl(igroup)%resonance_pdgs(iresonance)).eq.&
+                  resonance_species(iresonance_species)) then
+                mapped_species(iresonance_species)=.true.
+             endif
+          enddo
+       enddo
+    enddo
     do igroup=1,ngroups
        if (.not.allocated(pgl(igroup)%iden_processes)) cycle
        allocate(physical_processes(pgl(igroup)%next,&
@@ -122,14 +180,20 @@ contains
             physical_processes(:,1:iident))
        deallocate(physical_processes)
     enddo
+    do iresonance_species=1,size(resonance_species)
+       if (mapped_species(iresonance_species)) call phys_model%set_width(&
+            resonance_species(iresonance_species),nominal_widths(iresonance_species))
+    enddo
   end subroutine apply_final_state_widths_from_loaded_groups
 
   subroutine read_processes_from_file(filename)
     implicit none
     character(len=80) :: filename
     integer :: iproc,igroup,icheck,nproc_in_group,max_channels,iflav,ndim,process_file_version
+    integer :: nresonances,iresonance,resonance_pdg,nlabels,label,mask,overlap
     real(kind=8) :: idenCOfactor
     integer,dimension(:),allocatable :: process,order,ichans,phase_space_orders,phase_permutation
+    integer,dimension(:),allocatable :: resonance_labels
     integer,dimension(:,:),allocatable :: channel_permutations
     character(len=65536) :: buff
     integer :: i,j,ios
@@ -139,18 +203,27 @@ contains
        write (*,*) 'Could not read the process-file header'
        stop 1
     endif
-    process_file_version=1
     read(buff,*,iostat=ios) next,nproc_unique,process_file_version
     if (ios.ne.0) then
-       process_file_version=1
-       read(buff,*,iostat=ios) next,nproc_unique
-       if (ios.ne.0) then
-          write (*,*) 'Malformed process-file header'
-          stop 1
-       endif
+       write (*,*) 'Malformed process-file header'
+       stop 1
     endif
-    if (process_file_version.lt.1 .or. process_file_version.gt.2) then
-       write (*,*) 'Unsupported process-file version',process_file_version
+    if (process_file_version.ne.3) then
+       write (*,*) 'Only version-3 process files are supported; regenerate processes.txt'
+       stop 1
+    endif
+    if (next.lt.3 .or. nproc_unique.lt.1) then
+       write (*,*) 'Invalid process-file dimensions',next,nproc_unique
+       stop 1
+    endif
+    read(10,'(a)',iostat=ios) buff
+    if (ios.ne.0 .or. index(adjustl(buff),'# process:').ne.1) then
+       write (*,*) 'Missing process provenance in version-3 process file'
+       stop 1
+    endif
+    read(10,'(a)',iostat=ios) buff
+    if (ios.ne.0 .or. index(adjustl(buff),'# options:').ne.1) then
+       write (*,*) 'Missing process options in version-3 process file'
        stop 1
     endif
     ndim=3*(next-2)-4
@@ -177,11 +250,64 @@ contains
        nprocs=0
        sf_nprocs=0
        allocate(phase_space_orders(1:next))
-       read(10,*) icheck,nproc_in_group,max_channels,phase_space_orders(1:next)
+       read(10,*,iostat=ios) icheck,nproc_in_group,max_channels,phase_space_orders(1:next),nresonances
+       if (ios.ne.0 .or. nproc_in_group.lt.1 .or. max_channels.lt.1 .or.&
+            nresonances.lt.0) then
+          write (*,*) 'Malformed version-3 phase-space group header',igroup
+          stop 1
+       endif
        if (icheck.ne.igroup) then
           write (*,*) 'ERROR in processes file',icheck,igroup
           stop 1
        endif
+       pgl(igroup)%nresonances=nresonances
+       allocate(pgl(igroup)%resonance_pdgs(nresonances))
+       allocate(pgl(igroup)%resonance_masks(nresonances))
+       do iresonance=1,nresonances
+          read(10,'(a)',iostat=ios) buff
+          if (ios.ne.0) then
+             write (*,*) 'Could not read resonance record',igroup,iresonance
+             stop 1
+          endif
+          read(buff,*,iostat=ios) resonance_pdg,nlabels
+          if (ios.ne.0 .or. nlabels.lt.2 .or. nlabels.gt.next-2) then
+             write (*,*) 'Invalid resonance descendant count',igroup,iresonance
+             stop 1
+          endif
+          if (.not.(resonance_pdg.eq.23 .or. abs(resonance_pdg).eq.24 .or.&
+               resonance_pdg.eq.25 .or. abs(resonance_pdg).eq.6)) then
+             write (*,*) 'Unsupported mapped resonance PDG',resonance_pdg
+             stop 1
+          endif
+          allocate(resonance_labels(nlabels))
+          read(buff,*,iostat=ios) resonance_pdg,nlabels,resonance_labels
+          if (ios.ne.0 .or. any(resonance_labels.lt.3) .or.&
+               any(resonance_labels.gt.next)) then
+             write (*,*) 'Invalid resonance descendant labels',igroup,iresonance
+             stop 1
+          endif
+          mask=0
+          do i=1,nlabels
+             label=resonance_labels(i)
+             if (btest(mask,label-1)) then
+                write (*,*) 'Repeated resonance descendant label',igroup,iresonance,label
+                stop 1
+             endif
+             mask=ibset(mask,label-1)
+          enddo
+          do i=1,iresonance-1
+             overlap=iand(mask,pgl(igroup)%resonance_masks(i))
+             if (mask.eq.pgl(igroup)%resonance_masks(i) .or.&
+                  (overlap.ne.0 .and. overlap.ne.mask .and.&
+                  overlap.ne.pgl(igroup)%resonance_masks(i))) then
+                write (*,*) 'Resonance descendants must be distinct and laminar',igroup,iresonance
+                stop 1
+             endif
+          enddo
+          pgl(igroup)%resonance_pdgs(iresonance)=resonance_pdg
+          pgl(igroup)%resonance_masks(iresonance)=mask
+          deallocate(resonance_labels)
+       enddo
        allocate(iden_iproc(nproc_in_group))
        allocate(processes(1:next,nproc_in_group))
        allocate(color_orders(1:next,nproc_in_group))
@@ -210,21 +336,8 @@ contains
                   idenCOfactor,phase_permutation(1:next),&
                   channel_permutations(1:next,1:ichans(0))
              if (ios.ne.0) then
-                if (process_file_version.ge.2) then
-                   write (*,*) 'Malformed version-2 subprocess row; phase-space maps are required'
-                   stop 1
-                endif
-                ! Backward compatibility with process files written before
-                ! per-density external-leg permutations were introduced.
-                read(buff,*,iostat=ios) ichans(0),ichans(1:ichans(0)),process(1:next),order(1:next),idenCOfactor
-                if (ios.ne.0) then
-                   write (*,*) 'Malformed legacy subprocess row'
-                   stop 1
-                endif
-                phase_permutation=[(i,i=1,next)]
-                do i=1,ichans(0)
-                   channel_permutations(1:next,i)=[(j,j=1,next)]
-                enddo
+                write (*,*) 'Malformed version-3 subprocess row; phase-space maps are required'
+                stop 1
              endif
              if (any(ichans(1:ichans(0)).lt.1) .or. any(ichans(1:ichans(0)).gt.ngroups)) then
                 write (*,*) 'Multichannel partner outside the phase-space group range'

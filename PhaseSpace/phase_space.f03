@@ -20,6 +20,9 @@ module phase_space_base
      real(kind=8),dimension(:,:),allocatable :: pp,sqrt_s_min
      real(kind=8),dimension(:),allocatable :: x,invm,invm_min,invm_max,ETmin
      integer(kind=4),dimension(:),allocatable :: order
+     integer(kind=4),dimension(:),allocatable :: resonance_pdgs,resonance_masks
+     real(kind=8),dimension(:),allocatable :: resonance_masses,resonance_widths
+     integer(kind=4) :: nresonances=0
      logical :: t_channel
      logical :: can_invert_momenta=.false.
    contains
@@ -27,6 +30,7 @@ module phase_space_base
      procedure(phase_space_interface_generate_momenta),deferred :: generate_momenta
      procedure(phase_space_interface_compute_x_from_momenta),deferred :: compute_x_from_momenta
      procedure(phase_space_interface_cleanup),deferred :: cleanup
+     procedure :: configure_resonances => phase_space_configure_resonances
   end type phase_space_type
   
   ! Declare the abstract interface for the procedures
@@ -59,6 +63,31 @@ module phase_space_base
      end subroutine phase_space_interface_cleanup
   end interface
 contains
+  subroutine phase_space_configure_resonances(this,nresonances,pdgs,masks,masses,widths)
+    class(phase_space_type),intent(inout) :: this
+    integer(kind=4),intent(in) :: nresonances
+    integer(kind=4),dimension(nresonances),intent(in) :: pdgs,masks
+    real(kind=8),dimension(nresonances),intent(in) :: masses,widths
+    if (allocated(this%resonance_pdgs)) deallocate(this%resonance_pdgs)
+    if (allocated(this%resonance_masks)) deallocate(this%resonance_masks)
+    if (allocated(this%resonance_masses)) deallocate(this%resonance_masses)
+    if (allocated(this%resonance_widths)) deallocate(this%resonance_widths)
+    this%nresonances=nresonances
+    if (nresonances.eq.0) return
+    if (any(masses.le.0d0) .or. any(widths.le.0d0)) then
+       write (*,*) 'A mapped resonance must have positive mass and width',pdgs,masses,widths
+       stop 1
+    endif
+    allocate(this%resonance_pdgs(nresonances))
+    allocate(this%resonance_masks(nresonances))
+    allocate(this%resonance_masses(nresonances))
+    allocate(this%resonance_widths(nresonances))
+    this%resonance_pdgs=pdgs
+    this%resonance_masks=masks
+    this%resonance_masses=masses
+    this%resonance_widths=widths
+  end subroutine phase_space_configure_resonances
+
   subroutine finalize_psv(this)
     type(psv),intent(inout) :: this
     if (allocated(this%p)) deallocate(this%p)

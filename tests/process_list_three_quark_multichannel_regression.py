@@ -38,8 +38,8 @@ def finalized_request(process_string, flavour_scheme, include_three_lines):
         process_list.options.update({
             "include_3qqbar_processes": include_three_lines,
             "include_cc_processes": False,
-            "include_resonance": False,
             "serial": True,
+            "flavour_scheme": flavour_scheme,
         })
         request = process_list.ParseCollision(process_string)
         unique = process_list.GenerateAllUniqueProcs(request)
@@ -311,8 +311,8 @@ class ThreeQuarkLineMultiChannelRegression(unittest.TestCase):
             process_list.options.update({
                 "include_3qqbar_processes": True,
                 "include_cc_processes": False,
-                "include_resonance": False,
                 "serial": True,
+                "flavour_scheme": 5,
             })
             request = process_list.ParseCollision("p p > 4j")
             with mock.patch.object(
@@ -359,8 +359,7 @@ class ThreeQuarkLineMultiChannelRegression(unittest.TestCase):
     def test_serialization_appends_current_and_partner_maps(self):
         proc = ("d~", "u~", "d", "u", "s", "s~", "z")
         finalized_rows(proc)
-        process_list.options["include_resonance"] = False
-        output = process_list.WriteAllProcsIntoList([])
+        output = process_list.WriteAllProcsIntoList()
         self.assertEqual(output[0], "36")
 
         position = 2
@@ -368,7 +367,8 @@ class ThreeQuarkLineMultiChannelRegression(unittest.TestCase):
             header = tuple(int(value) for value in output[position].split())
             self.assertEqual(header[0], group + 1)
             nprocesses = header[1]
-            self.assertEqual(len(header), 3 + len(proc))
+            self.assertEqual(len(header), 4 + len(proc))
+            self.assertEqual(header[-1], 0)
             position += 1
             for _ in range(nprocesses):
                 fields = output[position].split()
@@ -389,13 +389,20 @@ class ThreeQuarkLineMultiChannelRegression(unittest.TestCase):
 
     def test_process_file_header_marks_permutation_metadata(self):
         saved_options = dict(process_list.options)
+        saved_provenance = process_list.process_provenance
         try:
-            process_list.options["include_resonance"] = False
+            process_list.options.update({
+                "flavour_scheme": 5,
+                "include_3qqbar_processes": False,
+                "include_cc_processes": False,
+            })
+            process_list.process_provenance = "p p > 2j"
             header = process_list.WriteUniqueProcsIntoList(
-                [("g", "g", "g", "g")], []
+                [("g", "g", "g", "g")]
             )[0]
-            self.assertEqual(header, "4 1 2")
+            self.assertEqual(header, "4 1 3")
         finally:
+            process_list.process_provenance = saved_provenance
             process_list.options.clear()
             process_list.options.update(saved_options)
 

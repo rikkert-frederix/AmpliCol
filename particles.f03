@@ -6,7 +6,7 @@ module particles
        configured_higgs_width=>higgs_width,ignore_final_state_width_fix
   implicit none
   integer,parameter :: model_particle_capacity = 24
-  integer,parameter :: model_vertex_capacity = 222
+  integer,parameter :: model_vertex_capacity = 240
   private :: append_particle, append_vertex, find_particle_index, particle_property_sign&
        &, weak_coupling, weak_cosine, neutral_gauge_coupling&
        &, charged_current_coupling, particle_species_index&
@@ -526,6 +526,13 @@ contains
     do i=1,3
     call append_vertex(this,l,22,[-(11+(2*i-2)),(11+(2*i-2)),23],z_fermion_coupling(this,-(11+(2*i-2))))
     enddo
+    ! Neutrino-antineutrino and antineutrino-neutrino to Z-boson
+    do i=1,3
+       call append_vertex(this,l,21,[(12+(2*i-2)),-(12+(2*i-2)),23],&
+            z_fermion_coupling(this,12+(2*i-2)))
+       call append_vertex(this,l,22,[-(12+(2*i-2)),(12+(2*i-2)),23],&
+            z_fermion_coupling(this,-(12+(2*i-2))))
+    enddo
     ! charged lepton-lepton to Wboson
     do i=1,3
     call append_vertex(this,l,21,[11+(2*i-2),-(12+(2*i-2)),-24],[charged_current_coupling(),0d0])
@@ -565,6 +572,17 @@ contains
     ! Zboson-antilepton to antilepton vertices
     do i=1,3
        call append_vertex(this,l,24,[23,-(11+(2*i-2)),-(11+(2*i-2))],z_fermion_coupling(this,-(11+(2*i-2))))
+    enddo
+    ! Neutrino-Z and Z-neutrino currents (and their antiparticles)
+    do i=1,3
+       call append_vertex(this,l,10,[(12+(2*i-2)),23,(12+(2*i-2))],&
+            z_fermion_coupling(this,12+(2*i-2)))
+       call append_vertex(this,l,11,[-(12+(2*i-2)),23,-(12+(2*i-2))],&
+            z_fermion_coupling(this,-(12+(2*i-2))))
+       call append_vertex(this,l,23,[23,(12+(2*i-2)),(12+(2*i-2))],&
+            z_fermion_coupling(this,12+(2*i-2)))
+       call append_vertex(this,l,24,[23,-(12+(2*i-2)),-(12+(2*i-2))],&
+            z_fermion_coupling(this,-(12+(2*i-2))))
     enddo
 
     this%nint=l
