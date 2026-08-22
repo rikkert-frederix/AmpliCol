@@ -11,10 +11,10 @@ contains
     ! generate with phase-space jacobian 'jac' using the random
     ! variables 'x' within the channel 'ichan'.
     !
-    ! weight = 1/( J_{ichan}*[ sum_{i=1}^{chans(0)} 1/J_i ] )
+    ! weight = 1/( Jref_{ichan}*[ sum_{i=1}^{chans(0)} 1/Jref_i ] )
     !
-    ! with J_i the combined Jacobian coming from MINT and the
-    ! phase-space.
+    ! with Jref_i the phase-space Jacobian times the fixed reference-grid
+    ! Jacobian.  The live grid Jacobian remains in the generated integrand.
     implicit none
     integer,intent(in) :: ichan,iint
     type(psv),intent(in) :: ps
@@ -22,7 +22,7 @@ contains
     real(kind=8),dimension(0:3,pgl(ichan)%next) :: p_target
     real(kind=8),dimension(pgl(ichan)%nproc),intent(out) :: weight
     integer :: i,iproc,k,a,iproc_first,iproc_last,self_count
-    real(kind=8) :: vol_ichan,vol,denominator
+    real(kind=8) :: vol_ichan,vol,denominator,density_ratio
     weight=0d0
     if (keep_processes_separate) then
        iproc_first=iint
@@ -54,7 +54,18 @@ contains
        return
     endif
     p_target=ps%p
-    call simple_integrator%compute_wgt_from_x(ichan,ps%x,vol_ichan)
+    ! The generated point retains its live-grid Jacobian in the integrand, but
+    ! the multichannel partition is built exclusively from the fixed reference
+    ! grids.  During warm-up the reference follows the live grid.
+    call simple_integrator%compute_reference_wgt_from_x(ichan,ps%x,vol_ichan)
+    if (ps%jac.le.0d0 .or. .not.ieee_is_finite(ps%jac) .or. &
+         vol_ichan.le.0d0 .or. .not.ieee_is_finite(vol_ichan)) then
+       write (*,*) 'Unexpected failure of the current multichannel map',&
+            ichan,ps%jac,vol_ichan
+       write (99,*) 'Unexpected failure of the current multichannel map',&
+            ichan,ps%jac,vol_ichan
+       stop 1
+    endif
     do iproc=iproc_first,iproc_last
        denominator=0d0
        self_count=0
@@ -87,12 +98,25 @@ contains
           ! whole point by a local 1/N weight would not form a partition of
           ! unity across the partner channels.
           if (ps_local%jac.le.0d0 .or. .not.ieee_is_finite(ps_local%jac)) cycle
-          if (any(.not.ieee_is_finite(ps_local%x))) cycle
-          call simple_integrator%compute_wgt_from_x(i,ps_local%x,vol)
+          if (any(.not.ieee_is_finite(ps_local%x(1:pgl(i)%ndim)))) cycle
+          if (any(ps_local%x(1:pgl(i)%ndim).le.0d0) .or. &
+               any(ps_local%x(1:pgl(i)%ndim).ge.1d0)) cycle
+          call simple_integrator%compute_reference_wgt_from_x(i,ps_local%x,vol)
           if (vol.le.0d0 .or. .not.ieee_is_finite(vol)) cycle
-          denominator=denominator+ps%jac*vol_ichan/(ps_local%jac*vol)
+          density_ratio=ps%jac*vol_ichan/(ps_local%jac*vol)
+          if (density_ratio.le.0d0 .or. &
+               .not.ieee_is_finite(density_ratio)) cycle
+          denominator=denominator+density_ratio
        enddo
-       weight(iproc)=1d0/denominator
+       if (denominator.gt.0d0 .and. ieee_is_finite(denominator)) then
+          weight(iproc)=1d0/denominator
+       else
+          write (*,*) 'Unexpected invalid multichannel denominator',&
+               ichan,iproc,denominator
+          write (99,*) 'Unexpected invalid multichannel denominator',&
+               ichan,iproc,denominator
+          stop 1
+       endif
     enddo
   end subroutine compute_multichannel_weight
 

@@ -110,7 +110,7 @@ module simple_integrator_mod
   ! dimension and one or more integral estimates sharing those grids.
   type :: channel
      integer :: ndim,nintegral,current_integral,current_iter&
-          &,number,max_iters,nevts_unw_req,ndim_extra
+          &,number,max_iters,nevts_unw_req,ndim_extra,reference_grid_iter
      integer(kind=8) :: npoints,npoints_iter
      real(kind=8),dimension(2) :: res,unc,res_iter,res2_iter,unc_iter
      real(kind=8) :: overweight
@@ -186,12 +186,14 @@ module simple_integrator_mod
      type(channel),allocatable,dimension(:) :: channels
      ! x and wgt are allocated by get_points and released by fill_points.
    contains
-     procedure,public :: init,get_points,fill_points,compute_wgt_from_x,assign_evnt_wgts
+     procedure,public :: init,get_points,fill_points,compute_wgt_from_x&
+          &,compute_reference_wgt_from_x,assign_evnt_wgts
      procedure,private :: read_all_grids,write_all_grids&
           &,get_channel_and_integral,update_points_requested&
           &,print_results,compute_total_rate,update_nevts_unw_req&
           &,count_unweighted_evnts,init_next_iter&
-          &,get_npoints_nonzero_iter,finalise_iter,update_grids
+          &,get_npoints_nonzero_iter,finalise_iter,update_grids&
+          &,reset_production_accumulators
   end type integrator
   double precision, external :: ran2
   integer,save :: iters_without_evnts,evnt_label=0
@@ -254,6 +256,10 @@ contains
        iters_without_evnts=iters_without_evnts-1
        this%npoints_requested=int(nevts_unw_req/(0.03*2**iters_without_evnts),kind=8)
     enddo
+    ! Always reserve at least one iteration for the stationary production
+    ! estimate.  For a one-iteration run the initial uniform grids are both
+    ! the live and reference grids.
+    iters_without_evnts=min(iters_without_evnts,niters-1)
     this%npoints_requested=max(this%npoints_requested,min_points_per_channel*this%nchannel,&
          min_points_per_integral*maxval(nintegral)*this%nchannel)
     allocate(this%channels(this%nchannel))
@@ -317,6 +323,9 @@ contains
        call this%integrals(i)%init_next_iter(this)
     enddo
     this%current_iter=this%current_iter+1
+    ! The reference grid follows the live grid through warm-up, including the
+    ! grid produced by the final warm-up update, and is fixed thereafter.
+    this%reference_grid_iter=min(this%current_iter,iters_without_evnts+1)
   end subroutine channel_init_next_iter
   
   ! Reset one integral for a new iteration and choose the active f_max estimate.
@@ -502,30 +511,75 @@ contains
     character(len=10) :: time
     character(len=5) :: zone
     character(len=19) :: formatted
+    character(len=22) :: result_kind
     integer(kind=8) :: npoints_nonzero
+    logical :: warmup,production_starts
+    warmup=this%channels(1)%current_iter.le.iters_without_evnts
+    production_starts=warmup .and. &
+         this%channels(1)%current_iter.eq.iters_without_evnts
+    if (warmup) then
+       result_kind='warm-up/current'
+    else
+       result_kind='production/accumulated'
+    endif
     call date_and_time(date, time, zone)
     write(formatted, '(A4,"-",A2,"-",A2," ",A2,":",A2,":",A2)') &
          date(1:4),date(5:6),date(7:8),time(1:2),time(3:4),time(5:6)
     call this%get_npoints_nonzero_iter(npoints_nonzero)
     write (*,*) ''
-    write (*,'(a,x,i4,x,a,x,i10,x,a)') &
-         'iteration',this%channels(1)%current_iter,'(',npoints_nonzero, &
-         'points) '//trim(formatted)//' :'
+    write (*,'(a,x,i4,x,a,x,a,x,i10,x,a)') &
+         'iteration',this%channels(1)%current_iter,'['//trim(result_kind)//']',&
+         '(',npoints_nonzero,'points) '//trim(formatted)//' :'
     write (99,*) ''
-    write (99,'(a,x,i4,x,a,x,i10,x,a)') &
-         'iteration',this%channels(1)%current_iter,'(',npoints_nonzero, &
-         'points) '//trim(formatted)//' :'
+    write (99,'(a,x,i4,x,a,x,a,x,i10,x,a)') &
+         'iteration',this%channels(1)%current_iter,'['//trim(result_kind)//']',&
+         '(',npoints_nonzero,'points) '//trim(formatted)//' :'
     call this%compute_total_rate()
-    call this%count_unweighted_evnts()
+    if (.not.warmup) call this%count_unweighted_evnts()
     call this%print_results()
     call this%update_grids()
     call this%init_next_iter()
+    if (production_starts) then
+       ! Use the final warm-up estimate once to distribute production work and
+       ! event targets, then discard all non-stationary rate samples.
+       call this%update_nevts_unw_req()
+       call this%reset_production_accumulators()
+    endif
     if (all(this%channels%evgen_done)) done=.true.
     if (turn_off_evnt_generation .and. this%res(1).gt.0d0 .and. &
          this%unc(1)/this%res(1).lt.1d0/(sqrt(dble(this%nevts_unw_req))*required_accuracy_factor)) done=.true.
     if (all(this%channels%done)) done=.true.
     call flush(99)
   end subroutine finalise_iter
+
+  ! Discard warm-up rate samples at the boundary to production.  Grid training
+  ! and maximum-weight information deliberately remain untouched.
+  subroutine reset_production_accumulators(this)
+    implicit none
+    class(integrator),intent(inout) :: this
+    integer :: i,j
+    this%res=0d0
+    this%unc=0d0
+    do i=1,this%nchannel
+       this%channels(i)%res=0d0
+       this%channels(i)%unc=0d0
+       this%channels(i)%res_iter=0d0
+       this%channels(i)%res2_iter=0d0
+       this%channels(i)%unc_iter=0d0
+       this%channels(i)%npoints=0_8
+       do j=1,this%channels(i)%nintegral
+          this%channels(i)%integrals(j)%res=0d0
+          this%channels(i)%integrals(j)%unc=0d0
+          this%channels(i)%integrals(j)%res_iter=0d0
+          this%channels(i)%integrals(j)%res2_iter=0d0
+          this%channels(i)%integrals(j)%unc_iter=0d0
+          this%channels(i)%integrals(j)%accum=0d0
+          this%channels(i)%integrals(j)%accum2=0d0
+          this%channels(i)%integrals(j)%npoints=0_8
+          this%channels(i)%integrals(j)%npoints_nonzero_total=0_8
+       enddo
+    enddo
+  end subroutine reset_production_accumulators
 
   ! Update all active channel grids after an iteration has been finalised.
   subroutine update_grids(this)
@@ -568,6 +622,7 @@ contains
     implicit none
     class(integrator),intent(inout) :: this
     integer :: i
+    if (this%channels(1)%current_iter.le.iters_without_evnts) return
     call this%update_nevts_unw_req
     do i=1,this%nchannel
        call this%channels(i)%check_gen_evnts()
@@ -643,11 +698,26 @@ contains
   subroutine compute_total_rate(this)
     implicit none
     class(integrator),intent(inout) :: this
-    integer :: i
+    integer :: i,j
+    logical :: warmup
+    warmup=this%channels(1)%current_iter.le.iters_without_evnts
     do i=1,this%nchannel
        if (.not.this%channels(i)%evgen_done) then
           call this%channels(i)%update_result_iter()
-          call this%channels(i)%combine_iters()
+          if (warmup) then
+             ! Keep warm-up estimates iteration-local.  These values are used
+             ! only for diagnostics and to allocate the next iteration.
+             this%channels(i)%res=this%channels(i)%res_iter
+             this%channels(i)%unc=this%channels(i)%unc_iter
+             do j=1,this%channels(i)%nintegral
+                this%channels(i)%integrals(j)%res=&
+                     this%channels(i)%integrals(j)%res_iter
+                this%channels(i)%integrals(j)%unc=&
+                     this%channels(i)%integrals(j)%unc_iter
+             enddo
+          else
+             call this%channels(i)%combine_iters()
+          endif
        endif
     enddo
     do i=1,2
@@ -662,23 +732,33 @@ contains
     class(integrator),intent(inout) :: this
     integer :: i
     real(kind=8) :: rel_unc
+    logical :: warmup
+    character(len=40) :: label_abs,label_signed
+    warmup=this%channels(1)%current_iter.le.iters_without_evnts
     do i=1,this%nchannel
        if (.not. this%channels(i)%evgen_done) call this%channels(i)%print_result_iter()
-       call this%channels(i)%print_combined_result()
+       if (.not.warmup) call this%channels(i)%print_combined_result()
     enddo
     if (this%res(1).gt.0d0) then
        rel_unc=this%unc(1)/this%res(1)*100d0
     else
        rel_unc=0d0
     endif
+    if (warmup) then
+       label_abs='Integral ABS (warm-up/current):'
+       label_signed='Integral     (warm-up/current):'
+    else
+       label_abs='Integral ABS (production/accumulated):'
+       label_signed='Integral     (production/accumulated):'
+    endif
     write(*,'(4x,a,1x,e12.6,1x,a,1x,e10.4,1x,a,f8.4,1x,a)') &
-         'Integral ABS (accum):',this%res(1),'+/-',this%unc(1),'(',rel_unc,'%)'
+         trim(label_abs),this%res(1),'+/-',this%unc(1),'(',rel_unc,'%)'
     write(*,'(4x,a,1x,e12.6,1x,a,1x,e10.4,1x,a,f8.4,1x,a)') &
-         'Integral     (accum):',this%res(2),'+/-',this%unc(2),'(',rel_unc,'%)'
+         trim(label_signed),this%res(2),'+/-',this%unc(2),'(',rel_unc,'%)'
     write(99,'(4x,a,1x,e12.6,1x,a,1x,e10.4,1x,a,f8.4,1x,a)') &
-         'Integral ABS (accum):',this%res(1),'+/-',this%unc(1),'(',rel_unc,'%)'
+         trim(label_abs),this%res(1),'+/-',this%unc(1),'(',rel_unc,'%)'
     write(99,'(4x,a,1x,e12.6,1x,a,1x,e10.4,1x,a,f8.4,1x,a)') &
-         'Integral     (accum):',this%res(2),'+/-',this%unc(2),'(',rel_unc,'%)'
+         trim(label_signed),this%res(2),'+/-',this%unc(2),'(',rel_unc,'%)'
     call flush()
   end subroutine print_results
   
@@ -761,6 +841,7 @@ contains
     class(channel),intent(inout) :: this
     integer :: i,j
     logical :: done
+    if (this%current_iter.le.iters_without_evnts) return
     do i=1,this%nintegral
        call this%integrals(i)%compute_fmax(this)
        if (this%integrals(i)%nevts_unw_req.eq.0) then
@@ -1023,9 +1104,9 @@ contains
        rel_unc=0d0
     endif
     write(99,'(4x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,f7.3,1x,a)') &
-         this%number,'channel ABS (accum):',this%res(1),'+/-',this%unc(1),'(',rel_unc,'%)'
+         this%number,'channel ABS (production/accumulated):',this%res(1),'+/-',this%unc(1),'(',rel_unc,'%)'
     write(99,'(4x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,f7.3,1x,a)') &
-         this%number,'channel     (accum):',this%res(2),'+/-',this%unc(2),'(',rel_unc,'%)'
+         this%number,'channel     (production/accumulated):',this%res(2),'+/-',this%unc(2),'(',rel_unc,'%)'
     do i=1,this%nintegral
        this%integrals(i)%npoints_nonzero_total=this%integrals(i)%npoints_nonzero_total+this%integrals(i)%npoints_nonzero
        if (this%integrals(i)%nevts_unw_gen.ge.this%integrals(i)%nevts_unw_req) then
@@ -1055,15 +1136,23 @@ contains
     implicit none
     class(channel),intent(inout) :: this
     real(kind=8) :: rel_unc
+    character(len=40) :: label_abs,label_signed
     if (this%res_iter(1).gt.0d0) then
        rel_unc=this%unc_iter(1)/this%res_iter(1)*100d0
     else
        rel_unc=0d0
     endif
+    if (this%current_iter.le.iters_without_evnts) then
+       label_abs='channel ABS (warm-up/current):'
+       label_signed='channel     (warm-up/current):'
+    else
+       label_abs='channel ABS (production/current):'
+       label_signed='channel     (production/current):'
+    endif
     write(99,'(4x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,f7.3,1x,a)') &
-         this%number,'channel ABS:',this%res_iter(1),'+/-',this%unc_iter(1),'(',rel_unc,'%)'
+         this%number,trim(label_abs),this%res_iter(1),'+/-',this%unc_iter(1),'(',rel_unc,'%)'
     write(99,'(4x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,f7.3,1x,a)') &
-         this%number,'channel    :',this%res_iter(2),'+/-',this%unc_iter(2),'(',rel_unc,'%)'
+         this%number,trim(label_signed),this%res_iter(2),'+/-',this%unc_iter(2),'(',rel_unc,'%)'
   end subroutine channel_print_result_iter
 
   ! Combine all integral estimates inside one channel.
@@ -1228,7 +1317,8 @@ contains
        this%evnt_list(this%nevnt_in_list)%iter=this%current_iter
        this%evnt_list(this%nevnt_in_list)%label=evnt_label
        this%nevts_unw_gen=this%nevts_unw_gen+1
-       if (this%nevts_unw_gen.gt.1.5d0*this%nevts_unw_req) enough=.true.
+       if (this%nevts_unw_req.gt.0 .and. &
+            this%nevts_unw_gen.gt.1.5d0*this%nevts_unw_req) enough=.true.
     endif
   end subroutine check_write_evnt
 
@@ -1451,6 +1541,19 @@ contains
     real(kind=8),intent(out) :: wgt
     call this%channels(ichan)%recompute_wgt_from_x(this%channels(ichan)%current_iter,x,wgt)
   end subroutine compute_wgt_from_x
+
+  ! Public helper used by multichannel partitioning.  During warm-up this is
+  ! the live grid; in production it is the snapshot made at the warm-up
+  ! boundary, independent of subsequent live-grid adaptation.
+  subroutine compute_reference_wgt_from_x(this,ichan,x,wgt)
+    implicit none
+    class(integrator),intent(inout) :: this
+    integer,intent(in) :: ichan
+    real(kind=8),dimension(this%channels(ichan)%ndim),intent(in) :: x
+    real(kind=8),intent(out) :: wgt
+    call this%channels(ichan)%recompute_wgt_from_x(&
+         this%channels(ichan)%reference_grid_iter,x,wgt)
+  end subroutine compute_reference_wgt_from_x
   
   ! Placeholder for future grid restart support.
   subroutine read_all_grids(this)

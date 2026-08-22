@@ -3,6 +3,8 @@
 .PHONY: test_matrix_elements test_fermi_statistics test_mixed_spinors \
 	test_three_quark_line_reweight test_three_quark_line_multichannel \
 	test_run_parameters test_command_line_parser test_resonance_phase_space \
+	test_simple_integrator_multichannel \
+	test_resonance_multichannel_end_to_end \
 	test_process_list_resonances test_flavour_scheme_yukawa \
 	test_flavour_scheme_end_to_end \
 	update_matrix_cases update_matrix_goldens
@@ -131,6 +133,9 @@ FILES_M_TEST_RUN_PARAMETERS = run_parameters.o particles.o run_parameters_regres
 
 FILES_M_TEST_COMMAND_LINE = command_line_parser.o command_line_parser_regression.o
 
+FILES_M_TEST_SIMPLE_INTEGRATOR = helper_modules.o simple_integrator.o \
+	simple_integrator_multichannel_regression.o
+
 FILES_M_TEST_RESONANCE_PS = phase_space.o LUPdecompose.o phase_space_gen23.o \
 	run_parameters.o resonance_phase_space_regression.o
 
@@ -169,6 +174,9 @@ run_parameters_regression: $(FILES_M_TEST_RUN_PARAMETERS)
 command_line_parser_regression: $(FILES_M_TEST_COMMAND_LINE)
 	$(FC) $(FFLAGS) -o $@ $(FILES_M_TEST_COMMAND_LINE)
 
+simple_integrator_multichannel_regression: $(FILES_M_TEST_SIMPLE_INTEGRATOR)
+	$(FC) $(FFLAGS) -o $@ $(FILES_M_TEST_SIMPLE_INTEGRATOR)
+
 resonance_phase_space_regression: $(FILES_M_TEST_RESONANCE_PS)
 	$(FC) $(FFLAGS) -o $@ $(FILES_M_TEST_RESONANCE_PS)
 
@@ -196,8 +204,12 @@ run_parameters_regression.o: tests/run_parameters_regression.f03 run_parameters.
 command_line_parser_regression.o: tests/command_line_parser_regression.f03 command_line_parser.o
 	$(FC) $(FFLAGS) -c -I. $< -o $@
 
+simple_integrator_multichannel_regression.o: \
+		tests/simple_integrator_multichannel_regression.f03 simple_integrator.o
+	$(FC) $(FFLAGS) -fno-finite-math-only -c -I. -ISimpleIntegrator $< -o $@
+
 resonance_phase_space_regression.o: tests/resonance_phase_space_regression.f03 phase_space_gen23.o
-	$(FC) $(FFLAGS) -c -I. -IPhaseSpace $< -o $@
+	$(FC) $(FFLAGS) -fno-finite-math-only -c -I. -IPhaseSpace $< -o $@
 
 tests/matrix_elements/cases.dat: tests/matrix_elements/generate_matrix_cases.py process_list.py
 	$(PYTHON) tests/matrix_elements/generate_matrix_cases.py --output $@
@@ -262,6 +274,18 @@ test_command_line_parser: command_line_parser_regression
 test_resonance_phase_space: resonance_phase_space_regression
 	./resonance_phase_space_regression
 
+test_simple_integrator_multichannel: simple_integrator_multichannel_regression
+	./simple_integrator_multichannel_regression
+
+test_resonance_multichannel_end_to_end: amplicol_generate amplicol_reweight \
+		tests/resonance_multichannel_end_to_end_regression.py process_list.py \
+		tests/input/resonance_multichannel_run_card.dat
+	$(PYTHON) tests/resonance_multichannel_end_to_end_regression.py \
+		--generator $(CURDIR)/amplicol_generate \
+		--reweighter $(CURDIR)/amplicol_reweight \
+		--process-list $(CURDIR)/process_list.py \
+		--input-card $(CURDIR)/tests/input/resonance_multichannel_run_card.dat
+
 update_matrix_cases: tests/matrix_elements/generate_matrix_cases.py process_list.py
 	$(PYTHON) tests/matrix_elements/generate_matrix_cases.py --output tests/matrix_elements/cases.dat
 
@@ -273,7 +297,8 @@ update_matrix_goldens: matrix_element_regression update_matrix_cases
 # ----------------------------------------------------------------------
 
 amplicol_reweight.o : amplitude_QCD.o math_functions.o particles.o run_parameters.o
-phase_space_gen23.o : phase_space.o LUPdecompose.o particles.o run_parameters.o
+phase_space_gen23.o : PhaseSpace/phase_space_gen23.f03 phase_space.o LUPdecompose.o particles.o run_parameters.o
+	$(FC) $(FFLAGS) -fno-finite-math-only -c -I. -IPhaseSpace $< -o $@
 phase_space_genpt.o : phase_space.o particles.o
 phase_space.o : particles.o
 phase_space_haag.o : phase_space.o

@@ -40,8 +40,7 @@ contains
              imax=k
           endif
        enddo
-       if (maxA .lt. tol) then
-          write (99,*) 'LUP decomposition failure: matrix is degenerate'
+       if (maxA .le. tol) then
           success=.false.
           return
        endif

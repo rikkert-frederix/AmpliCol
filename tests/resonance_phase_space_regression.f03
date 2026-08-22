@@ -1,13 +1,31 @@
 program resonance_phase_space_regression
   use phase_space_base
   use phase_space_gen23_mod
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite,ieee_value,ieee_quiet_nan
+  use, intrinsic :: ieee_exceptions, only: ieee_set_flag,ieee_all
   implicit none
+  character(len=256) :: log_line
+  integer :: io_status
 
-  open(unit=99,status='scratch',action='write')
+  open(unit=99,status='scratch',action='readwrite')
   call check_breit_wigner_quantile()
   call check_massive_quark_external_legs()
   call check_root_breit_wigner_with_pdfs()
   call check_nested_and_disjoint_inverse()
+  call check_alternative_maps_across_scales()
+  call check_singular_boundary_and_nonfinite_rejection()
+  call ieee_set_flag(ieee_all,.false.)
+  rewind(99)
+  do
+     read(99,'(a)',iostat=io_status) log_line
+     if (io_status.ne.0) exit
+     if (index(log_line,'LUP decomposition').gt.0 .or. &
+          index(log_line,'Warning: gram4').gt.0) then
+        write (*,*) 'Inverse-map failure produced determinant warning spam:',&
+             trim(log_line)
+        stop 1
+     endif
+  enddo
   close(99)
   write (*,*) 'resonance phase-space regression: PASS'
 
@@ -239,6 +257,174 @@ contains
     call check_inverse(original_x,forward_jac,inverse_point)
     call phase_space%cleanup()
   end subroutine check_nested_and_disjoint_inverse
+
+  subroutine check_alternative_maps_across_scales()
+    type(phase_space_gen23) :: generating_map,alternative_map
+    type(psv) :: point,alternative_point
+    integer,parameter :: n=6
+    integer,dimension(n) :: generating_order,alternative_order
+    real(kind=8),dimension(n) :: masses,pt_cut,rap_cut
+    real(kind=8),dimension(n,n) :: dr_cut,sqrt_s_min
+    real(kind=8),dimension(3) :: energy_scales
+    real(kind=8),allocatable,dimension(:) :: original_x
+    integer :: iscale,i,attempt,nforward
+    real(kind=8) :: last_alternative_jac
+    logical :: found
+
+    generating_order=[1,3,4,5,6,2]
+    alternative_order=[1,4,3,5,6,2]
+    energy_scales=[7d0,700d0,7d5]
+    masses=0d0
+    pt_cut=0d0
+    rap_cut=0d0
+    dr_cut=0d0
+    sqrt_s_min=0d0
+    do iscale=1,size(energy_scales)
+       call generating_map%init(energy_scales(iscale),n,masses,&
+            generating_order,pt_cut,rap_cut,dr_cut,sqrt_s_min,.false.,.false.)
+       call alternative_map%init(energy_scales(iscale),n,masses,&
+            alternative_order,pt_cut,rap_cut,dr_cut,sqrt_s_min,.false.,.false.)
+       allocate(point%x(generating_map%ndim+generating_map%ndim_extra))
+       allocate(point%p(0:3,n))
+       allocate(original_x(size(point%x)))
+       allocate(alternative_point%x(alternative_map%ndim+&
+            alternative_map%ndim_extra))
+       allocate(alternative_point%p(0:3,n))
+       found=.false.
+       nforward=0
+       last_alternative_jac=-999d0
+       do attempt=1,400
+          do i=1,size(original_x)
+             original_x(i)=0.05d0+0.9d0*&
+                  modulo(dble(37*attempt+53*i),997d0)/997d0
+          enddo
+          point%x=original_x
+          call generating_map%generate_momenta(point)
+          if (point%jac.le.0d0 .or. .not.ieee_is_finite(point%jac)) cycle
+          nforward=nforward+1
+          alternative_point%x=0.5d0
+          alternative_point%p=point%p
+          call alternative_map%compute_x_from_momenta(alternative_point)
+          last_alternative_jac=alternative_point%jac
+          if (alternative_point%jac.le.0d0 .or. &
+               .not.ieee_is_finite(alternative_point%jac)) cycle
+          if (any(.not.ieee_is_finite(&
+               alternative_point%x(1:alternative_map%ndim)))) cycle
+          found=.true.
+          exit
+       enddo
+       if (.not.found) then
+          write (*,*) 'Could not find a valid alternative-map inversion at scale',&
+               energy_scales(iscale),nforward,last_alternative_jac
+          stop 1
+       endif
+       deallocate(original_x)
+       deallocate(point%x,point%p)
+       deallocate(alternative_point%x,alternative_point%p)
+       call generating_map%cleanup()
+       call alternative_map%cleanup()
+    enddo
+  end subroutine check_alternative_maps_across_scales
+
+  subroutine check_singular_boundary_and_nonfinite_rejection()
+    type(phase_space_gen23) :: phase_space
+    type(psv) :: point,inverse_point
+    integer,parameter :: n=6
+    integer,dimension(n) :: order
+    real(kind=8),dimension(n) :: masses,pt_cut,rap_cut
+    real(kind=8),dimension(n,n) :: dr_cut,sqrt_s_min
+    integer :: i,attempt
+    logical :: found
+
+    order=[1,3,4,5,6,2]
+    masses=0d0
+    pt_cut=0d0
+    rap_cut=0d0
+    dr_cut=0d0
+    sqrt_s_min=0d0
+    call phase_space%init(700d0,n,masses,order,pt_cut,rap_cut,dr_cut,&
+         sqrt_s_min,.false.,.false.)
+    allocate(point%x(phase_space%ndim+phase_space%ndim_extra))
+    allocate(point%p(0:3,n))
+    found=.false.
+    do attempt=1,400
+       do i=1,size(point%x)
+          point%x(i)=0.05d0+0.9d0*&
+               modulo(dble(37*attempt+53*i),997d0)/997d0
+       enddo
+       call phase_space%generate_momenta(point)
+       if (point%jac.gt.0d0 .and. ieee_is_finite(point%jac)) then
+          found=.true.
+          exit
+       endif
+    enddo
+    if (.not.found) then
+       write (*,*) 'Forward point for inverse rejection tests failed',point%jac
+       stop 1
+    endif
+    allocate(inverse_point%x(phase_space%ndim+phase_space%ndim_extra))
+    allocate(inverse_point%p(0:3,n))
+
+    ! Collapse one external leg into its neighbour while preserving total
+    ! momentum.  This is a kinematic boundary/singular configuration and must
+    ! simply have zero density in an alternative map.
+    inverse_point%x=0.5d0
+    inverse_point%p=point%p
+    inverse_point%p(:,4)=inverse_point%p(:,4)+inverse_point%p(:,3)
+    inverse_point%p(:,3)=0d0
+    call phase_space%compute_x_from_momenta(inverse_point)
+    if (inverse_point%jac.ge.0d0 .or. .not.ieee_is_finite(inverse_point%jac)) then
+       write (*,*) 'Singular inverse point was not rejected cleanly',&
+            inverse_point%jac
+       stop 1
+    endif
+
+    inverse_point%x=0.5d0
+    inverse_point%p=point%p
+    inverse_point%p(0,3)=ieee_value(0d0,ieee_quiet_nan)
+    call phase_space%compute_x_from_momenta(inverse_point)
+    if (inverse_point%jac.ge.0d0 .or. .not.ieee_is_finite(inverse_point%jac)) then
+       write (*,*) 'Non-finite inverse point was not rejected cleanly',&
+            inverse_point%jac
+       stop 1
+    endif
+    call phase_space%cleanup()
+
+    call check_exact_random_boundary()
+  end subroutine check_singular_boundary_and_nonfinite_rejection
+
+  subroutine check_exact_random_boundary()
+    type(phase_space_gen23) :: phase_space
+    type(psv) :: inverse_point
+    integer,parameter :: n=4
+    integer,dimension(n) :: order
+    real(kind=8),dimension(n) :: masses,pt_cut,rap_cut
+    real(kind=8),dimension(n,n) :: dr_cut,sqrt_s_min
+
+    order=[1,3,2,4]
+    masses=0d0
+    pt_cut=0d0
+    rap_cut=0d0
+    dr_cut=0d0
+    sqrt_s_min=0d0
+    call phase_space%init(700d0,n,masses,order,pt_cut,rap_cut,dr_cut,&
+         sqrt_s_min,.false.,.false.)
+    allocate(inverse_point%x(phase_space%ndim+phase_space%ndim_extra))
+    allocate(inverse_point%p(0:3,n))
+    inverse_point%x=0.5d0
+    inverse_point%p=0d0
+    inverse_point%p(:,1)=[350d0,0d0,0d0,350d0]
+    inverse_point%p(:,2)=[350d0,0d0,0d0,-350d0]
+    inverse_point%p(:,3)=inverse_point%p(:,1)
+    inverse_point%p(:,4)=inverse_point%p(:,2)
+    call phase_space%compute_x_from_momenta(inverse_point)
+    if (inverse_point%jac.ge.0d0 .or. .not.ieee_is_finite(inverse_point%jac)) then
+       write (*,*) 'Exact random-variable boundary was not rejected cleanly',&
+            inverse_point%jac
+       stop 1
+    endif
+    call phase_space%cleanup()
+  end subroutine check_exact_random_boundary
 
   subroutine check_inverse(expected_x,forward_jac,inverse_point)
     real(kind=8),dimension(:),intent(in) :: expected_x

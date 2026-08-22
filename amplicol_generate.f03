@@ -487,7 +487,7 @@ contains
        write (*,*) pgl(ichan)%ps(1)%jac
        stop 1
     endif
-    if (pgl(ichan)%ps(1)%jac.lt.0d0) then
+    if (pgl(ichan)%ps(1)%jac.le.0d0) then
        val=0d0
        if (time_physics) then
           call cpu_time(tAfter)

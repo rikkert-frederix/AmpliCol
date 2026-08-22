@@ -1,6 +1,7 @@
 module phase_space_gen23_mod
   !  use common
   use phase_space_base
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   type,extends(phase_space_type),public :: phase_space_gen23
      integer(kind=4),dimension(:),allocatable :: decay_left,decay_right
@@ -23,6 +24,7 @@ module phase_space_gen23_mod
   real(kind=8),parameter :: vtiny=1d-12,tiny=1d-8
   real(kind=8),parameter :: pi=3.1415926535897932d0
   logical,parameter :: use_t_channel_at_start=.true.
+  logical,save :: forward_failure_reported=.false.
 
 contains
   subroutine gen23_init(this,sqrts,n,m,o,pt_cut,rap_cut,dr_cut,sqrt_s_min,t_chan,include_pdf,flat)
@@ -508,6 +510,15 @@ contains
     else
        call generate_momenta
     endif
+    if (.not.ieee_is_finite(ps%jac) .or. any(.not.ieee_is_finite(pp))) then
+       if (.not.forward_failure_reported) then
+          write (99,*) 'error, unexpected failure of a forward phase-space map',&
+               ps%jac
+          forward_failure_reported=.true.
+       endif
+       ps%jac=-99d0
+       return
+    endif
     if (debug) call test_momenta
 
     do i=1,this%next
@@ -859,6 +870,7 @@ contains
       real(kind=8) :: tmin,tmax,smin,smax,phi1,phi2,gram4,V,sqrtGG,shatmin,shatmax,y,base,root,phi_rot,&
            etminir,etmini
       real(kind=8),dimension(0:3) :: pi1,pr1,ppibir1,pi2,pr2,ppibir2,piir,pib,pim1,piirr,pim1r
+      logical :: s_limits_ok,gram_ok
       if (popcnt(i).gt.1) then
          if (popcnt(ir).gt.1) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
          call shatminmax(this,i,ir,shatmin,shatmax,invm)
@@ -917,7 +929,16 @@ contains
          write (*,*) '23- ir+ib',ir+ib,invm(ir+ib),tmin,tmax
       endif
       call sminmax(invm(ir+i),invm(ir),invm(ir+i+im1),invm(ir+i+ib)&
-           &,invm(ir+ib),invm(ir+ib+i+im1),invm(i),invm(im1),smin,smax,V,sqrtGG)
+           &,invm(ir+ib),invm(ir+ib+i+im1),invm(i),invm(im1),smin,smax,V,sqrtGG,s_limits_ok)
+      if (.not.s_limits_ok) then
+         if (.not.forward_failure_reported) then
+            write (99,*) 'error, unexpected failure of a forward phase-space map',&
+                 ' (invariant limits)',i,ir
+            forward_failure_reported=.true.
+         endif
+         ps%jac=-4d0
+         return
+      endif
       if (this%invm_min(i+im1).ne.0d0) smin=max(smin,this%invm_min(i+im1))
       if (this%invm_max(i+im1).ne.0d0) smax=min(smax,this%invm_max(i+im1))
       if (im1.gt.2) then
@@ -1005,9 +1026,13 @@ contains
       ! Compute the Jacobian
       gram4=gram_determinant4(invm(ir+i+im1),invm(ir+ib),invm(ir+i+ib)&
            &,invm(ir+i),invm(i+im1),invm(ir+ib+i+im1),invm(ir),invm(i)&
-           &,invm(im1))
-      if (gram4.ge.0d0) then 
-         write (99,*) 'error, gram4 greater than or equal to zero',gram4,i,ir
+           &,invm(im1),gram_ok)
+      if (.not.gram_ok .or. gram4.ge.0d0) then
+         if (.not.forward_failure_reported) then
+            write (99,*) 'error, unexpected failure of a forward phase-space map',&
+                 ' (Gram determinant)',gram4,i,ir
+            forward_failure_reported=.true.
+         endif
          ps%jac=-5d0
          return
       endif
@@ -1337,6 +1362,10 @@ contains
     if (debug) write (*,*) 'computing x from momenta'
     ps%jac=1d0
     ix=0
+    if (any(.not.ieee_is_finite(ps%p))) then
+       ps%jac=-1d0
+       return
+    endif
     
     call setup_PS_cuts(this)
        
@@ -1358,6 +1387,14 @@ contains
     else
        call compute_x_final_state
     endif
+    if (.not.ieee_is_finite(ps%jac) .or. ps%jac.le.0d0 .or. &
+         ix.ne.this%ndim) then
+       ps%jac=-1d0
+       return
+    endif
+    if (any(.not.ieee_is_finite(ps%x(1:this%ndim))) .or. &
+         any(ps%x(1:this%ndim).le.0d0) .or. &
+         any(ps%x(1:this%ndim).ge.1d0)) ps%jac=-1d0
 
   contains
     subroutine compute_x_initial_state
@@ -1750,6 +1787,7 @@ contains
       real(kind=8) :: tmin,tmax,smin,smax,phi1,phi2,gram4,V,sqrtGG,shatmin,shatmax,y,base,root,phi_rot,&
            etminir,etmini
       real(kind=8),dimension(0:3) :: pi1,pr1,ppibir1,pi2,pr2,ppibir2,piir,pib,pim1,piirr,pim1r
+      logical :: s_limits_ok,gram_ok,phi_ok
       if (popcnt(i).gt.1) then
          if (popcnt(ir).gt.1) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
          call shatminmax(this,i,ir,shatmin,shatmax,invm)
@@ -1804,7 +1842,11 @@ contains
       call var_to_random(invm(ir+ib),ip,tmin,tmax,ps%x(ix),ps%jac)
       if (ps%jac.lt.0d0) return
       call sminmax(invm(ir+i),invm(ir),invm(ir+i+im1),invm(ir+i+ib)&
-           &,invm(ir+ib),invm(ir+ib+i+im1),invm(i),invm(im1),smin,smax,V,sqrtGG)
+           &,invm(ir+ib),invm(ir+ib+i+im1),invm(i),invm(im1),smin,smax,V,sqrtGG,s_limits_ok)
+      if (.not.s_limits_ok) then
+         ps%jac=-1d0
+         return
+      endif
       if (this%invm_min(i+im1).ne.0d0) smin=max(smin,this%invm_min(i+im1))
       if (this%invm_max(i+im1).ne.0d0) smax=min(smax,this%invm_max(i+im1))
       if (im1.gt.2) then
@@ -1843,12 +1885,20 @@ contains
       ! (if it's only one). If both pass, simply pick one of the two at random
       ! with a flat prior.
       phi1=getphifroms(invm(i+im1),invm(ir+i),invm(ir),invm(ir+i+im1)&
-           &,invm(ir+i+ib),V,sqrtGG,1d0)
+           &,invm(ir+i+ib),V,sqrtGG,1d0,phi_ok)
+      if (.not.phi_ok) then
+         ps%jac=-1d0
+         return
+      endif
       call gentcms2(pp(0,ib),pp(0,ib+ir+i),pp(0,ib+ir+i+im1),invm(ir+ib),phi1 &
            &,sqrt(invm(i)),sqrt(invm(ir)),pi1,ppibir1)
       pr1(0:3)=pp(0:3,ir+i)-pi1(0:3)
       phi2=getphifroms(invm(i+im1),invm(ir+i),invm(ir),invm(ir+i+im1)&
-           &,invm(ir+i+ib),V,sqrtGG,0d0)
+           &,invm(ir+i+ib),V,sqrtGG,0d0,phi_ok)
+      if (.not.phi_ok) then
+         ps%jac=-1d0
+         return
+      endif
       call gentcms2(pp(0,ib),pp(0,ib+ir+i),pp(0,ib+ir+i+im1),invm(ir+ib),phi2 &
            &,sqrt(invm(i)),sqrt(invm(ir)),pi2,ppibir2)
       pr2(0:3)=pp(0:3,ir+i)-pi2(0:3)
@@ -1863,9 +1913,8 @@ contains
       ! Compute the Jacobian
       gram4=gram_determinant4(invm(ir+i+im1),invm(ir+ib),invm(ir+i+ib)&
            &,invm(ir+i),invm(i+im1),invm(ir+ib+i+im1),invm(ir),invm(i)&
-           &,invm(im1))
-      if (gram4.ge.0d0) then 
-         write (99,*) 'Warning: gram4 greater than or equal to zero in gen23_one_step_inverse',gram4,i,ir
+           &,invm(im1),gram_ok)
+      if (.not.gram_ok .or. gram4.ge.0d0) then
          ps%jac=-5d0
          return
       endif
@@ -1900,11 +1949,9 @@ contains
       integer(kind=4) :: ip
       real(kind=8) :: varmin,varmax,power,var
       if (variable.lt.var_min) then
-         write (99,*) 'Warning: variable not between varmin and varmax',var_min,variable,var_max
          jac=-1d0
          return
       elseif (variable.gt.var_max) then
-         write (99,*) 'Warning: variable not between varmin and varmax',var_min,variable,var_max
          jac=-1d0
          return
       endif
@@ -1914,9 +1961,6 @@ contains
          varmax=-var_min
          var=-variable
       elseif (var_min.lt.0d0 .and. var_max.gt.0d0 .and. (abs(power_in).gt.vtiny)) then
-         write (99,*) 'ERROR: in var_to_random one of the two limits '/&
-              &/'is negative',var_min,var_max,power_in,jac,x
-         write (99,*) 'using flat transformation'
          power=0d0
          varmin=var_min
          varmax=var_max
@@ -2047,7 +2091,7 @@ contains
     pb(3)=p(3)*cosh(yb)-p(0)*sinh(yb)
   end subroutine boostz
   real(kind=8) function gram_determinant4(shat_ip1,t_im1,t_i,shat_i,s_i,t_ip1&
-       &,shat_im1,m_i_2,m_ip1_2)
+       &,shat_im1,m_i_2,m_ip1_2,success)
     ! Computes the 4x4 Gram determinant (with m_a=0) as in eq.(B6), of
     ! E.~Byckling and K.~Kajantie, ``Reductions of the phase-space
     ! integral in terms of simpler processes,'' Phys. Rev. 187 (1969),
@@ -2055,22 +2099,34 @@ contains
     use LUPdecomposition
     implicit none
     real(kind=8) :: shat_ip1,t_im1,t_i,shat_i,s_i,t_ip1,shat_im1,m_i_2,m_ip1_2
+    logical,intent(out) :: success
     integer(kind=4),parameter :: n=4
     real(kind=8),dimension(n,n) :: a
     integer(kind=4),dimension(0:n) :: p
-    real(kind=8),parameter :: tol=1d-8
-    real(kind=8) :: deter
-    logical :: success
+    real(kind=8),parameter :: relative_tol=64d0*epsilon(1d0)
+    real(kind=8) :: deter,matrix_scale
     a(1:4,1)=(/ 0d0           , t_im1-shat_im1 , t_i-shat_i       , t_ip1-shat_ip1    /)
     a(1:4,2)=(/ t_im1-shat_im1, 2d0*t_im1      , t_i+t_im1-m_i_2  , t_im1+t_ip1-s_i   /)
     a(1:4,3)=(/ t_i-shat_i    , t_i+t_im1-m_i_2, 2d0*t_i          , t_i+t_ip1-m_ip1_2 /)
     a(1:4,4)=(/ t_ip1-shat_ip1, t_im1+t_ip1-s_i, t_i+t_ip1-m_ip1_2, 2d0*t_ip1         /)
-    call LUPdecompose(a,n,tol,p,success)
+    matrix_scale=maxval(abs(a))
+    if (.not.ieee_is_finite(matrix_scale) .or. matrix_scale.le.0d0 .or. &
+         any(.not.ieee_is_finite(a))) then
+       success=.false.
+       gram_determinant4=0d0
+       return
+    endif
+    a=a/matrix_scale
+    call LUPdecompose(a,n,relative_tol,p,success)
     if (success) then
        call LUPdeterminant(a,p,n,deter)
-       gram_determinant4=deter/16d0
+       gram_determinant4=deter*matrix_scale**n/16d0
+       if (.not.ieee_is_finite(gram_determinant4)) then
+          success=.false.
+          gram_determinant4=0d0
+       endif
     else
-       gram_determinant4=1d0
+       gram_determinant4=0d0
     endif
   end function gram_determinant4
   subroutine tminmax(X,Z,U,V,W,tmin,tmax)
@@ -2090,8 +2146,6 @@ contains
     real(kind=8) ::  t1,t2,yr
     yr = lambda(x,u,v)*lambda(x,w,z)
     if (yr.le.0d0) then
-       write (99,*) 'No allowed range for t: tmin=tmax',yr
-!!$       stop 1
        yr=0d0
     endif
     yr=sqrt(yr)
@@ -2100,28 +2154,40 @@ contains
     tmin = min(t1,t2)
     tmax = max(t1,t2)
   end subroutine tminmax
-  real(kind=8) function computeV(shat_i,shat_im1,shat_ip1,t_i,t_im1,t_ip1,m_i_2,m_ip1_2)
+  real(kind=8) function computeV(shat_i,shat_im1,shat_ip1,t_i,t_im1,t_ip1,m_i_2,m_ip1_2,success)
     ! Computes the determinant of V (with m_a=0) based on eq.(11) of
     ! E.~Byckling and K.~Kajantie, ``Reductions of the phase-space
     ! integral in terms of simpler processes,'' Phys. Rev. 187 (1969),
     ! 2008-2016, doi:10.1103/PhysRev.187.2008
     use LUPdecomposition
     real(kind=8),intent(in) :: shat_i,shat_im1,shat_ip1,t_i,t_im1,t_ip1,m_i_2,m_ip1_2
-    real(kind=8) :: deter
+    logical,intent(out) :: success
+    real(kind=8) :: deter,matrix_scale
     integer(kind=4),parameter :: n=3
     real(kind=8),dimension(n,n) :: a
     integer(kind=4),dimension(0:n) :: p
-    real(kind=8),parameter :: tol=1d-8
-    logical :: success
+    real(kind=8),parameter :: relative_tol=64d0*epsilon(1d0)
     a(1:3,1)=(/2d0*shat_i             , shat_i-t_i    , shat_i+shat_im1-m_i_2/)
     a(1:3,2)=(/shat_i-t_i             , 0d0           , shat_im1-t_im1       /)
     a(1:3,3)=(/shat_ip1+shat_i-m_ip1_2, shat_ip1-t_ip1, 0d0                  /)
-    call LUPdecompose(a,n,tol,p,success)
+    matrix_scale=maxval(abs(a))
+    if (.not.ieee_is_finite(matrix_scale) .or. matrix_scale.le.0d0 .or. &
+         any(.not.ieee_is_finite(a))) then
+       success=.false.
+       computeV=0d0
+       return
+    endif
+    a=a/matrix_scale
+    call LUPdecompose(a,n,relative_tol,p,success)
     if (success) then
        call LUPdeterminant(a,p,n,deter)
-       computeV=-deter/8d0
+       computeV=-deter*matrix_scale**n/8d0
+       if (.not.ieee_is_finite(computeV)) then
+          success=.false.
+          computeV=0d0
+       endif
     else
-       computeV=-99d99
+       computeV=0d0
     endif
   end function computeV
   real(kind=8) function G(x,y,z,u,v,w)
@@ -2136,7 +2202,7 @@ contains
          & -x*y*(z+u+v+w)-z*u*(x+y+v+w)-v*w*(x+y+z+u)
   end function G
   subroutine sminmax(shat_i,shat_im1,shat_ip1,t_i,t_im1,t_ip1,m_i_2&
-       &,m_ip1_2,smin,smax,V,sqrtGG)
+       &,m_ip1_2,smin,smax,V,sqrtGG,success)
     ! Determines the integration limits for s_i, as determined by
     ! setting cos(phi) to +/- 1 in eq.(11) of E.~Byckling and
     ! K.~Kajantie, ``Reductions of the phase-space integral in terms
@@ -2145,21 +2211,38 @@ contains
     implicit none
     real(kind=8),intent(in) :: shat_i,shat_im1,shat_ip1,t_i,t_im1,t_ip1,m_i_2,m_ip1_2
     real(kind=8),intent(out) :: smin,smax,V,sqrtGG
-    real(kind=8) :: GG,s1,s2
-    V=computeV(shat_i,shat_im1,shat_ip1,t_i,t_im1,t_ip1,m_i_2,m_ip1_2)
+    logical,intent(out) :: success
+    real(kind=8) :: GG,s1,s2,lambda_value
+    V=computeV(shat_i,shat_im1,shat_ip1,t_i,t_im1,t_ip1,m_i_2,m_ip1_2,success)
+    if (.not.success) then
+       smin=0d0
+       smax=0d0
+       sqrtGG=0d0
+       return
+    endif
     GG = G(t_i  , shat_ip1, shat_i  , t_ip1, m_ip1_2, 0d0) &
         *G(t_im1, shat_i  , shat_im1, t_i  , m_i_2  , 0d0)
-    if (GG.le.0d0 .or. V.eq.-99d99) then
-!!$       write (*,*) 'No allowed range for s: smin=smax',GG,V
-!!$       stop 1
-       GG=0d0
-       V=0d0
+    lambda_value=lambda(shat_i,t_i,0d0)
+    if (.not.ieee_is_finite(GG) .or. GG.le.0d0 .or. &
+         .not.ieee_is_finite(lambda_value) .or. lambda_value.le.0d0) then
+       success=.false.
+       smin=0d0
+       smax=0d0
+       sqrtGG=0d0
+       return
     endif
     sqrtGG=sqrt(GG)
-    s1=shat_im1+shat_ip1+2d0/lambda(shat_i,t_i,0d0) * (4d0*V + sqrtGG)
-    s2=shat_im1+shat_ip1+2d0/lambda(shat_i,t_i,0d0) * (4d0*V - sqrtGG)
+    s1=shat_im1+shat_ip1+2d0/lambda_value * (4d0*V + sqrtGG)
+    s2=shat_im1+shat_ip1+2d0/lambda_value * (4d0*V - sqrtGG)
+    if (.not.ieee_is_finite(s1) .or. .not.ieee_is_finite(s2)) then
+       success=.false.
+       smin=0d0
+       smax=0d0
+       return
+    endif
     smin=min(s1,s2)
     smax=max(s1,s2)
+    success=.true.
   end subroutine sminmax
   subroutine rotxxx(p,q,prot)
     ! This subroutine performs the spacial rotation of a four-momentum.
@@ -2303,7 +2386,7 @@ contains
     p1(0:3)=ptot(0:3)-pii(0:3)
     pr(0:3)=pb(0:3)-p1(0:3)         !Return remainder of momentum
   end subroutine gentcms2
-  real(kind=8) function getphifroms(si,shat_i,shat_im1,shat_ip1,t_i,V,sqrtGG,ran)
+  real(kind=8) function getphifroms(si,shat_i,shat_im1,shat_ip1,t_i,V,sqrtGG,ran,success)
     ! Given s_i (invariant mass of p_i and p_i+1, it transforms it
     ! into phi_i. Note that there are two possibilities for phi: need
     ! to pick one at random.
@@ -2312,10 +2395,16 @@ contains
     ! Phys. Rev. 187 (1969), 2008-2016, doi:10.1103/PhysRev.187.2008
     implicit none
     real(kind=8),intent(in) :: si,shat_i,shat_im1,shat_ip1,t_i,V,sqrtGG,ran
+    logical,intent(out),optional :: success
     real(kind=8) :: cosphi,x
+    if (present(success)) success=.true.
     cosphi=((si-shat_im1-shat_ip1)*0.5d0*lambda(shat_i,t_i,0d0)-4d0*V)/sqrtGG
-    if (cosphi.lt.-1d0 .or. cosphi.gt.1d0) then
-       write (99,*) 'WARNING cosphi does not have a reasonable value',cosphi
+    if (.not.ieee_is_finite(cosphi) .or. cosphi.lt.-1d0 .or. cosphi.gt.1d0) then
+       if (present(success)) then
+          success=.false.
+       else
+          write (99,*) 'ERROR: invalid forward 2-to-3 azimuth cosine',cosphi
+       endif
        getphifroms=0d0
        return
     endif
