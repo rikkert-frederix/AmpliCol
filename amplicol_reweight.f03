@@ -21,7 +21,7 @@ module rw_events
   character(len=1024) :: generator_string
   integer :: event_metadata_version=0
   logical :: unwgt,keep_comments,event_heft_enabled=.false.
-  real(kind=8) :: event_heft_kappa=1d0,event_heft_vev=246.21965d0
+  real(kind=8) :: event_heft_kappa=1d0,event_heft_vev=0d0
 end module rw_events
 module timings
   implicit none

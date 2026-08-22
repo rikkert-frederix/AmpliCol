@@ -85,11 +85,17 @@ The implemented CP-even HEFT interaction is
   L_HEFT = -g_H/4 h G^a_(mu nu) G^(a,mu nu),
   g_H(mu_R) = heft_kappa alpha_s(mu_R)/(3 pi heft_vev).
 
-'heft_kappa' and 'heft_vev' are set in run_card.dat. Amplitudes contain
-at most one HEFT insertion. Ordinary zero-insertion SM Higgs diagrams
-are retained in the same coefficient, so their interference with HEFT
-is included. The Hgg, Hggg and Hgggg interactions all use the event's
-renormalisation-scale alpha_s and per-vertex coupling powers.
+'heft_kappa' is set in run_card.dat. The on-shell weak-mixing sine and vev are
+dependent parameters,
+
+  sw = sqrt(1 - w_mass^2/z_mass^2),
+  heft_vev = 2 w_mass sw/sqrt(4 pi alphaEW),
+
+and cannot be set independently. Amplitudes contain at most one HEFT
+insertion. Ordinary zero-insertion SM Higgs diagrams are retained in the same
+coefficient, so their interference with HEFT is included. The Hgg, Hggg and
+Hgggg interactions all use the event's renormalisation-scale alpha_s and
+per-vertex coupling powers.
 
 By default, the effective width of every massive particle requested in
 the physical final state is set to zero globally before any subprocess

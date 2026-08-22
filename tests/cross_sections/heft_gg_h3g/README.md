@@ -14,10 +14,10 @@ deviation.
   all three gluon transverse momenta;
 - `pT(g) > 30 GeV`, `|eta(g)| < 6`, and `DeltaR(g,g) > 0.4`, with no dijet
   mass cut;
-- `mH = 125 GeV`, zero external-Higgs width, `kappa = 1`, and
-  `v = 246.21965 GeV`;
+- `mH = 125 GeV`, zero external-Higgs width, `kappa = 1`, and the derived
+  `sin(theta_W) = 0.4714302554840721` and `v = 246.2184581014718 GeV`;
 - strict HEFT in MadGraph's bundled `hgg_plugin`: `MT = 1e9 GeV` removes its
-  finite-top expansion, and `Gf = 1.16637870752389e-5` gives the same vev.
+  finite-top expansion, and `Gf = 1.16639000000326e-5` gives the same vev.
 
 Both programs update the Wilson coefficient event by event.  AmpliCol sets
 `gH = alpha_s(mu_R)/(3*pi*v)` from LHAPDF before evaluating each amplitude and
@@ -55,8 +55,8 @@ MG5_gg_h3g/bin/madevent generate_events matched_h3g_events \
 
 The MadGraph card helper is intentionally run before `generate_events` and
 sets `nevents = 10000`.  A standalone `madevent survey` is insufficient for
-this comparison: in the recorded runs its central values were 0.60825 pb with
-strategy 1 and 0.60954 pb with strategy 2, while refinement during event
+this comparison: in the recorded runs its central values were 0.60826 pb with
+strategy 1 and 0.60955 pb with strategy 2, while refinement during event
 generation produced the stable result below.
 
 Summarize and statistically compare the two generated samples with:
@@ -74,14 +74,17 @@ Summarize and statistically compare the two generated samples with:
 
 | Process | AmpliCol events | AmpliCol full colour [pb] | MadGraph events | MadGraph [pb] | Pull |
 |---|---:|---:|---:|---:|---:|
-| `g g > h g` | 100,000 | 7.1687596 +/- 0.0037256 | 10,000 | 7.1520900 +/- 0.013948 | 1.15 |
-| `g g > h g g` | 100,000 | 2.2226286 +/- 0.0017198 | 10,000 | 2.2220265 +/- 0.010004 | 0.06 |
-| `g g > h g g g` | 100,000 | 0.6164088 +/- 0.0005207 | 10,000 | 0.6145841 +/- 0.0019338 | 0.91 |
+| `g g > h g` | 100,000 | 7.1688290 +/- 0.0037256 | 10,000 | 7.1521592 +/- 0.013948 | 1.15 |
+| `g g > h g g` | 100,000 | 2.2226501 +/- 0.0017198 | 10,000 | 2.2220480 +/- 0.010004 | 0.06 |
+| `g g > h g g g` | 100,000 | 0.6164148 +/- 0.0005207 | 10,000 | 0.6145901 +/- 0.0019338 | 0.91 |
 
 The primary AmpliCol leading-colour result is
-`0.69334138 +/- 0.00058565 pb`; full-colour reweighting changes every event by
+`0.69334809 +/- 0.00058566 pb`; full-colour reweighting changes every event by
 `8/9` for this pure five-gluon colour structure.  An independent second
-100,000-event seed gave `0.6167513 +/- 0.0006849 pb`.  Their inverse-variance
-combination is `0.6165342 +/- 0.0004145 pb`, also consistent with MadGraph
+100,000-event seed gave `0.6167573 +/- 0.0006849 pb`.  Their inverse-variance
+combination is `0.6165402 +/- 0.0004145 pb`, also consistent with MadGraph
 (`0.99 sigma`).  Large LHE files are retained as run artifacts rather than
-committed to the repository.
+committed to the repository.  The samples were generated with the earlier
+independent value `v = 246.21965 GeV`; the recorded rates have been normalized
+to the now-derived vev by the exact common factor
+`(246.21965/246.2184581014718)^2 = 1.00000968166`.

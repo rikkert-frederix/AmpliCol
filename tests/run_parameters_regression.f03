@@ -6,12 +6,22 @@ program run_parameters_regression
   type(physics_model) :: model,ignore_model,higgs_model
   integer,dimension(n,nprocs) :: processes
   integer,dimension(n,1) :: higgs_process
-  character(len=256) :: default_card,custom_card,ignore_card
+  character(len=256) :: default_card,custom_card,ignore_card,mode
   integer :: i
   real(kind=dp) :: expected
 
+  if (command_argument_count().eq.2) then
+     call get_command_argument(1,mode)
+     if (trim(mode).eq.'--validate') then
+        call get_command_argument(2,default_card)
+        call read_run_parameters(trim(default_card))
+        write (*,'(a)') 'Run-parameter validation passed'
+        stop
+     endif
+  endif
   if (command_argument_count().ne.3) then
      write (*,*) 'Usage: run_parameters_regression DEFAULT CUSTOM IGNORE'
+     write (*,*) '   or: run_parameters_regression --validate CARD'
      stop 1
   endif
   call get_command_argument(1,default_card)
@@ -28,13 +38,15 @@ program run_parameters_regression
   call assert_close(w_width,2.0476d0,'default W width')
   call assert_close(higgs_mass,125d0,'default Higgs mass')
   call assert_close(higgs_width,0.0063823389999999999d0,'default Higgs width')
-  call assert_close(sw,0.47143025548407230d0,'default weak mixing sine')
+  expected=sqrt(1d0-(w_mass/z_mass)**2)
+  call assert_close(sw,expected,'derived default weak mixing sine')
   call assert_close(alphaS_MZ,0.119d0,'default alphaS')
   call assert_close(alphaEW,0.007546771114d0,'default alphaEW')
   call assert_close(heft_kappa,1d0,'default HEFT kappa')
-  call assert_close(heft_vev,246.21965d0,'default HEFT vev')
+  expected=2d0*w_mass*sw/sqrt(4d0*acos(-1d0)*alphaEW)
+  call assert_close(heft_vev,expected,'derived default HEFT vev')
   call assert_close(heft_coupling(0.118d0),&
-       0.118d0/(3d0*acos(-1d0)*246.21965d0),'default HEFT coupling')
+       0.118d0/(3d0*acos(-1d0)*expected),'default HEFT coupling')
   call assert_close(sqrts,14000d0,'default collider energy')
   if (scale_choice.ne.2 .or. (.not.include_pdf) .or. (.not.use_lhapdf) .or.&
        lhapdf_member.ne.0 .or. pdf_lhaid.ne.244800) then
@@ -55,13 +67,15 @@ program run_parameters_regression
   call assert_close(w_width,2.7d0,'custom W width')
   call assert_close(higgs_mass,126d0,'custom Higgs mass')
   call assert_close(higgs_width,0.02d0,'custom Higgs width')
-  call assert_close(sw,0.5d0,'custom weak mixing sine')
+  expected=sqrt(1d0-(w_mass/z_mass)**2)
+  call assert_close(sw,expected,'derived custom weak mixing sine')
   call assert_close(alphaS_MZ,0.121d0,'custom alphaS')
   call assert_close(alphaEW,0.008d0,'custom alphaEW')
   call assert_close(heft_kappa,1.7d0,'custom HEFT kappa')
-  call assert_close(heft_vev,251d0,'custom HEFT vev')
+  expected=2d0*w_mass*sw/sqrt(4d0*acos(-1d0)*alphaEW)
+  call assert_close(heft_vev,expected,'derived custom HEFT vev')
   call assert_close(heft_coupling(0.121d0),&
-       1.7d0*0.121d0/(3d0*acos(-1d0)*251d0),'custom HEFT coupling')
+       1.7d0*0.121d0/(3d0*acos(-1d0)*expected),'custom HEFT coupling')
   call assert_close(sqrts,13000d0,'custom collider energy')
   if (scale_choice.ne.5 .or. include_pdf .or. use_lhapdf .or.&
        lhapdf_member.ne.3 .or. pdf_lhaid.ne.999999) then
@@ -97,7 +111,7 @@ program run_parameters_regression
   call assert_close(model%get_mass(6),181d0,'model top mass')
   call assert_close(model%get_width(-6),2.3d0,'model anti-top width')
   call assert_close(model%get_mass(24),81d0,'model W mass')
-  expected=81d0/0.5d0
+  expected=w_mass/sw
   do i=1,model%nint
      if (model%vertex_list(i)%type.eq.17 .and.&
           all(model%vertex_list(i)%particles(1:3).eq.[24,-24,25])) then

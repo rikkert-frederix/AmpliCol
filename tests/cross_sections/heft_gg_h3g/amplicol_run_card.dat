@@ -9,11 +9,9 @@
   higgs_mass = 125d0
   higgs_width= 0.0063823389999999999d0
 
-  sw         = 0.47143025548407230d0
   alphaS_MZ  = 0.119d0
   alphaEW    = 0.007546771114d0
   heft_kappa = 1d0
-  heft_vev   = 246.21965d0
 
   sqrts       = 14000d0
   scale_choice= 2

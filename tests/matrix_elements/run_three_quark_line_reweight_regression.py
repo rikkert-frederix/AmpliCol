@@ -13,7 +13,7 @@ from pathlib import Path
 
 EVENT = """<LesHouchesEvents version="3.0">
 <header>
-6 0 2 0 1.0 246.21965
+6 0 2 0 1.0 0.0
 <nevents> 1 </nevents>
 </header>
 <init>

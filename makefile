@@ -232,9 +232,12 @@ test_three_quark_line_multichannel: \
 		process_list.py tests/process_list_three_quark_multichannel_regression.py
 	$(PYTHON) tests/process_list_three_quark_multichannel_regression.py
 
-test_run_parameters: run_parameters_regression
+test_run_parameters: run_parameters_regression \
+		tests/input/invalid_electroweak_run_card.dat
 	./run_parameters_regression run_card.dat tests/input/custom_run_card.dat \
 		tests/input/ignore_final_width_run_card.dat
+	! ./run_parameters_regression --validate \
+		tests/input/invalid_electroweak_run_card.dat
 
 test_command_line_parser: command_line_parser_regression
 	test "$$($(CURDIR)/command_line_parser_regression)" = "F"

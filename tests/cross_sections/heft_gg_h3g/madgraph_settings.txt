@@ -31,6 +31,7 @@ set run_card iseed -260830
 set run_card use_syst False
 set param_card mass 25 125
 set param_card mass 6 1e9
+set param_card mass 23 91.188
 set param_card sminputs 1 132.506999999629
-set param_card sminputs 2 1.16637870752389e-5
+set param_card sminputs 2 1.16639000000326e-5
 set param_card decay 25 0

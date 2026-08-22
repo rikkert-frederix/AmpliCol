@@ -11,9 +11,16 @@ import tempfile
 from pathlib import Path
 
 
-EVENT = """<LesHouchesEvents version="3.0">
+W_MASS = 80.419002445756163
+Z_MASS = 91.188
+ALPHA_EW = 0.007546771114
+SW = math.sqrt(1.0 - (W_MASS / Z_MASS) ** 2)
+HEFT_VEV = 2.0 * W_MASS * SW / math.sqrt(4.0 * math.pi * ALPHA_EW)
+
+
+EVENT = f"""<LesHouchesEvents version="3.0">
 <header>
-4 0 2 1 1.0 246.21965
+4 0 2 1 1.0 {HEFT_VEV:.17g}
 <nevents> 1 </nevents>
 <seed>   31 </seed>
 </header>
@@ -71,7 +78,9 @@ def main() -> None:
         if header is None or header.groups()[:4] != ("4", "0", "2", "1"):
             raise AssertionError("HEFT metadata was not preserved in reweighted LHE")
         kappa, vev = (float(value) for value in header.groups()[4:])
-        if not math.isclose(kappa, 1.0) or not math.isclose(vev, 246.21965):
+        if not math.isclose(kappa, 1.0) or not math.isclose(
+            vev, HEFT_VEV, rel_tol=1.0e-14
+        ):
             raise AssertionError("HEFT Wilson-coefficient metadata changed")
 
         expansion = re.search(

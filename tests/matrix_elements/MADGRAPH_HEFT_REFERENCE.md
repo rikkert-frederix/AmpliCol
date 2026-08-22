@@ -41,8 +41,9 @@ g_H = 4.43558169905496733e-5
 ```
 
 For this point the plugin was put in the strict heavy-top limit with
-`MT = 1e9 GeV`, and `Gf = 1.16637870752389e-5` was chosen so that its
-electroweak vev is exactly AmpliCol's `246.21965 GeV`.
+`MT = 1e9 GeV`. The fixed reference used `Gf = 1.16637870752389e-5`, giving
+the plugin `v = 246.21965 GeV`; AmpliCol is passed the resulting `g_H`
+explicitly, so this Feynman-rule comparison is independent of the runtime vev.
 
 Here positive `g_H` denotes the coefficient in AmpliCol's convention
 `L_HEFT = -g_H h G^a_(mu nu) G^(a,mu nu)/4`. At the inputs above, the bundled
