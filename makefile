@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := amplicol_generate
 
-.PHONY: test_matrix_elements test_fermi_statistics test_mixed_spinors \
+.PHONY: test_matrix_elements test_fermi_statistics test_mixed_spinors test_heft \
 	test_three_quark_line_reweight test_three_quark_line_multichannel \
 	test_run_parameters test_command_line_parser update_matrix_cases update_matrix_goldens
 
@@ -121,6 +121,9 @@ FILES_M_TEST_THREE_QUARK = bitset.o color_algebra.o math_functions.o feynmanrule
 FILES_M_TEST_MIXED_SPINOR = bitset.o color_algebra.o math_functions.o feynmanrules.o run_parameters.o particles.o \
 	amplitude_QCD.o mixed_spinor_regression.o
 
+FILES_M_TEST_HEFT = bitset.o color_algebra.o math_functions.o feynmanrules.o run_parameters.o particles.o \
+	amplitude_QCD.o heft_regression.o
+
 FILES_M_TEST_RUN_PARAMETERS = run_parameters.o particles.o run_parameters_regression.o
 
 FILES_M_TEST_COMMAND_LINE = command_line_parser.o command_line_parser_regression.o
@@ -151,6 +154,9 @@ three_quark_line_reweight_regression: $(FILES_M_TEST_THREE_QUARK)
 mixed_spinor_regression: $(FILES_M_TEST_MIXED_SPINOR)
 	$(FC) $(FFLAGS) -o $@ $(FILES_M_TEST_MIXED_SPINOR)
 
+heft_regression: $(FILES_M_TEST_HEFT)
+	$(FC) $(FFLAGS) -o $@ $(FILES_M_TEST_HEFT)
+
 run_parameters_regression: $(FILES_M_TEST_RUN_PARAMETERS)
 	$(FC) $(FFLAGS) -o $@ $(FILES_M_TEST_RUN_PARAMETERS)
 
@@ -169,6 +175,9 @@ three_quark_line_reweight_regression.o: \
 
 mixed_spinor_regression.o: \
 		tests/matrix_elements/mixed_spinor_regression.f03 amplitude_QCD.o particles.o
+	$(FC) $(FFLAGS) -c -I. $< -o $@
+
+heft_regression.o: tests/matrix_elements/heft_regression.f03 amplitude_QCD.o particles.o
 	$(FC) $(FFLAGS) -c -I. $< -o $@
 
 run_parameters_regression.o: tests/run_parameters_regression.f03 run_parameters.o particles.o
@@ -201,6 +210,17 @@ test_mixed_spinors: mixed_spinor_regression \
 	$(PYTHON) tests/matrix_elements/run_mixed_spinor_library_regression.py \
 		--generator $(CURDIR)/mixed_spinor_regression \
 		--compiler "$(FC)" --fflags="$(FFLAGS)"
+
+test_heft: heft_regression amplicol_reweight \
+		tests/matrix_elements/run_heft_library_regression.py \
+		tests/matrix_elements/heft_library_regression.f03 \
+		tests/matrix_elements/run_heft_reweight_regression.py
+	./heft_regression
+	$(PYTHON) tests/matrix_elements/run_heft_library_regression.py \
+		--generator $(CURDIR)/heft_regression \
+		--compiler "$(FC)" --fflags="$(FFLAGS)"
+	$(PYTHON) tests/matrix_elements/run_heft_reweight_regression.py \
+		--reweighter $(CURDIR)/amplicol_reweight --input-card $(CURDIR)/run_card.dat
 
 test_three_quark_line_reweight: three_quark_line_reweight_regression \
 		amplicol_reweight tests/matrix_elements/run_three_quark_line_reweight_regression.py

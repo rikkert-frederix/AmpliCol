@@ -236,7 +236,8 @@ contains
     LPRUP=1
     write(11,'(a)') '<LesHouchesEvents version="3.0">'
     write(11,'(a)') '<header>'
-    write(11,*) pgl_unique%next,pgl_unique%nproc
+    write(11,*) pgl_unique%next,pgl_unique%nproc,2,&
+         merge(1,0,phys_model%heft_enabled),heft_kappa,heft_vev
     do iproc=1,pgl_unique%nproc
        write(11,*) unique_map(iproc),unique_map_value(iproc),pgl_unique%processes(1:pgl_unique%next,iproc)
     enddo

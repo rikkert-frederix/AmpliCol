@@ -1,0 +1,10 @@
+import model sm
+add model hgg_plugin
+
+generate g g > h g
+output MG5_gg_hg
+
+generate g g > h g g
+output MG5_gg_h2g
+
+quit

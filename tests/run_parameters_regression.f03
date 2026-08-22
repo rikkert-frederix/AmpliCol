@@ -31,6 +31,10 @@ program run_parameters_regression
   call assert_close(sw,0.47143025548407230d0,'default weak mixing sine')
   call assert_close(alphaS_MZ,0.119d0,'default alphaS')
   call assert_close(alphaEW,0.007546771114d0,'default alphaEW')
+  call assert_close(heft_kappa,1d0,'default HEFT kappa')
+  call assert_close(heft_vev,246.21965d0,'default HEFT vev')
+  call assert_close(heft_coupling(0.118d0),&
+       0.118d0/(3d0*acos(-1d0)*246.21965d0),'default HEFT coupling')
   call assert_close(sqrts,14000d0,'default collider energy')
   if (scale_choice.ne.2 .or. (.not.include_pdf) .or. (.not.use_lhapdf) .or.&
        lhapdf_member.ne.0 .or. pdf_lhaid.ne.244800) then
@@ -54,6 +58,10 @@ program run_parameters_regression
   call assert_close(sw,0.5d0,'custom weak mixing sine')
   call assert_close(alphaS_MZ,0.121d0,'custom alphaS')
   call assert_close(alphaEW,0.008d0,'custom alphaEW')
+  call assert_close(heft_kappa,1.7d0,'custom HEFT kappa')
+  call assert_close(heft_vev,251d0,'custom HEFT vev')
+  call assert_close(heft_coupling(0.121d0),&
+       1.7d0*0.121d0/(3d0*acos(-1d0)*251d0),'custom HEFT coupling')
   call assert_close(sqrts,13000d0,'custom collider energy')
   if (scale_choice.ne.5 .or. include_pdf .or. use_lhapdf .or.&
        lhapdf_member.ne.3 .or. pdf_lhaid.ne.999999) then
@@ -92,7 +100,7 @@ program run_parameters_regression
   expected=81d0/0.5d0
   do i=1,model%nint
      if (model%vertex_list(i)%type.eq.17 .and.&
-          all(model%vertex_list(i)%particles.eq.[24,-24,25])) then
+          all(model%vertex_list(i)%particles(1:3).eq.[24,-24,25])) then
         call assert_close(model%vertex_list(i)%coupl(1),expected,&
              'configured HWW coupling')
         exit

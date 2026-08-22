@@ -7,7 +7,7 @@ module amplitude_QCD_mod
   integer(kind=8),parameter :: max_three_line_color_orders=5000_8
   type :: current
      ! if adding variables here, also update the finalize_current and assign_current subroutines
-     integer :: type,bin,n_vert,chirality
+     integer :: type,bin,n_vert,chirality,heft_order
      type(bitset) :: iproc
      integer(kind=16) :: ext_cur
      integer,dimension(:),allocatable :: vertices,order,spin,ext_type
@@ -20,8 +20,9 @@ module amplitude_QCD_mod
   end type current
   type :: interaction
      ! if adding variables here, also update the finalize_interaction and assign_interaction subroutines
-     integer :: type,chirality
-     integer,dimension(2) :: currents
+     integer :: type,chirality,n_inputs
+     integer,dimension(3) :: currents
+     integer,dimension(3) :: coupling_power
      integer,dimension(:),allocatable :: singlet_mv
      complex(kind=8),dimension(:),allocatable :: val_c
      real(kind=8),dimension(2) :: coupl
@@ -45,6 +46,7 @@ module amplitude_QCD_mod
           pp_bin_to_i,pp_i_to_bin,col_index,n_col_vals,iproc_start,n_sing,n_qqbar
      integer,dimension(:,:),allocatable :: perm,curr2amp,i_col_i,processes,&
           same_flavour_sum,same_flavour_sum_operation,three_line_partner_curr2amp
+     integer,dimension(:,:,:),allocatable :: amp_currents,three_line_partner_amp_currents
      integer,dimension(:,:,:),allocatable :: spins,row_index
      logical,dimension(:),allocatable :: include_amp,same_flav
      logical :: lib_created=.false.
@@ -67,9 +69,9 @@ contains
     integer,dimension(:,:,:),allocatable :: order
     type(current),dimension(:),allocatable :: current_list_local
     type(interaction),dimension(:),allocatable :: interaction_list_local
-    integer :: isize,nc,isplit,n1,n2,ic1,ic2,max_cur,max_vert,max_key,ispin,iproc
+    integer :: isize,nc,isplit,n1,n2,n3,ic1,ic2,ic3,max_cur,max_vert,max_key,ispin,iproc
     integer(kind=8),dimension(:),allocatable :: current_dict
-    integer,dimension(:,:),allocatable :: key_to_current
+    integer,dimension(:,:,:),allocatable :: key_to_current
 
     if (imode.eq.1) then
        write (99,*) 'Initialising amplitude for:'
@@ -106,8 +108,8 @@ contains
           stop 1
        endif
        call create_current_dict()
-       allocate(key_to_current(max_key,maskr(this%nprocs)))
-       key_to_current(1:max_key,1:maskr(this%nprocs))=0
+       allocate(key_to_current(max_key,maskr(this%nprocs),0:1))
+       key_to_current(1:max_key,1:maskr(this%nprocs),0:1)=0
     endif
 
     allocate(current_list_local(max_cur))
@@ -149,6 +151,20 @@ contains
                 enddo
              enddo
           enddo
+          if (pm%heft_enabled) then
+             do n1=1,isize-2
+                do n2=1,isize-n1-1
+                   n3=isize-n1-n2
+                   do ic1=this%n_cur_start(n1),this%n_cur_end(n1)
+                      do ic2=this%n_cur_start(n2),this%n_cur_end(n2)
+                         do ic3=this%n_cur_start(n3),this%n_cur_end(n3)
+                            call add_if_allowed_fourvertex()
+                         enddo
+                      enddo
+                   enddo
+                enddo
+             enddo
+          endif
        endif
        this%n_cur_end(isize)=this%n_cur
        if (isize.ge.2) this%n_vert_end(isize)=this%n_vert
@@ -202,6 +218,7 @@ contains
       current_list_local(this%n_cur)%order(1)=iorder
       current_list_local(this%n_cur)%type=ctype
       current_list_local(this%n_cur)%chirality=ichir
+      current_list_local(this%n_cur)%heft_order=0
       current_list_local(this%n_cur)%mass=pm%get_mass(current_list_local(this%n_cur)%type)
       current_list_local(this%n_cur)%width=pm%get_width(current_list_local(this%n_cur)%type)
       allocate(current_list_local(this%n_cur)%ext_type(isize))
@@ -231,9 +248,10 @@ contains
       ! subroutine also sets the include_amp(iamp) to .true. for all
       ! amplitudes
       implicit none
-      integer :: icur,jcur,i,j,iproc
+      integer :: icur,jcur,i,j,iproc,iamp,heft_order,max_candidates
       type(bitset) :: proc
       integer,dimension(:,:),allocatable :: curr2amp
+      integer,dimension(:,:,:),allocatable :: amp_currents
       integer,dimension(n,this%nprocs) :: procs
       do j=1,this%nprocs
          do i=1,n
@@ -244,8 +262,12 @@ contains
             endif
          enddo
       enddo
-      allocate(curr2amp(1:2,1:(this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)*(this%n_cur_end(n)-this%n_cur_start(n)+1)))
+      max_candidates=(this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)*&
+           (this%n_cur_end(n)-this%n_cur_start(n)+1)
+      allocate(curr2amp(1:2,1:max_candidates))
+      allocate(amp_currents(1:2,0:1,1:max_candidates))
       curr2amp=0
+      amp_currents=0
       allocate(this%iproc_start(1:this%nprocs+1))
       this%n_amps=0
       do iproc=1,this%nprocs
@@ -273,21 +295,55 @@ contains
                   ! one process, but it is not equal to process 'iproc'
                   cycle
                endif
-               this%n_amps=this%n_amps+1
-               curr2amp(1,this%n_amps)=icur
-               curr2amp(2,this%n_amps)=jcur
+               heft_order=current_list_local(icur)%heft_order+&
+                    current_list_local(jcur)%heft_order
+               if (heft_order.gt.1) cycle
+
+               ! Coupling-order sectors with the same helicity and colour
+               ! order are terms of one physical amplitude and must interfere.
+               do iamp=this%iproc_start(iproc),this%n_amps
+                  if (current_list_local(curr2amp(1,iamp))%ext_cur.ne.&
+                       current_list_local(icur)%ext_cur) cycle
+                  if (current_list_local(curr2amp(2,iamp))%ext_cur.ne.&
+                       current_list_local(jcur)%ext_cur) cycle
+                  if (any(current_list_local(curr2amp(1,iamp))%order(1:n-1).ne.&
+                       current_list_local(icur)%order(1:n-1))) cycle
+                  if (current_list_local(curr2amp(2,iamp))%order(1).ne.&
+                       current_list_local(jcur)%order(1)) cycle
+                  exit
+               enddo
+               if (iamp.gt.this%n_amps) then
+                  this%n_amps=this%n_amps+1
+                  iamp=this%n_amps
+                  curr2amp(1:2,iamp)=[icur,jcur]
+               endif
+               if (amp_currents(1,heft_order,iamp).ne.0) then
+                  if (any(amp_currents(:,heft_order,iamp).ne.[icur,jcur])) then
+                     write (*,*) 'Duplicate closure in one HEFT sector',iproc,iamp,heft_order
+                     stop 1
+                  endif
+               else
+                  amp_currents(:,heft_order,iamp)=[icur,jcur]
+               endif
             enddo
          enddo
       enddo
 
-      if (use_symmetry .and. this%n_qqbar(1).eq.0 .and. this%imode.eq.2) then
+      if (use_symmetry .and. .not.pm%heft_enabled .and. &
+           this%n_qqbar(1).eq.0 .and. this%imode.eq.2) then
          allocate(this%curr2amp(1:2,1:2*this%n_amps))
          this%curr2amp(1:2,1:this%n_amps)=curr2amp(1:2,1:this%n_amps)
          this%curr2amp(1:2,this%n_amps+1:2*this%n_amps)=curr2amp(1:2,1:this%n_amps)
+         allocate(this%amp_currents(1:2,0:1,1:2*this%n_amps))
+         this%amp_currents(:,:,1:this%n_amps)=amp_currents(:,:,1:this%n_amps)
+         this%amp_currents(:,:,this%n_amps+1:2*this%n_amps)=&
+              amp_currents(:,:,1:this%n_amps)
          this%n_amps=this%n_amps*2
       else
          allocate(this%curr2amp(1:2,1:this%n_amps))
          this%curr2amp(1:2,1:this%n_amps)=curr2amp(1:2,1:this%n_amps)
+         allocate(this%amp_currents(1:2,0:1,1:this%n_amps))
+         this%amp_currents(:,:,1:this%n_amps)=amp_currents(:,:,1:this%n_amps)
       endif
       if (this%imode.eq.3 .and. this%n_amps.ne.1) then
          write (*,*) 'For this%imode==3, there should only be one amplitude',this%n_amps
@@ -326,13 +382,17 @@ contains
     subroutine allocate_and_fill_colour_permutations()
       implicit none
       integer :: iamp,i,iproc,iamp_to_compare
+      logical :: closes_with_heft_higgs
       ! allocate and fill the colour orders in 'this%perm'. These are simply
       ! the orders of the elements in the 'this%current_list' (with size n-1)
       ! together with the final element). Exception: when there are colour
       ! singlets, they will not be part of the this%perm (while they are part
       ! of the elements in the this%current_list.
       allocate(this%perm(1:n-this%n_sing(1),1:this%n_amps))
-      if (pm%is_singlet(this%current_list(this%n_cur_start(n))%type)) then
+      closes_with_heft_higgs=pm%heft_enabled .and. &
+           pm%is_higgs(this%current_list(this%n_cur_start(n))%type)
+      if (pm%is_singlet(this%current_list(this%n_cur_start(n))%type) .and. &
+           .not.closes_with_heft_higgs) then
          write (*,*) 'Final current (that closes the amplitude) cannot be a colour singlet'
          write (*,*) this%current_list(this%n_cur_start(n))%type
          stop 1
@@ -344,9 +404,20 @@ contains
             iamp_to_compare=1
          endif
          do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
-            this%perm(1:n-this%n_sing(1),iamp)=[this%current_list(this%curr2amp(1,iamp))%order(1:n-1-this%n_sing(1)),&
-                 this%current_list(this%curr2amp(2,iamp))%order(1)]
-            if (use_symmetry .and. this%n_qqbar(iproc).eq.0 .and. iamp.gt.this%n_amps/2) then
+            if (closes_with_heft_higgs) then
+               ! The closing Higgs has no colour position. All coloured legs
+               ! are already contained in the other terminal current.
+               this%perm(1:n-this%n_sing(1),iamp)=&
+                    this%current_list(this%curr2amp(1,iamp))%order(&
+                    1:n-this%n_sing(1))
+            else
+               this%perm(1:n-this%n_sing(1),iamp)=[&
+                    this%current_list(this%curr2amp(1,iamp))%order(&
+                    1:n-1-this%n_sing(1)),&
+                    this%current_list(this%curr2amp(2,iamp))%order(1)]
+            endif
+            if (use_symmetry .and. .not.pm%heft_enabled .and. &
+                 this%n_qqbar(iproc).eq.0 .and. iamp.gt.this%n_amps/2) then
                this%perm(1:n-this%n_sing(1),iamp)=[this%current_list(this%curr2amp(1,iamp))%order(n-1-this%n_sing(1):1:-1),&
                     this%current_list(this%curr2amp(2,iamp))%order(1)]
             endif
@@ -379,6 +450,7 @@ contains
       integer,dimension(:),allocatable :: representative,partner
       integer,dimension(:,:),allocatable :: old_curr2amp,old_perm,&
            old_same_flavour_sum,old_same_flavour_sum_operation
+      integer,dimension(:,:,:),allocatable :: old_amp_currents
       logical,dimension(:),allocatable :: old_include_amp
 
       allocate(representative(this%n_amps))
@@ -408,19 +480,24 @@ contains
       endif
 
       allocate(old_curr2amp(2,this%n_amps))
+      allocate(old_amp_currents(2,0:1,this%n_amps))
       allocate(old_perm(size(this%perm,1),this%n_amps))
       allocate(old_include_amp(this%n_amps))
       allocate(old_same_flavour_sum(this%n_amps,2))
       allocate(old_same_flavour_sum_operation(this%n_amps,2))
       old_curr2amp=this%curr2amp
+      old_amp_currents=this%amp_currents
       old_perm=this%perm
       old_include_amp=this%include_amp
       old_same_flavour_sum=this%same_flavour_sum
       old_same_flavour_sum_operation=this%same_flavour_sum_operation
       allocate(this%three_line_partner_curr2amp(2,this%nColOrd))
+      allocate(this%three_line_partner_amp_currents(2,0:1,this%nColOrd))
       this%three_line_partner_curr2amp=0
+      this%three_line_partner_amp_currents=0
       do flow=1,this%nColOrd
          this%curr2amp(:,flow)=old_curr2amp(:,representative(flow))
+         this%amp_currents(:,:,flow)=old_amp_currents(:,:,representative(flow))
          this%perm(:,flow)=old_perm(:,representative(flow))
          this%include_amp(flow)=old_include_amp(representative(flow))
          this%same_flavour_sum(flow,:)=&
@@ -429,6 +506,8 @@ contains
               old_same_flavour_sum_operation(representative(flow),:)
          if (partner(flow).ne.0) then
             this%three_line_partner_curr2amp(:,flow)=old_curr2amp(:,partner(flow))
+            this%three_line_partner_amp_currents(:,:,flow)=&
+                 old_amp_currents(:,:,partner(flow))
          endif
       enddo
       this%n_amps=this%nColOrd
@@ -580,7 +659,10 @@ contains
                if (nq.ge.1) then
                   order(iglu+1,1,iproc)=i
                else
-                  order(iglu,1,iproc)=i
+                  ! Keep a coloured leg in the terminal slot.  Colour
+                  ! singlets have no cyclic-trace position and are stored
+                  ! before the pure-gluon word.
+                  order(nsing+iglu,1,iproc)=i
                endif
             elseif(is_quark_from_order(i,iproc)) then
                iq=iq+1
@@ -601,7 +683,7 @@ contains
                if(nq.ne.0) then
                   order(n-ising,1,iproc)=i
                else
-                  order(nglu+ising,1,iproc)=i
+                  order(ising,1,iproc)=i
                endif
             endif
          enddo
@@ -1000,18 +1082,39 @@ contains
          return
       endif
       do i=1,pm%nint
+         if (pm%vertex_list(i)%n_inputs.ne.2) cycle
          if ( current_list_local(ic1)%type.eq.pm%vertex_list(i)%particles(1) .and. &
               current_list_local(ic2)%type.eq.pm%vertex_list(i)%particles(2) ) then
             ichir=vertex_result_chirality(pm%vertex_list(i)%type, &
                  pm%vertex_list(i)%particles(3),pm%vertex_list(i)%coupl)
             if (ichir.eq.-99) cycle
             sgn=1d0
-              call add_vertex(pm%vertex_list(i)%type, &
-                            pm%vertex_list(i)%particles(3), &
-                            sgn*pm%vertex_list(i)%coupl,ichir)
+            call add_vertex(i,sgn*pm%vertex_list(i)%coupl,ichir)
          endif
       enddo
     end subroutine add_if_allowed_threevertex
+
+    subroutine add_if_allowed_fourvertex()
+      ! Add an ordered four-point interaction.  HEFT is the only model sector
+      ! with a genuine four-point Lorentz rule; the ordinary four-gluon rule
+      ! remains factorised through the auxiliary tensor.
+      implicit none
+      integer :: i
+      type(current) :: candidate
+      integer,dimension(0:isize) :: singlet_mv
+      logical :: vertex_sign
+      do i=1,pm%nint
+         if (pm%vertex_list(i)%n_inputs.ne.3) cycle
+         if (current_list_local(ic1)%type.ne.pm%vertex_list(i)%particles(1)) cycle
+         if (current_list_local(ic2)%type.ne.pm%vertex_list(i)%particles(2)) cycle
+         if (current_list_local(ic3)%type.ne.pm%vertex_list(i)%particles(3)) cycle
+         if (current_list_local(ic1)%heft_order+current_list_local(ic2)%heft_order+&
+              current_list_local(ic3)%heft_order+pm%vertex_list(i)%heft_power.gt.1) cycle
+         candidate=combine_currents3(ic1,ic2,ic3,pm%vertex_list(i)%particles(4),0)
+         if (.not.valid_three_current_combination(candidate)) cycle
+         call add_four_vertex(i,candidate,singlet_mv,vertex_sign)
+      enddo
+    end subroutine add_if_allowed_fourvertex
 
     integer function ext_from_cur(ic)
       implicit none
@@ -1132,7 +1235,8 @@ contains
       ! If using symmetry and the current is a combination of all external
       ! gluons, take only one of the two possible orders
       gluon_current=all_gluon_current(current_list_local(ic1),n1).and.all_gluon_current(current_list_local(ic2),n2)
-      if (use_symmetry .and. this%imode.eq.2 .and. gluon_current) then
+      if (use_symmetry .and. .not.pm%heft_enabled .and. &
+           this%imode.eq.2 .and. gluon_current) then
          if (maxval(current_list_local(ic1)%order(1:n1)).ge.maxval(current_list_local(ic2)%order(1:n2))) return
       endif
       if (.not. gluon_current) then
@@ -1171,16 +1275,105 @@ contains
             endif
          enddo
          ! if the current is of length n-1, the first should be a quark
-         if (isize.eq.n-1 .and. .not.pm%is_quark(et(1))) return
+         if (isize.eq.n-1 .and. any(this%n_qqbar.gt.0) .and. &
+              .not.pm%is_quark(et(1))) return
       endif
       ! Got all the way to the end. This must be a valid current combination
       valid_current_combination=.true.
     end function valid_current_combination
-    
-    subroutine add_vertex(itype,ctype,coupl,ichir)
+
+    logical function valid_three_current_combination(candidate)
       implicit none
-      integer :: itype,ctype,ichir,ic
+      type(current),intent(in) :: candidate
+      type(bitset) :: common_processes
+      integer :: combined_bin,iproc_local,i,j,ncol,nproc_col
+      integer,dimension(n) :: process_col_order
+      logical :: compatible,found_quark,found_antiquark
+
+      valid_three_current_combination=.false.
+      combined_bin=ior(ior(current_list_local(ic1)%bin,current_list_local(ic2)%bin),&
+           current_list_local(ic3)%bin)
+      if (popcnt(combined_bin).ne.isize) return
+      common_processes=(current_list_local(ic1)%iproc.and.current_list_local(ic2)%iproc).and.&
+           current_list_local(ic3)%iproc
+      if (common_processes%count_bits().eq.0) return
+
+      compatible=.false.
+      do iproc_local=1,this%nprocs
+         if (.not.common_processes%test_bit(iproc_local)) cycle
+         if (btest(combined_bin,order(n,1,iproc_local)-1)) cycle
+         if (this%imode.eq.2) then
+            compatible=.true.
+            exit
+         endif
+         ncol=0
+         do i=1,isize
+            if (pm%is_singlet(candidate%ext_type(i))) exit
+            ncol=ncol+1
+         enddo
+         nproc_col=0
+         do i=1,n
+            if (pm%is_singlet(this%processes(order(i,1,iproc_local),iproc_local))) cycle
+            nproc_col=nproc_col+1
+            process_col_order(nproc_col)=order(i,1,iproc_local)
+         enddo
+         do i=1,nproc_col-ncol+1
+            if (all(process_col_order(i:i+ncol-1).eq.candidate%order(1:ncol))) then
+               compatible=.true.
+               exit
+            endif
+         enddo
+         if (compatible) exit
+      enddo
+      if (.not.compatible) return
+
+      ! Gluon currents may contain quark subcurrents, but their external colour
+      ! order must still consist of alternating open quark strings.
+      ncol=0
+      do i=1,isize
+         if (pm%is_singlet(candidate%ext_type(i))) exit
+         ncol=ncol+1
+      enddo
+      found_quark=.false.
+      found_antiquark=.false.
+      do i=1,ncol
+         if (pm%is_quark(candidate%ext_type(i))) then
+            if (found_quark) return
+            found_antiquark=.false.
+            found_quark=.true.
+         elseif (pm%is_antiquark(candidate%ext_type(i))) then
+            if (found_antiquark) return
+            j=i
+            do while (j.lt.ncol)
+               if (pm%is_singlet(candidate%ext_type(j+1))) then
+                  j=j+1
+               elseif (.not.pm%is_quark(candidate%ext_type(j+1))) then
+                  return
+               else
+                  exit
+               endif
+            enddo
+            found_quark=.false.
+            found_antiquark=.true.
+         endif
+      enddo
+      if (isize.eq.n-1 .and. any(this%n_qqbar.gt.0)) then
+         if (ncol.eq.0 .or. .not.pm%is_quark(candidate%ext_type(1))) return
+      endif
+      valid_three_current_combination=.true.
+    end function valid_three_current_combination
+    
+    subroutine add_vertex(model_vertex,coupl,ichir)
+      implicit none
+      integer,intent(in) :: model_vertex,ichir
+      integer :: ctype,ic,heft_order
       real(kind=8),dimension(2) :: coupl
+      ctype=pm%vertex_list(model_vertex)%particles(&
+           pm%vertex_list(model_vertex)%n_inputs+1)
+      heft_order=current_list_local(ic1)%heft_order+&
+           current_list_local(ic2)%heft_order+&
+           pm%vertex_list(model_vertex)%heft_power
+      if (heft_order.gt.1) return
       if (isize.eq.n-1) then
          do ic=this%n_cur_start(n),this%n_cur_end(n)
             if (ctype.eq.anti_current(current_list_local(ic)%type)) exit
@@ -1189,14 +1382,52 @@ contains
       endif
       this%n_vert=this%n_vert+1
       if (this%n_vert.gt.max_vert) call increase_max_vert()
-      interaction_list_local(this%n_vert)%type=itype
+      interaction_list_local(this%n_vert)%type=pm%vertex_list(model_vertex)%type
       interaction_list_local(this%n_vert)%chirality=ichir
+      interaction_list_local(this%n_vert)%n_inputs=2
       interaction_list_local(this%n_vert)%currents(1)=ic1
       interaction_list_local(this%n_vert)%currents(2)=ic2
+      interaction_list_local(this%n_vert)%currents(3)=0
+      interaction_list_local(this%n_vert)%coupling_power=[&
+           pm%vertex_list(model_vertex)%qcd_power,&
+           pm%vertex_list(model_vertex)%ew_power,&
+           pm%vertex_list(model_vertex)%heft_power]
       interaction_list_local(this%n_vert)%coupl=coupl
       allocate(interaction_list_local(this%n_vert)%singlet_mv(0:isize))
       call add_all_currents(ctype,ichir)
     end subroutine add_vertex
+
+    subroutine add_four_vertex(model_vertex,candidate,singlet_mv,vertex_sign)
+      implicit none
+      integer,intent(in) :: model_vertex
+      type(current),intent(in) :: candidate
+      integer,dimension(0:isize),intent(out) :: singlet_mv
+      logical,intent(out) :: vertex_sign
+      integer :: ic,ctype
+      ctype=pm%vertex_list(model_vertex)%particles(4)
+      if (isize.eq.n-1) then
+         do ic=this%n_cur_start(n),this%n_cur_end(n)
+            if (ctype.eq.anti_current(current_list_local(ic)%type)) exit
+         enddo
+         if (ic.eq.this%n_cur_end(n)+1) return
+      endif
+      this%n_vert=this%n_vert+1
+      if (this%n_vert.gt.max_vert) call increase_max_vert()
+      interaction_list_local(this%n_vert)%type=pm%vertex_list(model_vertex)%type
+      interaction_list_local(this%n_vert)%chirality=0
+      interaction_list_local(this%n_vert)%n_inputs=3
+      interaction_list_local(this%n_vert)%currents=[ic1,ic2,ic3]
+      interaction_list_local(this%n_vert)%coupling_power=[&
+           pm%vertex_list(model_vertex)%qcd_power,&
+           pm%vertex_list(model_vertex)%ew_power,&
+           pm%vertex_list(model_vertex)%heft_power]
+      interaction_list_local(this%n_vert)%coupl=pm%vertex_list(model_vertex)%coupl
+      allocate(interaction_list_local(this%n_vert)%singlet_mv(0:isize))
+      singlet_mv=0
+      interaction_list_local(this%n_vert)%singlet_mv=singlet_mv
+      vertex_sign=lepton_reordering_is_odd3(ic1,ic2,ic3)
+      call add_current(vertex_sign,candidate)
+    end subroutine add_four_vertex
 
     function combine_lists(current,singlet_mv)
       ! just concatenate the two currents, except if there is a colour
@@ -1231,6 +1462,9 @@ contains
       allocate(combine_currents%ext_type(1:isize))
       combine_currents%type=ctype
       combine_currents%chirality=ichir
+      combine_currents%heft_order=current_list_local(ic1)%heft_order+&
+           current_list_local(ic2)%heft_order+&
+           interaction_list_local(this%n_vert)%coupling_power(3)
       combine_currents%bin=current_list_local(ic1)%bin+current_list_local(ic2)%bin
       combine_currents%iproc=current_list_local(ic1)%iproc.and.current_list_local(ic2)%iproc
       combine_currents%ext_cur=current_list_local(ic1)%ext_cur+current_list_local(ic2)%ext_cur
@@ -1338,6 +1572,77 @@ contains
       combine_currents%ext_type(1:isize)=combine_lists([et1(1:n1),et2(1:n2)],singlet_mv)
     end function combine_currents
 
+    type(current) function combine_currents3(ic1_in,ic2_in,ic3_in,ctype,ichir)
+      implicit none
+      integer,intent(in) :: ic1_in,ic2_in,ic3_in,ctype,ichir
+      integer :: children(3),lens(3),ncols(3)
+      integer :: ichild,i,j,k,pos,nsing,tmp_order,tmp_spin,tmp_type
+      integer,dimension(isize) :: sing_order,sing_spin,sing_type
+
+      children=[ic1_in,ic2_in,ic3_in]
+      do ichild=1,3
+         lens(ichild)=popcnt(current_list_local(children(ichild))%bin)
+         ncols(ichild)=lens(ichild)
+         do i=1,lens(ichild)
+            if (pm%is_singlet(current_list_local(children(ichild))%ext_type(i))) then
+               ncols(ichild)=i-1
+               exit
+            endif
+         enddo
+      enddo
+
+      allocate(combine_currents3%order(isize))
+      allocate(combine_currents3%spin(isize))
+      allocate(combine_currents3%ext_type(isize))
+      combine_currents3%type=ctype
+      combine_currents3%chirality=ichir
+      combine_currents3%heft_order=current_list_local(ic1_in)%heft_order+&
+           current_list_local(ic2_in)%heft_order+current_list_local(ic3_in)%heft_order+1
+      combine_currents3%bin=current_list_local(ic1_in)%bin+&
+           current_list_local(ic2_in)%bin+current_list_local(ic3_in)%bin
+      combine_currents3%iproc=(current_list_local(ic1_in)%iproc.and.&
+           current_list_local(ic2_in)%iproc).and.current_list_local(ic3_in)%iproc
+      combine_currents3%ext_cur=current_list_local(ic1_in)%ext_cur+&
+           current_list_local(ic2_in)%ext_cur+current_list_local(ic3_in)%ext_cur
+
+      pos=0
+      nsing=0
+      do ichild=1,3
+         do i=1,ncols(ichild)
+            pos=pos+1
+            combine_currents3%order(pos)=current_list_local(children(ichild))%order(i)
+            combine_currents3%spin(pos)=current_list_local(children(ichild))%spin(i)
+            combine_currents3%ext_type(pos)=current_list_local(children(ichild))%ext_type(i)
+         enddo
+         do i=ncols(ichild)+1,lens(ichild)
+            nsing=nsing+1
+            sing_order(nsing)=current_list_local(children(ichild))%order(i)
+            sing_spin(nsing)=current_list_local(children(ichild))%spin(i)
+            sing_type(nsing)=current_list_local(children(ichild))%ext_type(i)
+         enddo
+      enddo
+      do i=1,nsing-1
+         do j=i+1,nsing
+            if (sing_order(j).ge.sing_order(i)) cycle
+            tmp_order=sing_order(i)
+            tmp_spin=sing_spin(i)
+            tmp_type=sing_type(i)
+            sing_order(i)=sing_order(j)
+            sing_spin(i)=sing_spin(j)
+            sing_type(i)=sing_type(j)
+            sing_order(j)=tmp_order
+            sing_spin(j)=tmp_spin
+            sing_type(j)=tmp_type
+         enddo
+      enddo
+      do k=1,nsing
+         pos=pos+1
+         combine_currents3%order(pos)=sing_order(k)
+         combine_currents3%spin(pos)=sing_spin(k)
+         combine_currents3%ext_type(pos)=sing_type(k)
+      enddo
+    end function combine_currents3
+
     subroutine add_all_currents(ctype,ichir)
       ! combine currents ic1 and ic2 and add them to the list of currents to
       ! compute. If use_symmetry=.true., need to consider all possible
@@ -1359,7 +1664,8 @@ contains
       else
          lepton_sign=lepton_reordering_is_odd(ic1,ic2)
       endif
-      if (.not.use_symmetry .or. this%imode.eq.1 .or. this%imode.eq.3) then
+      if (.not.use_symmetry .or. pm%heft_enabled .or. &
+           this%imode.eq.1 .or. this%imode.eq.3) then
          new_currents(1)=combine_currents(ic1,ic2,ctype,ichir,singlet_mv,0)
          interaction_list_local(this%n_vert)%singlet_mv(0:isize)=singlet_mv(0:isize)
          call add_current(lepton_sign,new_currents(1))
@@ -1394,6 +1700,14 @@ contains
       enddo
       lepton_reordering_is_odd=mod(ncross,2).eq.1
     end function lepton_reordering_is_odd
+
+    logical function lepton_reordering_is_odd3(current1,current2,current3)
+      implicit none
+      integer,intent(in) :: current1,current2,current3
+      lepton_reordering_is_odd3=lepton_reordering_is_odd(current1,current2) .neqv.&
+           lepton_reordering_is_odd(current1,current3) .neqv.&
+           lepton_reordering_is_odd(current2,current3)
+    end function lepton_reordering_is_odd3
 
     subroutine check_all_permutations(ctype,ichir,nperm,new_currents,vertex_sign)
       ! If a current only contains (external) gluons, we can use symmetry to
@@ -1508,6 +1822,7 @@ contains
          do ic=1,this%n_cur
             if (new_current%type.ne.current_list_local(ic)%type) cycle
             if (new_current%chirality.ne.current_list_local(ic)%chirality) cycle
+            if (new_current%heft_order.ne.current_list_local(ic)%heft_order) cycle
             if (new_current%bin.ne.current_list_local(ic)%bin) cycle
             if (new_current%ext_cur.ne.current_list_local(ic)%ext_cur) cycle
             call append_current_vertex(ic,this%n_vert,vertex_sign)
@@ -1539,12 +1854,12 @@ contains
       elseif (this%imode.eq.2) then
          call get_value(new_current%order,new_current%type,val)
          call solve_dict(val,key)
-         ic=key_to_current(key,new_current%iproc%bitset_to_integer())
+         ic=key_to_current(key,new_current%iproc%bitset_to_integer(),new_current%heft_order)
          if (ic.eq.0) then
             ! initialise new current
             this%n_cur=this%n_cur+1
             if (this%n_cur.gt.max_cur) call increase_max_cur()
-            key_to_current(key,new_current%iproc%bitset_to_integer())=this%n_cur
+            key_to_current(key,new_current%iproc%bitset_to_integer(),new_current%heft_order)=this%n_cur
             ic=this%n_cur
             current_list_local(ic)=new_current
             current_list_local(ic)%mass=pm%get_mass(new_current%type)
@@ -1890,7 +2205,7 @@ contains
        do ic=this%n_cur_start(isize),this%n_cur_end(isize)
           call this%current_list(ic)%iproc%bitset_write_unformatted(iunit)
           write (iunit) this%current_list(ic)%type,this%current_list(ic)%bin,this%current_list(ic)%n_vert, &
-               this%current_list(ic)%chirality, &
+               this%current_list(ic)%chirality,this%current_list(ic)%heft_order, &
                this%current_list(ic)%mass,this%current_list(ic)%width
           write (iunit) this%current_list(ic)%vertices(1:this%current_list(ic)%n_vert)
           write (iunit) this%current_list(ic)%vertex_sign(1:this%current_list(ic)%n_vert)
@@ -1900,7 +2215,8 @@ contains
     ! interaction_list
     do iv=1,this%n_vert
        write (iunit) this%interaction_list(iv)%type,this%interaction_list(iv)%chirality,&
-            this%interaction_list(iv)%currents(1:2),&
+            this%interaction_list(iv)%n_inputs,this%interaction_list(iv)%currents(1:3),&
+            this%interaction_list(iv)%coupling_power,&
             this%interaction_list(iv)%coupl(1:2)
        if (allocated(this%interaction_list(iv)%singlet_mv)) then
           write (iunit) this%interaction_list(iv)%singlet_mv(0:this%interaction_list(iv)%singlet_mv(0))
@@ -1924,7 +2240,10 @@ contains
           write (iunit) this%include_amp(iamp),this%same_flavour_sum(iamp,1:2),this%same_flavour_sum_operation(iamp,1:2)
           write (iunit) this%spins(1:n,1,iamp)
           write (iunit) this%perm(1:n-this%n_sing(1),iamp)
-          if (.not.this%same_flav(iproc)) write (iunit) this%curr2amp(1:2,iamp)
+          if (.not.this%same_flav(iproc)) then
+             write (iunit) this%curr2amp(1:2,iamp)
+             write (iunit) this%amp_currents(:,:,iamp)
+          endif
        enddo
     enddo
   end subroutine write_init_amps_to_file
@@ -1949,7 +2268,8 @@ contains
        do ic=this%n_cur_start(isize),this%n_cur_end(isize)
           call this%current_list(ic)%iproc%bitset_read_unformatted(iunit)
           read (iunit) this%current_list(ic)%type,this%current_list(ic)%bin,this%current_list(ic)%n_vert, &
-               this%current_list(ic)%chirality,this%current_list(ic)%mass,this%current_list(ic)%width
+               this%current_list(ic)%chirality,this%current_list(ic)%heft_order,&
+               this%current_list(ic)%mass,this%current_list(ic)%width
           allocate(this%current_list(ic)%vertices(1:this%current_list(ic)%n_vert))
           allocate(this%current_list(ic)%vertex_sign(1:this%current_list(ic)%n_vert))
           read (iunit) this%current_list(ic)%vertices(1:this%current_list(ic)%n_vert)
@@ -1965,7 +2285,9 @@ contains
     allocate(this%interaction_list(1:this%n_vert))
     do iv=1,this%n_vert
        read (iunit) this%interaction_list(iv)%type,this%interaction_list(iv)%chirality,&
-            this%interaction_list(iv)%currents(1:2),this%interaction_list(iv)%coupl(1:2),itmp
+            this%interaction_list(iv)%n_inputs,this%interaction_list(iv)%currents(1:3),&
+            this%interaction_list(iv)%coupling_power,&
+            this%interaction_list(iv)%coupl(1:2),itmp
        if (itmp.gt.0) then
           allocate(this%interaction_list(iv)%singlet_mv(0:itmp))
           this%interaction_list(iv)%singlet_mv(0)=itmp
@@ -1999,12 +2321,17 @@ contains
        if (this%same_flav(iproc)) exit
     enddo
     allocate(this%curr2amp(1:2,1:this%iproc_start(iproc)-1))
+    allocate(this%amp_currents(1:2,0:1,1:this%iproc_start(iproc)-1))
+    this%amp_currents=0
     do iproc=1,this%nprocs
        do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
           read (iunit) this%include_amp(iamp),this%same_flavour_sum(iamp,1:2),this%same_flavour_sum_operation(iamp,1:2)
           read (iunit) this%spins(1:n,1,iamp)
           read (iunit) this%perm(1:n-this%n_sing(1),iamp)
-          if (.not.this%same_flav(iproc)) read (iunit) this%curr2amp(1:2,iamp)
+          if (.not.this%same_flav(iproc)) then
+             read (iunit) this%curr2amp(1:2,iamp)
+             read (iunit) this%amp_currents(:,:,iamp)
+          endif
        enddo
     enddo
   contains
@@ -2041,10 +2368,11 @@ contains
       if (allocated(this%spins)) deallocate(this%spins)
       if (allocated(this%perm)) deallocate(this%perm)
       if (allocated(this%curr2amp)) deallocate(this%curr2amp)
+      if (allocated(this%amp_currents)) deallocate(this%amp_currents)
     end subroutine deallocate_all
   end subroutine read_init_amps_from_file
   
-  subroutine evaluate(this,n,p,hel,read_file,pm)
+  subroutine evaluate(this,n,p,hel,read_file,pm,gs,gew,gheft)
     use FeynmanRules
     use particles
     implicit none
@@ -2053,8 +2381,20 @@ contains
     integer :: n
     integer,dimension(n)::hel
     real(kind=8),dimension(0:3,n) :: p
-    integer :: ic,iv,isize,ih_in,ifinal,dim
+    integer :: ic,iv,isize,ih_in,ifinal,dim,ipmom,ipmom1,ipmom2,ipmom3,imu,iwf
     logical :: read_file
+    real(kind=8),intent(in),optional :: gs,gew,gheft
+    real(kind=8) :: gs_local,gew_local,gheft_local,coupling_factor
+    real(kind=8),dimension(0:3) :: external_momentum
+    real(kind=8),dimension(0:3) :: vertex_p1,vertex_p2,vertex_p3
+    complex(kind=8),dimension(4) :: external_wavefunction
+    complex(kind=8),dimension(6) :: vertex_wf1,vertex_wf2,vertex_wf3,vertex_wfout
+    gs_local=1d0
+    gew_local=1d0
+    gheft_local=1d0
+    if (present(gs)) gs_local=gs
+    if (present(gew)) gew_local=gew
+    if (present(gheft)) gheft_local=gheft
     if (.not. allocated(this%current_list(1)%val_c)) then
        do ic=1,this%n_cur
           dim=current_dim(ic)
@@ -2067,6 +2407,18 @@ contains
        if (.not. allocated(this%amps)) allocate(this%amps(1:this%n_amps))
     endif
     
+    if (.not.allocated(this%pp_bin_to_i)) then
+       write (*,*) 'Momentum-mask map is not allocated'
+       stop 1
+    endif
+    if (.not.allocated(this%pp)) then
+       write (*,*) 'Current momentum storage is not allocated'
+       stop 1
+    endif
+    if (.not.allocated(this%pp_i_to_bin)) then
+       write (*,*) 'Reverse momentum-mask map is not allocated'
+       stop 1
+    endif
     call fill_momentum_array()
 
     do isize=1,n-1
@@ -2079,48 +2431,97 @@ contains
              else
                 ih_in=this%current_list(ic)%spin(1)
              endif
+             if (.not.allocated(this%current_list(ic)%val_c)) then
+                write (*,*) 'External current wavefunction storage is not allocated',ic
+                stop 1
+             endif
+             ipmom=current_momentum_index(ic)
+             dim=current_dim(ic)
+             if (dim.lt.1 .or. dim.gt.size(external_wavefunction) .or. &
+                  size(this%current_list(ic)%val_c).lt.dim) then
+                write (*,*) 'Invalid external-current wavefunction dimension',ic,dim,&
+                     size(this%current_list(ic)%val_c)
+                stop 1
+             endif
+             do imu=0,3
+                external_momentum(imu)=this%pp(imu,ipmom)
+             enddo
+             external_wavefunction=(0d0,0d0)
              if (pm%is_colour_flow_vector(this%current_list(ic)%type) .or. pm%is_photon(this%current_list(ic)%type)) then
-                call ext_massless_vector_cmplx(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
-                     ih_in,ifinal,this%current_list(ic)%val_c(1:4))
+                call ext_massless_vector_cmplx(external_momentum, &
+                     ih_in,ifinal,external_wavefunction)
              elseif (pm%is_quark(this%current_list(ic)%type) .or. &
                   pm%is_lepton(this%current_list(ic)%type)) then
                 if (this%current_list(ic)%chirality.ne.0) then
-                   call ext_fermion_outflow_weyl(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
-                        ih_in,ifinal,this%current_list(ic)%val_c(1:2),this%current_list(ic)%chirality)
+                   call ext_fermion_outflow_weyl(external_momentum, &
+                        ih_in,ifinal,external_wavefunction,this%current_list(ic)%chirality)
                 else
-                   call ext_fermion_outflow(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
-                        ih_in,ifinal,this%current_list(ic)%val_c(1:4),this%current_list(ic)%mass)
+                   call ext_fermion_outflow(external_momentum, &
+                        ih_in,ifinal,external_wavefunction,this%current_list(ic)%mass)
                 endif
              elseif (pm%is_antiquark(this%current_list(ic)%type) .or. &
                   pm%is_antilepton(this%current_list(ic)%type)) then
                 if (this%current_list(ic)%chirality.ne.0) then
-                   call ext_fermion_inflow_weyl(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
-                        ih_in,ifinal,this%current_list(ic)%val_c(1:2),this%current_list(ic)%chirality)
+                   call ext_fermion_inflow_weyl(external_momentum, &
+                        ih_in,ifinal,external_wavefunction,this%current_list(ic)%chirality)
                 else
-                   call ext_fermion_inflow(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
-                        ih_in,ifinal,this%current_list(ic)%val_c(1:4),this%current_list(ic)%mass)
+                   call ext_fermion_inflow(external_momentum, &
+                        ih_in,ifinal,external_wavefunction,this%current_list(ic)%mass)
                 endif
              elseif (pm%is_massive_vector(this%current_list(ic)%type)) then
-                call ext_massive_vector(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
-                     ih_in,ifinal,this%current_list(ic)%val_c(1:4),this%current_list(ic)%mass)
+                call ext_massive_vector(external_momentum, &
+                     ih_in,ifinal,external_wavefunction,this%current_list(ic)%mass)
              elseif (pm%is_higgs(this%current_list(ic)%type)) then
-                call ext_scalar(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
-                     ifinal,this%current_list(ic)%val_c(1))
+                call ext_scalar(external_momentum,ifinal,external_wavefunction)
              else
                 write (*,*) 'External particle type unknown',ic,this%current_list(ic)%type,ih_in
                 stop 1
              endif
+             do iwf=1,dim
+                this%current_list(ic)%val_c(iwf)=external_wavefunction(iwf)
+             enddo
           enddo
           cycle
        endif
        ! loop over the vertices required to create all the currents with isize
        ! number of external particles combined
        do iv=this%n_vert_start(isize),this%n_vert_end(isize)
+          ipmom1=0
+          ipmom2=0
+          ipmom3=0
+          if (this%interaction_list(iv)%type.eq.0 .or. &
+               this%interaction_list(iv)%type.eq.12 .or. &
+               (this%interaction_list(iv)%type.ge.25 .and. &
+               this%interaction_list(iv)%type.le.31)) then
+             ipmom1=current_momentum_index(this%interaction_list(iv)%currents(1))
+             ipmom2=current_momentum_index(this%interaction_list(iv)%currents(2))
+             if (this%interaction_list(iv)%n_inputs.eq.3) &
+                  ipmom3=current_momentum_index(this%interaction_list(iv)%currents(3))
+          endif
+          if (this%interaction_list(iv)%type.ge.25 .and. &
+               this%interaction_list(iv)%type.le.34) then
+             call copy_current_wavefunction(&
+                  this%interaction_list(iv)%currents(1),vertex_wf1)
+             call copy_current_wavefunction(&
+                  this%interaction_list(iv)%currents(2),vertex_wf2)
+             vertex_wf3=(0d0,0d0)
+             if (this%interaction_list(iv)%n_inputs.eq.3) then
+                call copy_current_wavefunction(&
+                     this%interaction_list(iv)%currents(3),vertex_wf3)
+             endif
+             vertex_wfout=(0d0,0d0)
+             if (this%interaction_list(iv)%type.le.31) then
+                call copy_vertex_momentum(ipmom1,vertex_p1)
+                call copy_vertex_momentum(ipmom2,vertex_p2)
+                if (this%interaction_list(iv)%n_inputs.eq.3) &
+                     call copy_vertex_momentum(ipmom3,vertex_p3)
+             endif
+          endif
           if (this%interaction_list(iv)%type.eq.0) then
              call threeGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
-                  this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
+                  this%pp(0:3,ipmom1),&
                   this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
-                  this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
+                  this%pp(0:3,ipmom2),&
                   this%interaction_list(iv)%val_c(1:4))
           elseif(this%interaction_list(iv)%type.eq.1) then
              call TwoGluonToAuxTensor(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
@@ -2267,9 +2668,9 @@ contains
              endif
           elseif (this%interaction_list(iv)%type.eq.12) then
              call VectorVectorToVector(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
-                       this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
+                       this%pp(0:3,ipmom1),&
                        this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
-                       this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
+                       this%pp(0:3,ipmom2),&
                        this%interaction_list(iv)%val_c(1:4),&
                        this%interaction_list(iv)%coupl(1:2))
 
@@ -2401,10 +2802,59 @@ contains
                 endif
              endif
 
+          elseif(this%interaction_list(iv)%type.eq.25) then
+             call HeftTwoGluonToScalar(&
+                  vertex_wf1,vertex_p1,vertex_wf2,vertex_p2,vertex_wfout)
+
+          elseif(this%interaction_list(iv)%type.eq.26) then
+             call HeftScalarGluonToGluon(&
+                  vertex_wf1,vertex_p1,vertex_wf2,vertex_p2,vertex_wfout)
+
+          elseif(this%interaction_list(iv)%type.eq.27) then
+             call HeftScalarGluonToGluon(&
+                  vertex_wf2,vertex_p2,vertex_wf1,vertex_p1,vertex_wfout)
+
+          elseif(this%interaction_list(iv)%type.eq.28) then
+             call HeftThreeGluonToScalar(&
+                  vertex_wf1,vertex_p1,vertex_wf2,vertex_p2,&
+                  vertex_wf3,vertex_p3,vertex_wfout)
+
+          elseif(this%interaction_list(iv)%type.eq.29) then
+             call HeftScalarTwoGluonToGluon(&
+                  vertex_wf1,vertex_p1,vertex_wf2,vertex_p2,&
+                  vertex_wf3,vertex_p3,vertex_wfout)
+
+          elseif(this%interaction_list(iv)%type.eq.30) then
+             call HeftScalarTwoGluonToGluon(&
+                  vertex_wf2,vertex_p2,vertex_wf1,vertex_p1,&
+                  vertex_wf3,vertex_p3,vertex_wfout)
+
+          elseif(this%interaction_list(iv)%type.eq.31) then
+             call HeftScalarTwoGluonToGluon(&
+                  vertex_wf3,vertex_p3,vertex_wf1,vertex_p1,&
+                  vertex_wf2,vertex_p2,vertex_wfout)
+
+          elseif(this%interaction_list(iv)%type.eq.32) then
+             call HeftTwoAuxTensorToScalar(vertex_wf1,vertex_wf2,vertex_wfout)
+
+          elseif(this%interaction_list(iv)%type.eq.33) then
+             call HeftScalarAuxTensorToAuxTensor(vertex_wf1,vertex_wf2,vertex_wfout)
+
+          elseif(this%interaction_list(iv)%type.eq.34) then
+             call HeftScalarAuxTensorToAuxTensor(vertex_wf2,vertex_wf1,vertex_wfout)
+
           else
              write (*,*) 'Unknown vertex type: not yet implemented',iv,this%interaction_list(iv)%type
              stop 1
           endif
+          if (this%interaction_list(iv)%type.ge.25 .and. &
+               this%interaction_list(iv)%type.le.34) &
+               call store_interaction_wavefunction(iv,vertex_wfout)
+          coupling_factor=gs_local**this%interaction_list(iv)%coupling_power(1)*&
+               gew_local**this%interaction_list(iv)%coupling_power(2)*&
+               gheft_local**this%interaction_list(iv)%coupling_power(3)
+          this%interaction_list(iv)%val_c=&
+               coupling_factor*this%interaction_list(iv)%val_c
        enddo
 
        ! compute the currents by combining the interactions
@@ -2483,6 +2933,93 @@ contains
       endif
     end function current_dim
 
+    integer function current_momentum_index(icur)
+      implicit none
+      integer,intent(in) :: icur
+      integer :: momentum_mask
+      if (icur.lt.1 .or. icur.gt.this%n_cur) then
+         write (*,*) 'Invalid current in momentum lookup',icur,this%n_cur
+         stop 1
+      endif
+      momentum_mask=this%current_list(icur)%bin
+      if (momentum_mask.lt.1 .or. momentum_mask.gt.size(this%pp_bin_to_i)) then
+         write (*,*) 'Current has an invalid momentum mask',icur,momentum_mask
+         stop 1
+      endif
+      current_momentum_index=this%pp_bin_to_i(momentum_mask)
+      if (current_momentum_index.lt.1 .or. &
+           current_momentum_index.gt.size(this%pp,2)) then
+         write (*,*) 'Current has no momentum entry',icur,momentum_mask,&
+              current_momentum_index
+         stop 1
+      endif
+    end function current_momentum_index
+
+    subroutine copy_current_wavefunction(icur,wavefunction)
+      implicit none
+      integer,intent(in) :: icur
+      complex(kind=8),dimension(6),intent(out) :: wavefunction
+      integer :: component,ncomponents
+      if (icur.lt.1 .or. icur.gt.this%n_cur) then
+         write (*,*) 'Invalid current in wavefunction copy',icur,this%n_cur
+         stop 1
+      endif
+      if (.not.allocated(this%current_list(icur)%val_c)) then
+         write (*,*) 'Current wavefunction storage is not allocated',icur
+         stop 1
+      endif
+      ncomponents=current_dim(icur)
+      if (ncomponents.lt.1 .or. ncomponents.gt.size(wavefunction) .or. &
+           size(this%current_list(icur)%val_c).lt.ncomponents) then
+         write (*,*) 'Invalid current wavefunction dimension',icur,ncomponents,&
+              size(this%current_list(icur)%val_c)
+         stop 1
+      endif
+      wavefunction=(0d0,0d0)
+      do component=1,ncomponents
+         wavefunction(component)=this%current_list(icur)%val_c(component)
+      enddo
+    end subroutine copy_current_wavefunction
+
+    subroutine copy_vertex_momentum(momentum_index,momentum)
+      implicit none
+      integer,intent(in) :: momentum_index
+      real(kind=8),dimension(0:3),intent(out) :: momentum
+      integer :: component
+      if (momentum_index.lt.1 .or. momentum_index.gt.size(this%pp,2)) then
+         write (*,*) 'Invalid vertex momentum index',momentum_index,size(this%pp,2)
+         stop 1
+      endif
+      do component=0,3
+         momentum(component)=this%pp(component,momentum_index)
+      enddo
+    end subroutine copy_vertex_momentum
+
+    subroutine store_interaction_wavefunction(ivert,wavefunction)
+      implicit none
+      integer,intent(in) :: ivert
+      complex(kind=8),dimension(6),intent(in) :: wavefunction
+      integer :: component,ncomponents
+      if (ivert.lt.1 .or. ivert.gt.this%n_vert) then
+         write (*,*) 'Invalid interaction in wavefunction copy',ivert,this%n_vert
+         stop 1
+      endif
+      if (.not.allocated(this%interaction_list(ivert)%val_c)) then
+         write (*,*) 'Interaction wavefunction storage is not allocated',ivert
+         stop 1
+      endif
+      ncomponents=interaction_dim(ivert)
+      if (ncomponents.lt.1 .or. ncomponents.gt.size(wavefunction) .or. &
+           size(this%interaction_list(ivert)%val_c).lt.ncomponents) then
+         write (*,*) 'Invalid interaction wavefunction dimension',ivert,ncomponents,&
+              size(this%interaction_list(ivert)%val_c)
+         stop 1
+      endif
+      do component=1,ncomponents
+         this%interaction_list(ivert)%val_c(component)=wavefunction(component)
+      enddo
+    end subroutine store_interaction_wavefunction
+
     integer function interaction_dim(ivert)
       implicit none
       integer,intent(in) :: ivert
@@ -2535,7 +3072,8 @@ contains
       elseif(this%imode.eq.2) then
             do iproc=1,this%nprocs
                do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
-                  if (use_symmetry .and. this%n_qqbar(1).eq.0 .and. iamp.gt.this%n_amps/2 .and. mod(n,2).eq.1) then
+                  if (use_symmetry .and. .not.pm%heft_enabled .and. &
+                       this%n_qqbar(1).eq.0 .and. iamp.gt.this%n_amps/2 .and. mod(n,2).eq.1) then
                      if (iproc.ne.1) then
                         write (*,*) 'this can only be one process at the time'
                         stop 1
@@ -2550,9 +3088,8 @@ contains
                         if (allocated(this%three_line_partner_curr2amp)) then
                            if (iamp.le.size(this%three_line_partner_curr2amp,2)) then
                               if (this%three_line_partner_curr2amp(1,iamp).ne.0) then
-                                 this%amps(iamp)=this%amps(iamp)+contract_current_pair(&
-                                      this%three_line_partner_curr2amp(1,iamp),&
-                                      this%three_line_partner_curr2amp(2,iamp))
+                                 this%amps(iamp)=this%amps(iamp)+&
+                                      contract_partner_currents(iamp)
                               endif
                            endif
                         endif
@@ -2562,7 +3099,8 @@ contains
             enddo
             do iproc=1,this%nprocs
                do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
-                  if (use_symmetry .and. this%n_qqbar(1).eq.0 .and. iamp.gt.this%n_amps/2 .and. mod(n,2).eq.1) then
+                  if (use_symmetry .and. .not.pm%heft_enabled .and. &
+                       this%n_qqbar(1).eq.0 .and. iamp.gt.this%n_amps/2 .and. mod(n,2).eq.1) then
                      cycle
                   else
                      if (this%same_flav(iproc)) then
@@ -2583,18 +3121,62 @@ contains
     complex(kind=8) function contract_currents(iamp)
       implicit none
       integer,intent(in) :: iamp
-      integer :: ic1,ic2
-      ic1=this%curr2amp(1,iamp)
-      ic2=this%curr2amp(2,iamp)
-      contract_currents=contract_current_pair(ic1,ic2)
+      integer :: i,j
+      integer,dimension(2,0:1) :: pairs
+      do j=0,1
+         do i=1,2
+            pairs(i,j)=this%amp_currents(i,j,iamp)
+         enddo
+      enddo
+      contract_currents=contract_sector_pairs(pairs)
     end function contract_currents
+
+    complex(kind=8) function contract_partner_currents(iamp)
+      implicit none
+      integer,intent(in) :: iamp
+      integer :: i,j
+      integer,dimension(2,0:1) :: pairs
+      do j=0,1
+         do i=1,2
+            pairs(i,j)=this%three_line_partner_amp_currents(i,j,iamp)
+         enddo
+      enddo
+      contract_partner_currents=contract_sector_pairs(pairs)
+    end function contract_partner_currents
+
+    complex(kind=8) function contract_sector_pairs(pairs)
+      implicit none
+      integer,dimension(2,0:1),intent(in) :: pairs
+      integer :: iheft
+      contract_sector_pairs=(0d0,0d0)
+      do iheft=0,1
+         if (pairs(1,iheft).eq.0) cycle
+         contract_sector_pairs=contract_sector_pairs+&
+              contract_current_pair(pairs(1,iheft),pairs(2,iheft))
+      enddo
+    end function contract_sector_pairs
 
     complex(kind=8) function contract_current_pair(ic1,ic2)
       implicit none
       integer,intent(in) :: ic1,ic2
-      contract_current_pair=ContractFermionCurrents(&
-           this%current_list(ic1)%val_c,this%current_list(ic1)%chirality,&
-           this%current_list(ic2)%val_c,this%current_list(ic2)%chirality)
+      integer :: dim1,dim2
+      dim1=current_dim(ic1)
+      dim2=current_dim(ic2)
+      if (dim1.eq.1 .or. dim2.eq.1) then
+         if (dim1.ne.1 .or. dim2.ne.1) then
+            write (*,*) 'Cannot contract scalar and non-scalar currents',ic1,ic2,dim1,dim2
+            stop 1
+         endif
+         contract_current_pair=this%current_list(ic1)%val_c(1)*&
+              this%current_list(ic2)%val_c(1)
+      elseif (dim1.le.4 .and. dim2.le.4) then
+         contract_current_pair=ContractFermionCurrents(&
+              this%current_list(ic1)%val_c,this%current_list(ic1)%chirality,&
+              this%current_list(ic2)%val_c,this%current_list(ic2)%chirality)
+      else
+         write (*,*) 'Unsupported terminal-current contraction',ic1,ic2,dim1,dim2
+         stop 1
+      endif
     end function contract_current_pair
 
     complex (kind=8) function apply_operation(iamp,idau)
@@ -2622,49 +3204,63 @@ contains
     end subroutine combine_interactions
     subroutine include_massless_vector_propagator()
       implicit none
+      integer :: momentum_index
+      momentum_index=current_momentum_index(ic)
       call MasslessVectorPropagator(this%current_list(ic)%val_c, &
-           this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)))
+           this%pp(0:3,momentum_index))
     end subroutine include_massless_vector_propagator
 
     subroutine include_massive_vector_propagator()
       implicit none
+      integer :: momentum_index
+      momentum_index=current_momentum_index(ic)
       call MassiveVectorPropagator(this%current_list(ic)%val_c, &
-           this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)),&
+           this%pp(0:3,momentum_index),&
            this%current_list(ic)%mass,this%current_list(ic)%width)
     end subroutine include_massive_vector_propagator
 
     subroutine include_fermion_propagator()
       implicit none
+      integer :: momentum_index
+      momentum_index=current_momentum_index(ic)
       call FermionPropagator(this%current_list(ic)%val_c, &
-           this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), & 
+           this%pp(0:3,momentum_index),&
            this%current_list(ic)%mass,&
            this%current_list(ic)%width)
     end subroutine include_fermion_propagator
 
     subroutine include_fermion_propagator_weyl()
       implicit none
+      integer :: momentum_index
+      momentum_index=current_momentum_index(ic)
       call FermionPropagator_weyl(this%current_list(ic)%val_c, &
-           this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
+           this%pp(0:3,momentum_index),&
            this%current_list(ic)%chirality)
     end subroutine include_fermion_propagator_weyl
 
     subroutine include_antifermion_propagator()
       implicit none
+      integer :: momentum_index
+      momentum_index=current_momentum_index(ic)
       call AntifermionPropagator(this%current_list(ic)%val_c, &
-           this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)),&
+           this%pp(0:3,momentum_index),&
            this%current_list(ic)%mass,&
            this%current_list(ic)%width)
     end subroutine include_antifermion_propagator
     subroutine include_antifermion_propagator_weyl()
       implicit none
+      integer :: momentum_index
+      momentum_index=current_momentum_index(ic)
       call AntifermionPropagator_weyl(this%current_list(ic)%val_c, &
-           this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)),&
+           this%pp(0:3,momentum_index),&
            this%current_list(ic)%chirality)
     end subroutine include_antifermion_propagator_weyl
     subroutine include_scalar_propagator()
       implicit none
+      integer :: momentum_index
+      momentum_index=current_momentum_index(ic)
       call ScalarPropagator(this%current_list(ic)%val_c, &
-           this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
+           this%pp(0:3,momentum_index),&
            this%current_list(ic)%mass,&
            this%current_list(ic)%width)
     end subroutine include_scalar_propagator
@@ -3031,8 +3627,10 @@ contains
             col=col+1
          enddo
          do iacc_local=1,3
-            this%row_index(row,1:nvalues(iacc_local),iacc_local)=&
-                 cursor(1:nvalues(iacc_local),iacc_local)
+            do ival_local=1,nvalues(iacc_local)
+               this%row_index(row,ival_local,iacc_local)=&
+                    cursor(ival_local,iacc_local)
+            enddo
          enddo
       enddo
     end subroutine init_three_quark_line_colour_matrix
@@ -3698,6 +4296,8 @@ contains
           endif
           do ic2=ic1+1,this%n_cur_end(isize)
              if (.not.include_cur(ic2)) cycle
+             if (this%current_list(ic1)%heft_order.ne.&
+                  this%current_list(ic2)%heft_order) cycle
              if (size(this%current_list(ic1)%val_c).ne.size(this%current_list(ic2)%val_c)) cycle
              if ( sum(abs(this%current_list(ic1)%val_c-this%current_list(ic2)%val_c))/ &
                   sum(abs(this%current_list(ic1)%val_c)+abs(this%current_list(ic2)%val_c)).lt.tiny) then
@@ -3718,6 +4318,10 @@ contains
           if (this%interaction_list(iv1)%currents(2).eq.map_cur(i,1)) then
              this%interaction_list(iv1)%currents(2)=map_cur(i,2)
           endif
+          if (this%interaction_list(iv1)%n_inputs.eq.3) then
+             if (this%interaction_list(iv1)%currents(3).eq.map_cur(i,1)) &
+                  this%interaction_list(iv1)%currents(3)=map_cur(i,2)
+          endif
        enddo
     enddo
     do isize=2,n-1
@@ -3733,6 +4337,8 @@ contains
           endif
           do iv2=iv1+1,this%n_vert_end(isize)
              if (.not.include_vert(iv2)) cycle
+             if (any(this%interaction_list(iv1)%coupling_power.ne.&
+                  this%interaction_list(iv2)%coupling_power)) cycle
              if (size(this%interaction_list(iv1)%val_c).ne.size(this%interaction_list(iv2)%val_c)) cycle
              if ( sum(abs(this%interaction_list(iv1)%val_c-this%interaction_list(iv2)%val_c))/ &
                   sum(abs(this%interaction_list(iv1)%val_c)+abs(this%interaction_list(iv2)%val_c)).lt.tiny) then
@@ -3768,7 +4374,7 @@ contains
     write (99,*) 'Total number of currents, vertices and amplitudes after optimisation',this%n_cur,this%n_vert,this%n_amps
   end subroutine optimise_evaluation
 
-  subroutine create_library(this,n,hel,igroup,iint,pm,p)
+  subroutine create_library(this,n,hel,igroup,iint,pm,p,gs,gew,gheft)
     use particles
     implicit none
     class(amplitude_QCD) :: this
@@ -3777,17 +4383,27 @@ contains
     real(kind=8),dimension(0:3,n),intent(in) :: p
     integer,parameter :: iunit=14
     integer,dimension(n),intent(in)::hel
+    real(kind=8),intent(in),optional :: gs,gew,gheft
+    real(kind=8) :: gs_local,gew_local,gheft_local
     character(len=170) :: line,tmp
-    integer :: ip,ibin,i,isize,ih_in,ifinal,ic,iv,iamp,iproc,itype,j,ii,jj,idau,vkey
+    integer :: ip,ibin,i,isize,ih_in,ifinal,ic,iv,iamp,iproc,itype,j,ii,jj,idau,vkey,idim,iheft
+    integer :: contract_dim1,contract_dim2
     integer :: max_current_vertices
     integer :: chir1,chir2,chiri
-    integer,dimension(0:24,0:8) :: icount
+    integer,dimension(0:34,0:8) :: icount
     integer,dimension(:,:),allocatable :: icount_type
     integer,dimension(:,:),allocatable :: curs
     integer,dimension(:),allocatable :: pp
     real(kind=8),dimension(:),allocatable :: m,w
-    integer,dimension(this%n_vert,0:24,0:8) :: cur1,cur2,int1,pp1,pp2
-    real(kind=8),dimension(2,this%n_vert,0:24,0:8) :: coupl
+    integer,dimension(this%n_vert,0:34,0:8) :: cur1,cur2,cur3,int1,pp1,pp2,pp3
+    integer,dimension(this%n_vert,0:34,0:8) :: qpow,epow,hpow
+    real(kind=8),dimension(2,this%n_vert,0:34,0:8) :: coupl
+    gs_local=1d0
+    gew_local=1d0
+    gheft_local=1d0
+    if (present(gs)) gs_local=gs
+    if (present(gew)) gew_local=gew
+    if (present(gheft)) gheft_local=gheft
     max_current_vertices=max(1,maxval(this%current_list(:)%n_vert))
     allocate(icount_type(max_current_vertices,11))
     write(tmp,*) igroup
@@ -3796,6 +4412,7 @@ contains
     open(file=line,unit=iunit,form='unformatted',access='stream',status='unknown')
     write(iunit) p
     write(iunit) this%amps
+    write(iunit) gs_local,gew_local,gheft_local
     close(iunit)
     
     write(tmp,*) igroup
@@ -3811,12 +4428,14 @@ contains
     write(line,*) iint
     write(iunit,'(2x,a)') 'public :: evaluate_amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))
     write(iunit,'(2x,a)') 'contains'
-    write(iunit,'(2x,a)') 'subroutine evaluate_amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'(p,amps)'
+    write(iunit,'(2x,a)') 'subroutine evaluate_amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//&
+         '(p,amps,gs,gew,gheft)'
     write(iunit,'(4x,a)') 'implicit none'
     write(tmp,*) n
     write(iunit,'(4x,a)') 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//'),intent(in) :: p'
     write(tmp,*) this%n_amps
     write(iunit,'(4x,a)') 'complex(kind=8),dimension('//trim(adjustl(tmp))//'),intent(out) :: amps'
+    write(iunit,'(4x,a)') 'real(kind=8),intent(in) :: gs,gew,gheft'
     write(tmp,*) this%max_pp
     write(iunit,'(4x,a)') 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//') :: pp'
     write(tmp,*) this%n_cur
@@ -3827,7 +4446,8 @@ contains
     write(iunit,'(4x,a)') 'call compute_external_currents(pp,val_c)'
     do isize=2,n-1
        write(tmp,*) isize
-       write(iunit,'(4x,a)') 'call compute_vertices'//trim(adjustl(tmp))//'(pp,val_c,int_c)'
+       write(iunit,'(4x,a)') 'call compute_vertices'//trim(adjustl(tmp))//&
+            '(pp,val_c,int_c,gs,gew,gheft)'
        write(iunit,'(4x,a)') 'call compute_currents'//trim(adjustl(tmp))//'(pp,val_c,int_c)'
     enddo
     write(iunit,'(4x,a)') 'call compute_amps(amps,val_c)'
@@ -3961,7 +4581,8 @@ contains
        ! loop over the vertices required to create all the currents with isize
        ! number of external particles combined
        write(tmp,*) isize
-       write(iunit,'(2x,a)') 'subroutine compute_vertices'//trim(adjustl(tmp))//'(pp,val_c,int_c)'
+       write(iunit,'(2x,a)') 'subroutine compute_vertices'//trim(adjustl(tmp))//&
+            '(pp,val_c,int_c,gs,gew,gheft)'
        write(iunit,'(4x,a)') 'implicit none'
        write(tmp,*) this%max_pp
        write(iunit,'(4x,a)') 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//'),intent(in) :: pp'
@@ -3969,9 +4590,10 @@ contains
        write(iunit,'(4x,a)') 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(in) :: val_c'
        write(tmp,*) this%n_vert
        write(iunit,'(4x,a)') 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(inout) :: int_c'
+       write(iunit,'(4x,a)') 'real(kind=8),intent(in) :: gs,gew,gheft'
 
-       icount(0:24,0:8)=0
-       do itype=0,24 ! vertex type
+       icount(0:34,0:8)=0
+       do itype=0,34 ! vertex type
           do iv=this%n_vert_start(isize),this%n_vert_end(isize)
              if (this%interaction_list(iv)%type.eq.itype) then
                 chir1=this%current_list(this%interaction_list(iv)%currents(1))%chirality
@@ -4000,14 +4622,24 @@ contains
                 icount(itype,vkey)=icount(itype,vkey)+1
                 cur1(icount(itype,vkey),itype,vkey)=this%interaction_list(iv)%currents(1)
                 cur2(icount(itype,vkey),itype,vkey)=this%interaction_list(iv)%currents(2)
+                cur3(icount(itype,vkey),itype,vkey)=this%interaction_list(iv)%currents(3)
                 pp1(icount(itype,vkey),itype,vkey)=this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)
                 pp2(icount(itype,vkey),itype,vkey)=this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)
+                if (this%interaction_list(iv)%n_inputs.eq.3) then
+                   pp3(icount(itype,vkey),itype,vkey)=this%pp_bin_to_i(&
+                        this%current_list(this%interaction_list(iv)%currents(3))%bin)
+                else
+                   pp3(icount(itype,vkey),itype,vkey)=0
+                endif
                 int1(icount(itype,vkey),itype,vkey)=iv
                 coupl(1:2,icount(itype,vkey),itype,vkey)=this%interaction_list(iv)%coupl(1:2)
+                qpow(icount(itype,vkey),itype,vkey)=this%interaction_list(iv)%coupling_power(1)
+                epow(icount(itype,vkey),itype,vkey)=this%interaction_list(iv)%coupling_power(2)
+                hpow(icount(itype,vkey),itype,vkey)=this%interaction_list(iv)%coupling_power(3)
              endif
           enddo
        enddo
-       do itype=0,24
+       do itype=0,34
           do vkey=0,8
              if (icount(itype,vkey).eq.0) cycle
              write(tmp,*) isize
@@ -4018,7 +4650,7 @@ contains
                 write(tmp,*) vkey
                 line=trim(adjustl(line))//'_v'//trim(adjustl(tmp))
              endif
-             line=trim(adjustl(line))//'(pp,val_c,int_c)'
+             line=trim(adjustl(line))//'(pp,val_c,int_c,gs,gew,gheft)'
              write(iunit,'(4x,a)') trim(adjustl(line))
           enddo
        enddo
@@ -4026,7 +4658,7 @@ contains
        write(iunit,'(2x,a)') 'end subroutine compute_vertices'//trim(adjustl(tmp))
        write(iunit,'(a)') ''
 
-       do itype=0,24
+       do itype=0,34
           do vkey=0,8
           if (icount(itype,vkey).eq.0) cycle
           write(tmp,*) isize
@@ -4037,7 +4669,7 @@ contains
              write(tmp,*) vkey
              line=trim(adjustl(line))//'_v'//trim(adjustl(tmp))
           endif
-          line=trim(adjustl(line))//'(pp,val_c,int_c)'
+          line=trim(adjustl(line))//'(pp,val_c,int_c,gs,gew,gheft)'
           write(iunit,'(2x,a)') trim(adjustl(line))
           write(iunit,'(4x,a)') 'implicit none'
           write(tmp,*) this%max_pp
@@ -4046,6 +4678,7 @@ contains
           write(iunit,'(4x,a)') 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(in) :: val_c'
           write(tmp,*) this%n_vert
           write(iunit,'(4x,a)') 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(inout) :: int_c'
+          write(iunit,'(4x,a)') 'real(kind=8),intent(in) :: gs,gew,gheft'
           write(iunit,'(4x,a)') 'integer :: i'
           write(tmp,*) icount(itype,vkey)
           write(iunit,'(4x,a)') 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: cur1=[ &'
@@ -4064,6 +4697,10 @@ contains
              endif
           enddo
           write(iunit,'(6x,a)') trim(adjustl(line))//']'
+          if (itype.ge.28 .and. itype.le.31) then
+             call write_integer_parameter('cur3',cur3(1:icount(itype,vkey),itype,vkey),&
+                  icount(itype,vkey))
+          endif
           write(tmp,*) icount(itype,vkey)
           write(iunit,'(4x,a)') 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: cur2=[ &'
           line=''
@@ -4098,7 +4735,8 @@ contains
              endif
           enddo
           write(iunit,'(6x,a)') trim(adjustl(line))//']'
-          if (itype.eq.0 .or. itype.eq.12) then
+          if (itype.eq.0 .or. itype.eq.12 .or. &
+               (itype.ge.25 .and. itype.le.31)) then
              write(tmp,*) icount(itype,vkey)
              write(iunit,'(4x,a)') 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: pp1=[ &'
              line=''
@@ -4134,6 +4772,16 @@ contains
              enddo
              write(iunit,'(6x,a)') trim(adjustl(line))//']'
           endif
+          if (itype.ge.28 .and. itype.le.31) then
+             call write_integer_parameter('pp3',pp3(1:icount(itype,vkey),itype,vkey),&
+                  icount(itype,vkey))
+          endif
+          call write_integer_parameter('qpow',qpow(1:icount(itype,vkey),itype,vkey),&
+               icount(itype,vkey))
+          call write_integer_parameter('epow',epow(1:icount(itype,vkey),itype,vkey),&
+               icount(itype,vkey))
+          call write_integer_parameter('hpow',hpow(1:icount(itype,vkey),itype,vkey),&
+               icount(itype,vkey))
           if (itype.eq.8 .or. itype.ge.10) then
              write(tmp,*) icount(itype,vkey)*2
              write(iunit,'(4x,a)') 'real(kind=8),parameter,dimension('//trim(adjustl(tmp))//') :: coupl=[ &'
@@ -4359,8 +5007,58 @@ contains
                 write(iunit,'(8x,a)') '[coupl(2*i-1),coupl(2*i)])'
              endif
              line=''
+          elseif(itype.eq.25) then
+             line='call HeftTwoGluonToScalar(val_c(1,cur1(i)),pp(0,pp1(i)),'//&
+                  'val_c(1,cur2(i)),pp(0,pp2(i)),int_c(1,int1(i)))'
+          elseif(itype.eq.26) then
+             line='call HeftScalarGluonToGluon(val_c(1,cur1(i)),pp(0,pp1(i)),'//&
+                  'val_c(1,cur2(i)),pp(0,pp2(i)),int_c(1,int1(i)))'
+          elseif(itype.eq.27) then
+             line='call HeftScalarGluonToGluon(val_c(1,cur2(i)),pp(0,pp2(i)),'//&
+                  'val_c(1,cur1(i)),pp(0,pp1(i)),int_c(1,int1(i)))'
+          elseif(itype.eq.28) then
+             write(iunit,'(6x,a)') 'call HeftThreeGluonToScalar('//&
+                  'val_c(1,cur1(i)),pp(0,pp1(i)), &'
+             write(iunit,'(8x,a)') 'val_c(1,cur2(i)),pp(0,pp2(i)),'//&
+                  'val_c(1,cur3(i)),pp(0,pp3(i)),int_c(1,int1(i)))'
+             line=''
+          elseif(itype.eq.29) then
+             write(iunit,'(6x,a)') 'call HeftScalarTwoGluonToGluon('//&
+                  'val_c(1,cur1(i)),pp(0,pp1(i)), &'
+             write(iunit,'(8x,a)') 'val_c(1,cur2(i)),pp(0,pp2(i)),'//&
+                  'val_c(1,cur3(i)),pp(0,pp3(i)),int_c(1,int1(i)))'
+             line=''
+          elseif(itype.eq.30) then
+             write(iunit,'(6x,a)') 'call HeftScalarTwoGluonToGluon('//&
+                  'val_c(1,cur2(i)),pp(0,pp2(i)), &'
+             write(iunit,'(8x,a)') 'val_c(1,cur1(i)),pp(0,pp1(i)),'//&
+                  'val_c(1,cur3(i)),pp(0,pp3(i)),int_c(1,int1(i)))'
+             line=''
+          elseif(itype.eq.31) then
+             write(iunit,'(6x,a)') 'call HeftScalarTwoGluonToGluon('//&
+                  'val_c(1,cur3(i)),pp(0,pp3(i)), &'
+             write(iunit,'(8x,a)') 'val_c(1,cur1(i)),pp(0,pp1(i)),'//&
+                  'val_c(1,cur2(i)),pp(0,pp2(i)),int_c(1,int1(i)))'
+             line=''
+          elseif(itype.eq.32) then
+             line='call HeftTwoAuxTensorToScalar(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
+          elseif(itype.eq.33) then
+             line='call HeftScalarAuxTensorToAuxTensor(val_c(1,cur1(i)),'//&
+                  'val_c(1,cur2(i)),int_c(1,int1(i)))'
+          elseif(itype.eq.34) then
+             line='call HeftScalarAuxTensorToAuxTensor(val_c(1,cur2(i)),'//&
+                  'val_c(1,cur1(i)),int_c(1,int1(i)))'
           endif
           if (len_trim(line).gt.0) write(iunit,'(6x,a)')trim(adjustl(line))
+          if (this%interaction_list(int1(1,itype,vkey))%chirality.ne.0) then
+             idim=2
+          else
+             idim=pm%get_inter_dim(itype)
+          endif
+          write(tmp,*) idim
+          line='int_c(1:'//trim(adjustl(tmp))//',int1(i))='//&
+               'int_c(1:'//trim(adjustl(tmp))//',int1(i))*gs**qpow(i)*gew**epow(i)*gheft**hpow(i)'
+          write(iunit,'(6x,a)') trim(adjustl(line))
           write(iunit,'(4x,a)')'enddo'
 
           write(tmp,*) isize
@@ -4670,16 +5368,50 @@ contains
        do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
           if (.not.this%same_flav(iproc)) then
              write(tmp,*) iamp
-             line='amps('//trim(adjustl(tmp))//')=ContractFermionCurrents('
-             write(tmp,*) this%curr2amp(1,iamp)
-             line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'),'
-             write(tmp,*) this%current_list(this%curr2amp(1,iamp))%chirality
-             line=trim(adjustl(line))//trim(adjustl(tmp))//',val_c(1,'
-             write(tmp,*) this%curr2amp(2,iamp)
-             line=trim(adjustl(line))//trim(adjustl(tmp))//'),'
-             write(tmp,*) this%current_list(this%curr2amp(2,iamp))%chirality
-             line=trim(adjustl(line))//trim(adjustl(tmp))//')'
+             line='amps('//trim(adjustl(tmp))//')=(0d0,0d0)'
              write(iunit,'(4x,a)') trim(adjustl(line))
+             do iheft=0,1
+                if (this%amp_currents(1,iheft,iamp).eq.0) cycle
+                ic=this%amp_currents(1,iheft,iamp)
+                iv=this%amp_currents(2,iheft,iamp)
+                if (this%current_list(ic)%chirality.ne.0) then
+                   contract_dim1=2
+                else
+                   contract_dim1=pm%get_dim(this%current_list(ic)%type)
+                endif
+                if (this%current_list(iv)%chirality.ne.0) then
+                   contract_dim2=2
+                else
+                   contract_dim2=pm%get_dim(this%current_list(iv)%type)
+                endif
+                write(tmp,*) iamp
+                line='amps('//trim(adjustl(tmp))//')=amps('//trim(adjustl(tmp))//')+'
+                if (contract_dim1.eq.1 .or. contract_dim2.eq.1) then
+                   if (contract_dim1.ne.1 .or. contract_dim2.ne.1) then
+                      write (*,*) 'Cannot emit scalar/non-scalar contraction',igroup,iint,iamp
+                      stop 1
+                   endif
+                   write(tmp,*) ic
+                   line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//')*'
+                   write(tmp,*) iv
+                   line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//')'
+                elseif (contract_dim1.le.4 .and. contract_dim2.le.4) then
+                   line=trim(adjustl(line))//'ContractFermionCurrents('
+                   write(tmp,*) ic
+                   line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'),'
+                   write(tmp,*) this%current_list(ic)%chirality
+                   line=trim(adjustl(line))//trim(adjustl(tmp))//',val_c(1,'
+                   write(tmp,*) iv
+                   line=trim(adjustl(line))//trim(adjustl(tmp))//'),'
+                   write(tmp,*) this%current_list(iv)%chirality
+                   line=trim(adjustl(line))//trim(adjustl(tmp))//')'
+                else
+                   write (*,*) 'Cannot emit terminal-current contraction',igroup,iint,iamp,&
+                        contract_dim1,contract_dim2
+                   stop 1
+                endif
+                write(iunit,'(4x,a)') trim(adjustl(line))
+             enddo
           endif
        enddo
     enddo
@@ -4730,6 +5462,33 @@ contains
     write(iunit,'(a)') 'end module amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib'
     close(iunit)
     deallocate(icount_type)
+  contains
+    subroutine write_integer_parameter(name,values,nvalues)
+      implicit none
+      character(len=*),intent(in) :: name
+      integer,intent(in) :: nvalues
+      integer,dimension(nvalues),intent(in) :: values
+      character(len=170) :: local_line,local_tmp
+      integer :: ivalue
+      write(local_tmp,*) nvalues
+      write(iunit,'(4x,a)') 'integer,parameter,dimension('//trim(adjustl(local_tmp))//&
+           ') :: '//trim(name)//'=[ &'
+      local_line=''
+      do ivalue=1,nvalues
+         write(local_tmp,*) values(ivalue)
+         if (ivalue.eq.1) then
+            local_line=trim(adjustl(local_tmp))
+         else
+            local_line=trim(adjustl(local_line))//','//trim(adjustl(local_tmp))
+         endif
+         if (mod(ivalue,12).eq.0 .and. ivalue.ne.nvalues) then
+            local_line=trim(adjustl(local_line))//' &'
+            write(iunit,'(6x,a)') trim(adjustl(local_line))
+            local_line=''
+         endif
+      enddo
+      write(iunit,'(6x,a)') trim(adjustl(local_line))//']'
+    end subroutine write_integer_parameter
   end subroutine create_library
 
 
@@ -4740,7 +5499,7 @@ contains
     integer,intent(in) :: n
     integer,intent(inout) :: nhel
     integer,intent(inout),dimension(nhel) :: include_hel
-    integer :: nspin,ispin,ic,iv,iamp
+    integer :: nspin,ispin,ic,iv,iamp,iheft
     logical,dimension(:),allocatable :: include_current
     integer,dimension(:,:,:),allocatable :: tmp_spin
     ! deallocate a bunch
@@ -4753,8 +5512,7 @@ contains
     if (allocated(this%amps)) deallocate(this%amps)
     
     allocate(include_current(this%n_cur))
-    include_current(this%n_cur_start(n  ):this%n_cur_end(n  ))=.false.
-    include_current(this%n_cur_start(n-1):this%n_cur_end(n-1))=.false.
+    include_current=.false.
 
     this%include_amp(1:this%n_amps)=.false.
     
@@ -4765,8 +5523,20 @@ contains
        if (include_hel(iamp).ge.1) then
           this%include_amp(iamp)=.true.
           if (this%same_flavour_sum(iamp,1).le.0) then
-             include_current(this%curr2amp(1,iamp))=.true.
-             include_current(this%curr2amp(2,iamp))=.true.
+             do iheft=0,1
+                if (this%amp_currents(1,iheft,iamp).ne.0) then
+                   include_current(this%amp_currents(1,iheft,iamp))=.true.
+                   include_current(this%amp_currents(2,iheft,iamp))=.true.
+                endif
+                if (allocated(this%three_line_partner_amp_currents)) then
+                   if (this%three_line_partner_amp_currents(1,iheft,iamp).ne.0) then
+                      include_current(&
+                           this%three_line_partner_amp_currents(1,iheft,iamp))=.true.
+                      include_current(&
+                           this%three_line_partner_amp_currents(2,iheft,iamp))=.true.
+                   endif
+                endif
+             enddo
           else
              ! same-flavour amplitude.
              if (all(include_hel(this%same_flavour_sum(iamp,1:2)).eq.0)) then
@@ -4829,7 +5599,7 @@ contains
     logical,dimension(:),allocatable :: is_needed_cur,is_needed_ver
     integer,dimension(:),allocatable :: where_to_cur,where_to_ver,where_to_amp
     logical,dimension(*),optional :: include_current
-    integer :: to_skip,isize,nc,iv,n,iamp,iproc,i
+    integer :: to_skip,isize,nc,iv,n,iamp,iproc,i,iheft
     allocate(is_needed_cur(this%n_cur))
     allocate(is_needed_ver(this%n_vert))
     allocate(where_to_cur(this%n_cur))
@@ -4858,8 +5628,10 @@ contains
           is_needed_cur(nc)=.true.
           do iv=1,this%current_list(nc)%n_vert
              is_needed_ver(this%current_list(nc)%vertices(iv))=.true.
-             is_needed_cur(this%interaction_list(this%current_list(nc)%vertices(iv))%currents(1))=.true.
-             is_needed_cur(this%interaction_list(this%current_list(nc)%vertices(iv))%currents(2))=.true.
+             do i=1,this%interaction_list(this%current_list(nc)%vertices(iv))%n_inputs
+                is_needed_cur(this%interaction_list(&
+                     this%current_list(nc)%vertices(iv))%currents(i))=.true.
+             enddo
           enddo
        endif
     enddo
@@ -4913,8 +5685,10 @@ contains
                deallocate(this%interaction_list(where_to_ver(iv))%singlet_mv)
           this%interaction_list(where_to_ver(iv))=this%interaction_list(iv)
        endif
-       this%interaction_list(where_to_ver(iv))%currents(1:2)= &
-            where_to_cur(this%interaction_list(where_to_ver(iv))%currents(1:2))
+       this%interaction_list(where_to_ver(iv))%currents(&
+            1:this%interaction_list(where_to_ver(iv))%n_inputs)=where_to_cur(&
+            this%interaction_list(where_to_ver(iv))%currents(&
+            1:this%interaction_list(where_to_ver(iv))%n_inputs))
     enddo
     ! do the actual shifting of the amplitudes in the list
     do iamp=1,this%n_amps
@@ -4923,15 +5697,36 @@ contains
           if (this%curr2amp(i,iamp).ne.0) then
              this%curr2amp(i,where_to_amp(iamp))=where_to_cur(this%curr2amp(i,iamp))
           endif
+          do iheft=0,1
+             if (this%amp_currents(i,iheft,iamp).ne.0) then
+                this%amp_currents(i,iheft,where_to_amp(iamp))=where_to_cur(&
+                     this%amp_currents(i,iheft,iamp))
+             else
+                this%amp_currents(i,iheft,where_to_amp(iamp))=0
+             endif
+          enddo
        enddo
     enddo
     if (allocated(this%three_line_partner_curr2amp)) then
        do iamp=1,this%n_amps
+          if (.not.this%include_amp(iamp)) cycle
           do i=1,2
              if (this%three_line_partner_curr2amp(i,iamp).ne.0) then
-                this%three_line_partner_curr2amp(i,iamp)=&
+                this%three_line_partner_curr2amp(i,where_to_amp(iamp))=&
                      where_to_cur(this%three_line_partner_curr2amp(i,iamp))
+             else
+                this%three_line_partner_curr2amp(i,where_to_amp(iamp))=0
              endif
+             do iheft=0,1
+                if (this%three_line_partner_amp_currents(i,iheft,iamp).ne.0) then
+                   this%three_line_partner_amp_currents(&
+                        i,iheft,where_to_amp(iamp))=where_to_cur(&
+                        this%three_line_partner_amp_currents(i,iheft,iamp))
+                else
+                   this%three_line_partner_amp_currents(&
+                        i,iheft,where_to_amp(iamp))=0
+                endif
+             enddo
           enddo
        enddo
     endif
@@ -5029,7 +5824,9 @@ contains
     integer :: val_size
     lhs%type=rhs%type
     lhs%chirality=rhs%chirality
-    lhs%currents(1:2)=rhs%currents(1:2)
+    lhs%n_inputs=rhs%n_inputs
+    lhs%currents(1:3)=rhs%currents(1:3)
+    lhs%coupling_power=rhs%coupling_power
     lhs%coupl(1:2)=rhs%coupl(1:2)
     if (allocated(rhs%singlet_mv)) then
        if (rhs%singlet_mv(0).gt.0) then
@@ -5057,6 +5854,7 @@ contains
     lhs%type=rhs%type
     lhs%bin=rhs%bin
     lhs%chirality=rhs%chirality
+    lhs%heft_order=rhs%heft_order
     isize=popcnt(lhs%bin)
     lhs%n_vert=rhs%n_vert
     if (allocated(lhs%iproc%bits)) deallocate(lhs%iproc%bits)
@@ -5134,8 +5932,11 @@ contains
     if (allocated(amp%n_qqbar)) deallocate(amp%n_qqbar)
     if (allocated(amp%perm)) deallocate(amp%perm)
     if (allocated(amp%curr2amp)) deallocate(amp%curr2amp)
+    if (allocated(amp%amp_currents)) deallocate(amp%amp_currents)
     if (allocated(amp%three_line_partner_curr2amp)) &
          deallocate(amp%three_line_partner_curr2amp)
+    if (allocated(amp%three_line_partner_amp_currents)) &
+         deallocate(amp%three_line_partner_amp_currents)
     if (allocated(amp%i_col_i)) deallocate(amp%i_col_i)
     if (allocated(amp%processes)) deallocate(amp%processes)
     if (allocated(amp%same_flavour_sum)) deallocate(amp%same_flavour_sum)

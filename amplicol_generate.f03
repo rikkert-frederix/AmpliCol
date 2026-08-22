@@ -17,6 +17,7 @@ program amplicol_generate
   use multichannel
   use amplitude_library
   implicit none
+  real(kind=8),parameter :: coupling_pi=3.1415926535897932384626433832795d0
   integer :: iproc,iident,target_label
   real(kind=8) :: weight
   integer :: i
@@ -48,7 +49,9 @@ program amplicol_generate
   if (timing_enabled) call cpu_time(tTot_B)
 
   call phys_model%init_part()
-  if (.not.use_amplitude_library) then
+  if (use_amplitude_library) then
+     call configure_model_from_amplitude_lib()
+  else
      call apply_final_state_widths_from_process_file(filename)
   endif
   call phys_model%init_vert()
@@ -493,6 +496,21 @@ contains
        t_PS= t_PS + (tAfter-tBefore)*dble(timing_sample)
        tBefore=tAfter
     endif
+
+    ! The HEFT Wilson coefficient runs with alpha_s(mu_R), and each recursive
+    ! interaction now carries its own coupling powers.  Determine the scale
+    ! before evaluating the currents rather than applying one global power to
+    ! the squared result.
+    call set_scale(scale_choice,pgl(ichan)%next,pgl(ichan)%ps(1)%p,&
+         pgl(ichan)%iden_processes(:,1,iproc),scale_ren)
+    scale_fac=scale_ren
+    scale_shower=scale_ren
+    if (use_lhapdf) then
+       alphas=alphaspdf(scale_ren)
+    else
+       alphas=alphas_Q(scale_ren,2,alphas_MZ)
+    endif
+
     call compute_the_amps(iint,ichan)
     if (time_physics) then
        call cpu_time(tAfter)
@@ -515,30 +533,10 @@ contains
        if (done) return
     endif
 
-    ! set scales and update alphaS
+    ! Build the common non-matrix-element integration weight.
     if (time_physics) call cpu_time(tBefore)
-    call set_scale(scale_choice,pgl(ichan)%next,pgl(ichan)%ps(1)%p,&
-         pgl(ichan)%iden_processes(:,1,iproc),scale_ren)
-    scale_fac=scale_ren
-    scale_shower=scale_ren
-    if (use_lhapdf) then
-       alphas=alphaspdf(scale_ren)
-    else
-       alphas=alphas_Q(scale_ren,2,alphas_MZ)
-    endif
-    
     ! MINT weight, phase-space jacobian and GeV -> pb conversion factor
     weight=vol*pgl(ichan)%ps(1)%jac*conv
-
-    ! multiply by the strong coupling
-    if (pgl(ichan)%amps(iint)%n_sing(1).lt.pgl(ichan)%next-2) then
-       weight=weight*(4*pi*alphas)**(pgl(ichan)%next-2-pgl(ichan)%amps(iint)%n_sing(1))
-    endif
-    
-    ! multiply by the EW coupling
-    if (pgl(ichan)%amps(iint)%n_sing(1).ge.1) then
-       weight=weight*(2d0*4d0*pi*alphaEW)**pgl(ichan)%amps(iint)%n_sing(1)
-    endif
 
     if (keep_processes_separate) then
        val(1)=pgl(ichan)%amp2(1)*weight/dble(pgl(ichan)%iden(iint))
@@ -591,7 +589,9 @@ contains
        deallocate(amp2_save)
        if (create_amplitude_library) then
           call pgl(ichan)%amps(iint)%create_library(pgl(ichan)%next,pgl(ichan)%hel,&
-               ichan,iint,phys_model,pgl(ichan)%ps(1)%p)
+               ichan,iint,phys_model,pgl(ichan)%ps(1)%p,&
+               sqrt(4d0*coupling_pi*alphas),sqrt(8d0*coupling_pi*alphaEW),&
+               heft_coupling(alphas))
           pgl(ichan)%amps(iint)%lib_created=.true.
           done=.true.
        endif
@@ -605,9 +605,14 @@ contains
     integer,intent(in) :: iint,ichan
     if (.not. use_amplitude_library) then
        call pgl(ichan)%amps(iint)%evaluate(pgl(ichan)%next,pgl(ichan)%ps(1)%p,&
-            pgl(ichan)%hel,read_proc_from_file,phys_model)
+            pgl(ichan)%hel,read_proc_from_file,phys_model,&
+            gs=sqrt(4d0*coupling_pi*alphas),&
+            gew=sqrt(8d0*coupling_pi*alphaEW),&
+            gheft=heft_coupling(alphas))
     else
-       call evaluate_amp(ichan,iint,pgl(ichan)%ps(1)%p,pgl(ichan)%amps(iint)%amps)
+       call evaluate_amp(ichan,iint,pgl(ichan)%ps(1)%p,pgl(ichan)%amps(iint)%amps,&
+            sqrt(4d0*coupling_pi*alphas),sqrt(8d0*coupling_pi*alphaEW),&
+            heft_coupling(alphas))
     endif
   end subroutine compute_the_amps
     

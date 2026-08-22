@@ -11,7 +11,7 @@ program fermi_statistics_library_regression
   read(14) p
   read(14) expected
   close(14)
-  call evaluate_amp1_1(p,actual)
+  call evaluate_amp1_1(p,actual,1d0,1d0,1d0)
   relative_difference=abs(actual(1)-expected(1))/&
        max(1d-30,abs(actual(1))+abs(expected(1)))
   if (relative_difference.gt.1d-10) then

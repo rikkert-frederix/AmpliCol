@@ -11,16 +11,54 @@ module read_process_file
   integer,dimension(:),allocatable :: unique_map,iden_iproc
   integer,dimension(:,:,:),allocatable :: iden_processes
   real(kind=8),dimension(:,:),allocatable :: idenCOandMAPfactor
+  integer,parameter :: required_process_file_version=3
+  logical :: process_heft_enabled=.false.
 contains
+  subroutine configure_model_from_process_file(filename)
+    implicit none
+    character(len=*),intent(in) :: filename
+    character(len=65536) :: buffer
+    integer :: iunit,ios,n_external,n_unique,version,heft_flag
+
+    open(newunit=iunit,file=trim(filename),status='old',action='read',iostat=ios)
+    if (ios.ne.0) then
+       write (*,*) 'Could not open process file: ',trim(filename)
+       stop 1
+    endif
+    read(iunit,'(a)',iostat=ios) buffer
+    close(iunit)
+    if (ios.ne.0) then
+       write (*,*) 'Could not read process-file header'
+       stop 1
+    endif
+    read(buffer,*,iostat=ios) n_external,n_unique,version,heft_flag
+    if (ios.ne.0 .or. n_external.lt.3 .or. n_unique.lt.1) then
+       write (*,*) 'Malformed version-3 process-file header'
+       stop 1
+    endif
+    if (version.ne.required_process_file_version) then
+       write (*,*) 'Unsupported process-file version',version,&
+            '; regenerate processes.txt with process_list.py'
+       stop 1
+    endif
+    if (heft_flag.ne.0 .and. heft_flag.ne.1) then
+       write (*,*) 'HEFT process flag must be zero or one',heft_flag
+       stop 1
+    endif
+    process_heft_enabled=heft_flag.eq.1
+    call phys_model%set_heft_enabled(process_heft_enabled)
+  end subroutine configure_model_from_process_file
+
   subroutine apply_final_state_widths_from_process_file(filename)
     implicit none
     character(len=*),intent(in) :: filename
     character(len=65536) :: buffer
-    integer :: iunit,ios,n_external,n_unique,version,iproc,igroup,ngroup_file
+    integer :: iunit,ios,n_external,n_unique,version,heft_flag,iproc,igroup,ngroup_file
     integer :: group_index,nproc_in_group,max_channels,nchannels
     integer,dimension(:),allocatable :: phase_order,channels
     integer,dimension(:,:),allocatable :: physical_process
 
+    call configure_model_from_process_file(filename)
     if (ignore_final_state_width_fix) return
     open(newunit=iunit,file=trim(filename),status='old',action='read',iostat=ios)
     if (ios.ne.0) then
@@ -32,11 +70,7 @@ contains
        write (*,*) 'Could not read process-file header while applying final-state widths'
        stop 1
     endif
-    version=1
-    read(buffer,*,iostat=ios) n_external,n_unique,version
-    if (ios.ne.0) then
-       read(buffer,*,iostat=ios) n_external,n_unique
-    endif
+    read(buffer,*,iostat=ios) n_external,n_unique,version,heft_flag
     if (ios.ne.0 .or. n_external.lt.3 .or. n_unique.lt.1) then
        write (*,*) 'Malformed process-file header while applying final-state widths'
        stop 1
@@ -127,7 +161,7 @@ contains
   subroutine read_processes_from_file(filename)
     implicit none
     character(len=80) :: filename
-    integer :: iproc,igroup,icheck,nproc_in_group,max_channels,iflav,ndim,process_file_version
+    integer :: iproc,igroup,icheck,nproc_in_group,max_channels,iflav,ndim,process_file_version,heft_flag
     real(kind=8) :: idenCOfactor
     integer,dimension(:),allocatable :: process,order,ichans,phase_space_orders,phase_permutation
     integer,dimension(:,:),allocatable :: channel_permutations
@@ -139,20 +173,21 @@ contains
        write (*,*) 'Could not read the process-file header'
        stop 1
     endif
-    process_file_version=1
-    read(buff,*,iostat=ios) next,nproc_unique,process_file_version
+    read(buff,*,iostat=ios) next,nproc_unique,process_file_version,heft_flag
     if (ios.ne.0) then
-       process_file_version=1
-       read(buff,*,iostat=ios) next,nproc_unique
-       if (ios.ne.0) then
-          write (*,*) 'Malformed process-file header'
-          stop 1
-       endif
+       write (*,*) 'Malformed version-3 process-file header'
+       stop 1
     endif
-    if (process_file_version.lt.1 .or. process_file_version.gt.2) then
+    if (process_file_version.ne.required_process_file_version) then
        write (*,*) 'Unsupported process-file version',process_file_version
        stop 1
     endif
+    if (heft_flag.ne.0 .and. heft_flag.ne.1) then
+       write (*,*) 'HEFT process flag must be zero or one',heft_flag
+       stop 1
+    endif
+    process_heft_enabled=heft_flag.eq.1
+    call phys_model%set_heft_enabled(process_heft_enabled)
     ndim=3*(next-2)-4
     if (include_pdf) ndim=ndim+2
     allocate(unique_procs(1:next,1:nproc_unique))
@@ -210,21 +245,8 @@ contains
                   idenCOfactor,phase_permutation(1:next),&
                   channel_permutations(1:next,1:ichans(0))
              if (ios.ne.0) then
-                if (process_file_version.ge.2) then
-                   write (*,*) 'Malformed version-2 subprocess row; phase-space maps are required'
-                   stop 1
-                endif
-                ! Backward compatibility with process files written before
-                ! per-density external-leg permutations were introduced.
-                read(buff,*,iostat=ios) ichans(0),ichans(1:ichans(0)),process(1:next),order(1:next),idenCOfactor
-                if (ios.ne.0) then
-                   write (*,*) 'Malformed legacy subprocess row'
-                   stop 1
-                endif
-                phase_permutation=[(i,i=1,next)]
-                do i=1,ichans(0)
-                   channel_permutations(1:next,i)=[(j,j=1,next)]
-                enddo
+                write (*,*) 'Malformed version-3 subprocess row; phase-space maps are required'
+                stop 1
              endif
              if (any(ichans(1:ichans(0)).lt.1) .or. any(ichans(1:ichans(0)).gt.ngroups)) then
                 write (*,*) 'Multichannel partner outside the phase-space group range'
@@ -716,7 +738,28 @@ contains
     implicit none
     integer,dimension(next),intent(in) :: process
     integer,dimension(next),intent(inout) :: order
-    integer :: i,iord,aq,iaq,ipart
+    integer :: i,iord,aq,iaq,ipart,is,ic
+    integer,dimension(next) :: reordered
+
+    ! A pure-gluon HEFT trace has no antiquark endpoint.  Canonicalise its
+    ! colourless Higgs before the cyclic coloured trace, matching the current
+    ! recursion while leaving the phase-space density order untouched.
+    if (.not.any(abs(process).ge.1 .and. abs(process).le.6)) then
+       is=1
+       ic=count([(phys_model%is_singlet(process(order(i))),i=1,next)])+1
+       do i=1,next
+          iord=order(i)
+          if (phys_model%is_singlet(process(iord))) then
+             reordered(is)=iord
+             is=is+1
+          else
+             reordered(ic)=iord
+             ic=ic+1
+          endif
+       enddo
+       order=reordered
+       return
+    endif
     ! find the final anti-quark
     do i=next,1,-1
        iord=order(i)

@@ -17,6 +17,8 @@ module run_parameters
   real(kind=8) :: sw=0.47143025548407230d0
   real(kind=8) :: alphaS_MZ=0.119d0
   real(kind=8) :: alphaEW=0.007546771114d0
+  real(kind=8) :: heft_kappa=1d0
+  real(kind=8) :: heft_vev=246.21965d0
 
   ! Collider, scale and PDF setup.
   real(kind=8) :: sqrts=14000d0
@@ -59,7 +61,8 @@ module run_parameters
   character(len=256) :: active_run_card=''
 
   namelist /amplicol/ top_mass,top_width,z_mass,z_width,w_mass,w_width,&
-       higgs_mass,higgs_width,sw,alphaS_MZ,alphaEW,sqrts,scale_choice,&
+       higgs_mass,higgs_width,sw,alphaS_MZ,alphaEW,heft_kappa,heft_vev,&
+       sqrts,scale_choice,&
        include_pdf,use_lhapdf,lhapdfset,lhapdf_member,pdf_lhaid,&
        internal_pdf_grid,ignore_final_state_width_fix,&
        pTj_min,DRjj_min,etaj_max,sqrt_sjj_min,&
@@ -68,6 +71,13 @@ module run_parameters
        DRja_min,sqrt_sja_min,DRjl_min,sqrt_sjl_min,DRla_min,sqrt_sla_min
 
 contains
+
+  real(kind=8) function heft_coupling(alpha_s)
+    implicit none
+    real(kind=8),intent(in) :: alpha_s
+    real(kind=8),parameter :: pi=3.1415926535897932384626433832795d0
+    heft_coupling=heft_kappa*alpha_s/(3d0*pi*heft_vev)
+  end function heft_coupling
 
   subroutine reset_run_parameters()
     implicit none
@@ -82,6 +92,8 @@ contains
     sw=0.47143025548407230d0
     alphaS_MZ=0.119d0
     alphaEW=0.007546771114d0
+    heft_kappa=1d0
+    heft_vev=246.21965d0
     sqrts=14000d0
     scale_choice=2
     include_pdf=.true.
@@ -140,7 +152,8 @@ contains
   subroutine validate_run_parameters()
     implicit none
     if (any(.not.ieee_is_finite([top_mass,top_width,z_mass,z_width,&
-         w_mass,w_width,higgs_mass,higgs_width,sw,alphaS_MZ,alphaEW,sqrts,&
+         w_mass,w_width,higgs_mass,higgs_width,sw,alphaS_MZ,alphaEW,&
+         heft_kappa,heft_vev,sqrts,&
          pTj_min,DRjj_min,etaj_max,sqrt_sjj_min,pTa_min,DRaa_min,etaa_max,&
          sqrt_saa_min,pTl_min,DRll_min,etal_max,sqrt_sll_min,DRja_min,&
          sqrt_sja_min,DRjl_min,sqrt_sjl_min,DRla_min,sqrt_sla_min]))) then
@@ -163,6 +176,10 @@ contains
     endif
     if (alphaS_MZ.le.0d0 .or. alphaEW.le.0d0) then
        write (*,*) 'alphaS_MZ and alphaEW must be positive',alphaS_MZ,alphaEW
+       stop 1
+    endif
+    if (heft_vev.le.0d0) then
+       write (*,*) 'heft_vev must be positive',heft_vev
        stop 1
     endif
     if (sqrts.le.0d0) then

@@ -32,7 +32,7 @@ from collections import Counter, defaultdict
 import multiprocessing
 import math
 
-PROCESS_FILE_VERSION = 2
+PROCESS_FILE_VERSION = 3
 
 
 # Global sets (make then 'frozenset' so that they are immutable):
@@ -141,6 +141,21 @@ def ValidColorOrd(proc,perm):
     which lets the phase-space generator cover singular regions associated
     with singlets attached to different colour lines.
     """
+    # A colourless Higgs does not belong to the cyclic gluon trace.  Keep one
+    # representative of that trace (anchored on incoming leg zero) and put the
+    # Higgs at the end of the matrix-element order.  Additional placements are
+    # integration channels constructed later; they must not duplicate the
+    # colour coefficient.
+    if not any(p in quarks or p in antiquarks for p in proc):
+        if all(p in gluons for p in proc):
+            return perm[0] == 0
+        if options.get("heft", False) and proc.count("h") == 1 and \
+                all(p in gluons or p == "h" for p in proc):
+            return perm[0] == 0 and proc[perm[-1]] == "h" and all(
+                proc[idx] in gluons for idx in perm[:-1]
+            )
+        return False
+
     found_quark = found_antiquark = found_singlet = found_gluon = found_first=False
     for idx in perm:
         if idx == 0: found_first=True
@@ -331,8 +346,12 @@ def ValidProc(proc):
         if 'w+' not in proc and 'w-' not in proc:
             for q in quarks:
                 if count_matching_elements(proc,[q]) != count_matching_elements(proc,[q+'~']) : return False
-    # need at least one quark line if there are colour singlets:
-    if nq == 0 and count_matching_elements(proc,singlets) > 0 : return False
+    # A HEFT Higgs can terminate a pure-gluon tree.  No other colour singlet
+    # has such a tree-level connection in the built-in model.
+    if nq == 0 and count_matching_elements(proc,singlets) > 0:
+        if not (options.get("heft", False) and proc.count("h") == 1 and
+                count_matching_elements(proc, singlets) == 1):
+            return False
     return True
 
 def CompatibleUniqueProc(process,proc):
@@ -465,6 +484,8 @@ def ParseArgument():
     parser.add_argument("-s", "--serial", action='store_true', help="Do not use multi-processes (parallel execution). Useful for debugging.")
     parser.add_argument("-cc", "--include_cc", action='store_true', help="Include flavour-changing processes")
     parser.add_argument("-res", "--resonance", action='store_true', help="Treat the lepton pair as a resonance")
+    parser.add_argument("--heft", action='store_true',
+                        help="Enable the CP-even single-Higgs effective gluon interaction")
     args=parser.parse_args()
     if (args.flavour_scheme):
         SwitchFlavourScheme(args.flavour_scheme)
@@ -484,7 +505,11 @@ def ParseArgument():
         options["serial"] = True
     else:
         options["serial"] = False
-    return ParseCollision(args.process_string)
+    options["heft"] = args.heft
+    process = ParseCollision(args.process_string)
+    if args.heft and process["rest"].count("h") != 1:
+        parser.error("--heft requires exactly one explicit final-state 'h'")
+    return process
 
 def IdenticalParticleSymmetryFactor(proc):
     """Return the identical-particle factor for coloured final states."""
@@ -788,7 +813,12 @@ def SingletMultiChannelOrders(proc, perm):
     if not singlet_perms:
         all_possible_perms.append((perm,proc))
     else:
-        if len(anti_quark_indices) == 1:
+        if len(anti_quark_indices) == 0:
+            # In a HEFT all-gluon amplitude the Higgs is not attached to an
+            # open colour string.  Its antenna placements are density maps,
+            # not distinct matrix-element orders, and are added below.
+            all_possible_perms.append((perm, proc))
+        elif len(anti_quark_indices) == 1:
             # For a single quark line, the only thing we need to consider
             # is all the permutations of the colour singlets.
             for s in singlet_perms:
@@ -841,6 +871,62 @@ def SingletMultiChannelOrders(proc, perm):
                         all_possible_perms.append((tuple(order),tuple(proc)))
 
     return tuple(all_possible_perms)
+
+
+def HiggsDensityOrders(proc, perm):
+    """Return phase-space orders for every coloured gap of one HEFT flow.
+
+    ``perm`` remains the unique matrix-element colour order.  These returned
+    orders are used only as phase-space density headers, so the Higgs may sit
+    between coloured legs without becoming part of the colour trace/string.
+    """
+    if not options.get("heft", False) or proc.count("h") != 1:
+        zero = perm.index(0)
+        return (tuple(perm[zero:] + perm[:zero]),)
+
+    higgs = proc.index("h")
+    orders = []
+    nlines = sum(p in quarks for p in proc)
+    if nlines == 0:
+        coloured = [idx for idx in perm if proc[idx] in all_coloured]
+        zero = coloured.index(0)
+        coloured = coloured[zero:] + coloured[:zero]
+        for gap in range(len(coloured)):
+            order = coloured[:gap + 1] + [higgs] + coloured[gap + 1:]
+            zero = order.index(0)
+            orders.append(tuple(order[zero:] + order[:zero]))
+    else:
+        blocks = QuarkLineBlocks(proc, perm, nlines)
+        stripped_blocks = []
+        for block in blocks:
+            coloured = [idx for idx in block if proc[idx] in all_coloured]
+            other_singlets = [
+                idx for idx in block if proc[idx] in singlets and idx != higgs
+            ]
+            stripped_blocks.append((coloured, other_singlets))
+
+        for selected, (coloured, _) in enumerate(stripped_blocks):
+            for gap in range(max(0, len(coloured) - 1)):
+                order = []
+                for iblock, (block_coloured, block_singlets) in \
+                        enumerate(stripped_blocks):
+                    for position, label in enumerate(block_coloured):
+                        order.append(label)
+                        if iblock == selected and position == gap:
+                            order.append(higgs)
+                    order.extend(block_singlets)
+                zero = order.index(0)
+                orders.append(tuple(order[zero:] + order[:zero]))
+
+    # A valid coloured tree always has at least one gap.  Preserve insertion
+    # order while removing coincident maps (notably the two-leg cyclic trace).
+    unique = []
+    for order in orders:
+        if order not in unique:
+            unique.append(order)
+    if not unique:
+        raise ValueError(f"HEFT colour flow has no Higgs antenna gap: {proc} {perm}")
+    return tuple(unique)
 
 
 def BuildTopologyAwareMultiChannels():
@@ -994,17 +1080,42 @@ def BuildTopologyAwareMultiChannels():
             )
             for source_rank, node in enumerate(ordered_bucket):
                 record = nodes[node]
-                channel_key = base_key + (source_rank,)
-                if channel_key in maps:
-                    raise ValueError(
-                        "two coefficient maps share a ranked channel key"
+                if options.get("heft", False) and \
+                        record["process"].count("h") == 1:
+                    permutation = record["permutation"]
+                    target_to_base = [None] * len(permutation)
+                    for base_label, target_label in enumerate(permutation):
+                        target_to_base[target_label] = base_label
+                    base_process = tuple(
+                        record["process"][permutation[label]]
+                        for label in range(len(permutation))
                     )
-                maps[channel_key] = (
-                    record["process"],
-                    record["order"],
-                    record["permutation"],
-                )
-                all_channel_keys.add(channel_key)
+                    base_order = tuple(
+                        target_to_base[label] for label in record["order"]
+                    )
+                    density_orders = HiggsDensityOrders(
+                        base_process, base_order
+                    )
+                else:
+                    density_orders = (base_key[0],)
+
+                for density_rank, density_order in enumerate(density_orders):
+                    channel_key = (
+                        density_order,
+                        base_key[1],
+                        source_rank,
+                        density_rank,
+                    )
+                    if channel_key in maps:
+                        raise ValueError(
+                            "two coefficient maps share a ranked channel key"
+                        )
+                    maps[channel_key] = (
+                        record["process"],
+                        record["order"],
+                        record["permutation"],
+                    )
+                    all_channel_keys.add(channel_key)
         component_maps.append((maps, old_weight))
 
     all_keys_sorted = sorted(all_channel_keys)
@@ -1186,7 +1297,8 @@ def WriteUniqueProcsIntoList(procs,lep):
     # in case of different flavour multiple-quark line processes, add all the possible orders:
     sorted_procs=Addqq_dfProcesses(sorted_procs)
     try:
-        line=[str(len(sorted_procs[0]))+' '+str(len(sorted_procs))+' '+str(PROCESS_FILE_VERSION)]
+        line=[str(len(sorted_procs[0]))+' '+str(len(sorted_procs))+' '+
+              str(PROCESS_FILE_VERSION)+' '+str(int(options.get("heft", False)))]
     except IndexError:
         print("ERROR: no processes found. Try './process_list.py --help' to get more information on usage")
         quit()
