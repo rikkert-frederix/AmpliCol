@@ -400,7 +400,7 @@ class ThreeQuarkLineMultiChannelRegression(unittest.TestCase):
             header = process_list.WriteUniqueProcsIntoList(
                 [("g", "g", "g", "g")]
             )[0]
-            self.assertEqual(header, "4 1 3")
+            self.assertEqual(header, "4 1 4")
         finally:
             process_list.process_provenance = saved_provenance
             process_list.options.clear()

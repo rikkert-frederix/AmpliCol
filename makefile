@@ -3,7 +3,8 @@
 .PHONY: test_matrix_elements test_fermi_statistics test_mixed_spinors \
 	test_three_quark_line_reweight test_three_quark_line_multichannel \
 	test_run_parameters test_command_line_parser test_resonance_phase_space \
-	test_process_list_resonances \
+	test_process_list_resonances test_flavour_scheme_yukawa \
+	test_flavour_scheme_end_to_end \
 	update_matrix_cases update_matrix_goldens
 
 FC = gfortran
@@ -123,6 +124,9 @@ FILES_M_TEST_THREE_QUARK = bitset.o color_algebra.o math_functions.o feynmanrule
 FILES_M_TEST_MIXED_SPINOR = bitset.o color_algebra.o math_functions.o feynmanrules.o run_parameters.o particles.o \
 	amplitude_QCD.o mixed_spinor_regression.o
 
+FILES_M_TEST_FLAVOUR_YUKAWA = bitset.o color_algebra.o math_functions.o feynmanrules.o run_parameters.o particles.o \
+	amplitude_QCD.o flavour_scheme_yukawa_regression.o
+
 FILES_M_TEST_RUN_PARAMETERS = run_parameters.o particles.o run_parameters_regression.o
 
 FILES_M_TEST_COMMAND_LINE = command_line_parser.o command_line_parser_regression.o
@@ -156,6 +160,9 @@ three_quark_line_reweight_regression: $(FILES_M_TEST_THREE_QUARK)
 mixed_spinor_regression: $(FILES_M_TEST_MIXED_SPINOR)
 	$(FC) $(FFLAGS) -o $@ $(FILES_M_TEST_MIXED_SPINOR)
 
+flavour_scheme_yukawa_regression: $(FILES_M_TEST_FLAVOUR_YUKAWA)
+	$(FC) $(FFLAGS) -o $@ $(FILES_M_TEST_FLAVOUR_YUKAWA)
+
 run_parameters_regression: $(FILES_M_TEST_RUN_PARAMETERS)
 	$(FC) $(FFLAGS) -o $@ $(FILES_M_TEST_RUN_PARAMETERS)
 
@@ -179,6 +186,10 @@ mixed_spinor_regression.o: \
 		tests/matrix_elements/mixed_spinor_regression.f03 amplitude_QCD.o particles.o
 	$(FC) $(FFLAGS) -c -I. $< -o $@
 
+flavour_scheme_yukawa_regression.o: \
+		tests/matrix_elements/flavour_scheme_yukawa_regression.f03 amplitude_QCD.o particles.o
+	$(FC) $(FFLAGS) -fno-finite-math-only -c -I. $< -o $@
+
 run_parameters_regression.o: tests/run_parameters_regression.f03 run_parameters.o particles.o
 	$(FC) $(FFLAGS) -c -I. $< -o $@
 
@@ -194,7 +205,8 @@ tests/matrix_elements/cases.dat: tests/matrix_elements/generate_matrix_cases.py 
 tests/matrix_elements/golden.dat: matrix_element_regression tests/matrix_elements/cases.dat
 	./matrix_element_regression --write tests/matrix_elements/cases.dat $@
 
-test_matrix_elements: matrix_element_regression
+test_matrix_elements: matrix_element_regression tests/matrix_elements/cases.dat \
+		tests/matrix_elements/golden.dat
 	./matrix_element_regression --check tests/matrix_elements/cases.dat tests/matrix_elements/golden.dat
 
 test_fermi_statistics: fermi_statistics_regression \
@@ -212,6 +224,16 @@ test_mixed_spinors: mixed_spinor_regression \
 	$(PYTHON) tests/matrix_elements/run_mixed_spinor_library_regression.py \
 		--generator $(CURDIR)/mixed_spinor_regression \
 		--compiler "$(FC)" --fflags="$(FFLAGS)"
+
+test_flavour_scheme_yukawa: flavour_scheme_yukawa_regression
+	./flavour_scheme_yukawa_regression
+
+test_flavour_scheme_end_to_end: amplicol_generate \
+		tests/flavour_scheme_end_to_end_regression.py process_list.py
+	$(PYTHON) tests/flavour_scheme_end_to_end_regression.py \
+		--generator $(CURDIR)/amplicol_generate \
+		--process-list $(CURDIR)/process_list.py \
+		--input-card $(CURDIR)/tests/input/resonance_run_card.dat
 
 test_three_quark_line_reweight: three_quark_line_reweight_regression \
 		amplicol_reweight tests/matrix_elements/run_three_quark_line_reweight_regression.py

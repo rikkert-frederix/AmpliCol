@@ -20,6 +20,10 @@ program run_parameters_regression
   open(unit=99,file='/dev/null',status='unknown',action='write')
 
   call read_run_parameters(trim(default_card))
+  call assert_close(up_mass,0.0022d0,'default inactive up mass')
+  call assert_close(strange_mass,0.095d0,'default inactive strange mass')
+  call assert_close(charm_mass,1.42d0,'default inactive charm mass')
+  call assert_close(bottom_mass,4.7d0,'default inactive bottom mass')
   call assert_close(top_mass,173d0,'default top mass')
   call assert_close(top_width,1.4915d0,'default top width')
   call assert_close(z_mass,91.188d0,'default Z mass')
@@ -43,6 +47,10 @@ program run_parameters_regression
   endif
 
   call read_run_parameters(trim(custom_card))
+  call assert_close(up_mass,0.003d0,'custom inactive up mass')
+  call assert_close(strange_mass,0.11d0,'custom inactive strange mass')
+  call assert_close(charm_mass,1.5d0,'custom inactive charm mass')
+  call assert_close(bottom_mass,4.8d0,'custom inactive bottom mass')
   call assert_close(top_mass,181d0,'custom top mass')
   call assert_close(top_width,2.3d0,'custom top width')
   call assert_close(z_mass,92d0,'custom Z mass')
@@ -84,6 +92,52 @@ program run_parameters_regression
   call assert_close(DRla_min,0.56d0,'custom lepton-photon DR cut')
   call assert_close(sqrt_sla_min,106d0,'custom lepton-photon invariant-mass cut')
 
+  ! The process flavour scheme controls both kinematic quark masses and the
+  ! presence of their Higgs Yukawa vertices.
+  call set_flavour_scheme(5)
+  call model%init_part()
+  call model%init_vert()
+  call assert_close(model%get_mass(5),0d0,'FS5 bottom mass')
+  call assert_close(model%get_mass(4),0d0,'FS5 charm mass')
+  call assert_yukawa_vertex(model,5,0d0,.false.,'FS5 Hbb')
+  call assert_yukawa_vertex(model,6,181d0/(81d0*2d0*0.5d0),.true.,'FS5 Htt')
+
+  call set_flavour_scheme(4)
+  call model%init_part()
+  call model%init_vert()
+  call assert_close(model%get_mass(5),4.8d0,'FS4 bottom mass')
+  call assert_close(model%get_mass(4),0d0,'FS4 charm mass')
+  call assert_yukawa_vertex(model,5,4.8d0/(81d0*2d0*0.5d0),.true.,'FS4 Hbb')
+  call assert_yukawa_vertex(model,4,0d0,.false.,'FS4 Hcc')
+  if (.not.model%is_jet(5) .or. model%is_massless_fermion(5)) then
+     write (*,*) 'Massive FS4 bottom must remain a resolved jet but not a massless fermion'
+     stop 1
+  endif
+
+  call set_flavour_scheme(3)
+  call model%init_part()
+  call model%init_vert()
+  call assert_close(model%get_mass(4),1.5d0,'FS3 charm mass')
+  call assert_close(model%get_mass(5),4.8d0,'FS3 bottom mass')
+  call assert_yukawa_vertex(model,4,1.5d0/(81d0*2d0*0.5d0),.true.,'FS3 Hcc')
+
+  call set_flavour_scheme(2)
+  call model%init_part()
+  call model%init_vert()
+  call assert_close(model%get_mass(3),0.11d0,'FS2 strange mass')
+  call assert_close(model%get_mass(2),0d0,'FS2 up mass')
+  call assert_yukawa_vertex(model,3,0.11d0/(81d0*2d0*0.5d0),.true.,'FS2 Hss')
+  call assert_yukawa_vertex(model,2,0d0,.false.,'FS2 Huu')
+
+  call set_flavour_scheme(1)
+  call model%init_part()
+  call model%init_vert()
+  call assert_close(model%get_mass(2),0.003d0,'FS1 up mass')
+  call assert_close(model%get_mass(1),0d0,'FS1 down mass')
+  call assert_yukawa_vertex(model,2,0.003d0/(81d0*2d0*0.5d0),.true.,'FS1 Huu')
+  call assert_yukawa_vertex(model,1,0d0,.false.,'FS1 Hdd')
+
+  call set_flavour_scheme(5)
   call model%init_part()
   call model%init_vert()
   call assert_close(model%get_mass(6),181d0,'model top mass')
@@ -156,5 +210,30 @@ contains
        stop 1
     endif
   end subroutine assert_close
+
+  subroutine assert_yukawa_vertex(test_model,pdg,reference,expected_presence,label)
+    implicit none
+    type(physics_model),intent(in) :: test_model
+    integer,intent(in) :: pdg
+    real(kind=dp),intent(in) :: reference
+    logical,intent(in) :: expected_presence
+    character(len=*),intent(in) :: label
+    integer :: ivert
+    logical :: found
+    found=.false.
+    do ivert=1,test_model%nint
+       if (test_model%vertex_list(ivert)%type.eq.16 .and.&
+            all(test_model%vertex_list(ivert)%particles.eq.[pdg,25,pdg])) then
+          found=.true.
+          if (expected_presence) call assert_close(&
+               test_model%vertex_list(ivert)%coupl(1),reference,label)
+          exit
+       endif
+    enddo
+    if (found.neqv.expected_presence) then
+       write (*,*) trim(label),' presence mismatch:',found,expected_presence
+       stop 1
+    endif
+  end subroutine assert_yukawa_vertex
 
 end program run_parameters_regression

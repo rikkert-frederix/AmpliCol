@@ -18,6 +18,7 @@ import process_list  # noqa: E402
 
 class ProcessListResonanceRegression(unittest.TestCase):
     def setUp(self):
+        process_list.SwitchFlavourScheme(5)
         process_list._resonance_history_cache.clear()
 
     def histories(self, process):
@@ -95,6 +96,54 @@ class ProcessListResonanceRegression(unittest.TestCase):
             for resonance in history
         ))
 
+    def test_higgs_yukawa_currents_follow_the_flavour_scheme(self):
+        bottom_process = (
+            "g", "g", "b", "b~", "e+", "e-", "ve", "ve~"
+        )
+        charm_process = (
+            "g", "g", "c", "c~", "e+", "e-", "ve", "ve~"
+        )
+
+        process_list.SwitchFlavourScheme(5)
+        self.assertFalse(any(
+            resonance[0] == 25
+            for history in self.histories(bottom_process)
+            for resonance in history
+        ))
+
+        process_list.SwitchFlavourScheme(4)
+        self.assertTrue(any(
+            resonance[0] == 25
+            for history in self.histories(bottom_process)
+            for resonance in history
+        ))
+        self.assertFalse(any(
+            resonance[0] == 25
+            for history in self.histories(charm_process)
+            for resonance in history
+        ))
+
+        process_list.SwitchFlavourScheme(3)
+        self.assertTrue(any(
+            resonance[0] == 25
+            for history in self.histories(charm_process)
+            for resonance in history
+        ))
+
+        for scheme in range(1, 6):
+            process_list.SwitchFlavourScheme(scheme)
+            higgs_quark_flavours = {
+                abs(particle)
+                for vertex in process_list.THREE_POINT_VERTICES
+                if 25 in vertex
+                for particle in vertex
+                if 1 <= abs(particle) <= 6
+            }
+            self.assertEqual(
+                higgs_quark_flavours,
+                set(range(scheme + 1, 7)),
+            )
+
     def test_top_supports_explicit_and_leptonic_w_daughters(self):
         explicit = self.histories(
             ("u", "u~", "b", "w+", "b~", "w-")
@@ -130,7 +179,7 @@ class ProcessListResonanceRegression(unittest.TestCase):
             (23, (2, 3)), (23, (4, 5)), (23, (6, 7))
         ), histories)
 
-    def test_version_three_serializes_provenance_and_resonances(self):
+    def test_version_four_serializes_provenance_and_resonances(self):
         saved_options = dict(process_list.options)
         saved_provenance = process_list.process_provenance
         try:
@@ -143,7 +192,7 @@ class ProcessListResonanceRegression(unittest.TestCase):
             unique = process_list.WriteUniqueProcsIntoList([
                 ("u", "u~", "e+", "e-")
             ])
-            self.assertEqual(unique[0], "4 1 3")
+            self.assertEqual(unique[0], "4 1 4")
             self.assertEqual(unique[1], "# process: p p > e+ e-")
             self.assertIn("resonance_discovery=automatic", unique[2])
 

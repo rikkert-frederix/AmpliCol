@@ -1,7 +1,8 @@
 module read_process_file
   use handling_processes
-  use run_parameters, only: ignore_final_state_width_fix
+  use run_parameters, only: ignore_final_state_width_fix,flavour_scheme,set_flavour_scheme
   implicit none
+  integer,parameter :: supported_process_file_version=4
   integer :: sf_nprocs
   integer,dimension(:,:),allocatable :: unique_procs,processes,color_orders,multi_chans
   integer,dimension(:,:),allocatable :: phase_space_permutations
@@ -12,13 +13,84 @@ module read_process_file
   integer,dimension(:,:,:),allocatable :: iden_processes
   real(kind=8),dimension(:,:),allocatable :: idenCOandMAPfactor
 contains
+  subroutine parse_process_options(options_line,file_flavour_scheme)
+    implicit none
+    character(len=*),intent(in) :: options_line
+    integer,intent(out) :: file_flavour_scheme
+    integer :: key_position,value_start,value_length,value_end,ios
+
+    if (index(adjustl(options_line),'# options:').ne.1) then
+       write (*,*) 'Missing process options in version-4 process file'
+       stop 1
+    endif
+    key_position=index(options_line,'flavour_scheme=')
+    if (key_position.eq.0) then
+       write (*,*) 'Process options do not define flavour_scheme'
+       stop 1
+    endif
+    value_start=key_position+len('flavour_scheme=')
+    value_length=scan(options_line(value_start:),' ')
+    if (value_length.eq.0) then
+       value_end=len_trim(options_line)
+    else
+       value_end=value_start+value_length-2
+    endif
+    read(options_line(value_start:value_end),*,iostat=ios) file_flavour_scheme
+    if (ios.ne.0 .or. file_flavour_scheme.lt.1 .or. file_flavour_scheme.gt.5) then
+       write (*,*) 'Invalid flavour_scheme in process options',&
+            trim(options_line(value_start:value_end))
+       stop 1
+    endif
+  end subroutine parse_process_options
+
+  subroutine configure_flavour_scheme_from_process_file(filename)
+    implicit none
+    character(len=*),intent(in) :: filename
+    character(len=65536) :: buffer
+    integer :: iunit,ios,n_external,n_unique,process_file_version
+    integer :: file_flavour_scheme
+
+    open(newunit=iunit,file=trim(filename),status='old',action='read',iostat=ios)
+    if (ios.ne.0) then
+       write (*,*) 'Could not open process file while reading model metadata: ',trim(filename)
+       stop 1
+    endif
+    read(iunit,'(a)',iostat=ios) buffer
+    if (ios.ne.0) then
+       write (*,*) 'Could not read process-file header while reading model metadata'
+       stop 1
+    endif
+    read(buffer,*,iostat=ios) n_external,n_unique,process_file_version
+    if (ios.ne.0 .or. n_external.lt.3 .or. n_unique.lt.1) then
+       write (*,*) 'Malformed process-file header while reading model metadata'
+       stop 1
+    endif
+    if (process_file_version.ne.supported_process_file_version) then
+       write (*,*) 'Only version-4 process files are supported; regenerate processes.txt'
+       stop 1
+    endif
+    read(iunit,'(a)',iostat=ios) buffer
+    if (ios.ne.0 .or. index(adjustl(buffer),'# process:').ne.1) then
+       write (*,*) 'Missing process provenance in version-4 process file'
+       stop 1
+    endif
+    read(iunit,'(a)',iostat=ios) buffer
+    close(iunit)
+    if (ios.ne.0) then
+       write (*,*) 'Missing process options in version-4 process file'
+       stop 1
+    endif
+    call parse_process_options(buffer,file_flavour_scheme)
+    call set_flavour_scheme(file_flavour_scheme)
+  end subroutine configure_flavour_scheme_from_process_file
+
   subroutine apply_final_state_widths_from_process_file(filename)
     implicit none
     character(len=*),intent(in) :: filename
     character(len=65536) :: buffer
     integer :: iunit,ios,n_external,n_unique,version,iproc,igroup,ngroup_file
     integer :: group_index,nproc_in_group,max_channels,nchannels,nresonances,iresonance
-    integer :: resonance_pdg,iresonance_species
+    integer :: resonance_pdg,iresonance_species,file_flavour_scheme
     integer,dimension(4),parameter :: resonance_species=[6,23,24,25]
     logical,dimension(4) :: mapped_species
     real(kind=8),dimension(4) :: nominal_widths
@@ -46,14 +118,24 @@ contains
        write (*,*) 'Malformed process-file header while applying final-state widths'
        stop 1
     endif
-    if (version.ne.3) then
-       write (*,*) 'Only version-3 process files are supported; regenerate processes.txt'
+    if (version.ne.supported_process_file_version) then
+       write (*,*) 'Only version-4 process files are supported; regenerate processes.txt'
        stop 1
     endif
     read(iunit,'(a)',iostat=ios) buffer
+    if (ios.ne.0 .or. index(adjustl(buffer),'# process:').ne.1) then
+       write (*,*) 'Missing process provenance in version-4 process file'
+       stop 1
+    endif
     read(iunit,'(a)',iostat=ios) buffer
     if (ios.ne.0) then
-       write (*,*) 'Missing process provenance in version-3 process file'
+       write (*,*) 'Missing process options in version-4 process file'
+       stop 1
+    endif
+    call parse_process_options(buffer,file_flavour_scheme)
+    if (file_flavour_scheme.ne.flavour_scheme) then
+       write (*,*) 'Process flavour scheme changed after model initialization',&
+            file_flavour_scheme,flavour_scheme
        stop 1
     endif
     do iproc=1,n_unique
@@ -190,6 +272,7 @@ contains
     implicit none
     character(len=80) :: filename
     integer :: iproc,igroup,icheck,nproc_in_group,max_channels,iflav,ndim,process_file_version
+    integer :: file_flavour_scheme
     integer :: nresonances,iresonance,resonance_pdg,nlabels,label,mask,overlap
     real(kind=8) :: idenCOfactor
     integer,dimension(:),allocatable :: process,order,ichans,phase_space_orders,phase_permutation
@@ -208,8 +291,8 @@ contains
        write (*,*) 'Malformed process-file header'
        stop 1
     endif
-    if (process_file_version.ne.3) then
-       write (*,*) 'Only version-3 process files are supported; regenerate processes.txt'
+    if (process_file_version.ne.supported_process_file_version) then
+       write (*,*) 'Only version-4 process files are supported; regenerate processes.txt'
        stop 1
     endif
     if (next.lt.3 .or. nproc_unique.lt.1) then
@@ -218,12 +301,18 @@ contains
     endif
     read(10,'(a)',iostat=ios) buff
     if (ios.ne.0 .or. index(adjustl(buff),'# process:').ne.1) then
-       write (*,*) 'Missing process provenance in version-3 process file'
+       write (*,*) 'Missing process provenance in version-4 process file'
        stop 1
     endif
     read(10,'(a)',iostat=ios) buff
-    if (ios.ne.0 .or. index(adjustl(buff),'# options:').ne.1) then
-       write (*,*) 'Missing process options in version-3 process file'
+    if (ios.ne.0) then
+       write (*,*) 'Missing process options in version-4 process file'
+       stop 1
+    endif
+    call parse_process_options(buff,file_flavour_scheme)
+    if (file_flavour_scheme.ne.flavour_scheme) then
+       write (*,*) 'Process flavour scheme does not match initialized model',&
+            file_flavour_scheme,flavour_scheme
        stop 1
     endif
     ndim=3*(next-2)-4
@@ -253,7 +342,7 @@ contains
        read(10,*,iostat=ios) icheck,nproc_in_group,max_channels,phase_space_orders(1:next),nresonances
        if (ios.ne.0 .or. nproc_in_group.lt.1 .or. max_channels.lt.1 .or.&
             nresonances.lt.0) then
-          write (*,*) 'Malformed version-3 phase-space group header',igroup
+          write (*,*) 'Malformed version-4 phase-space group header',igroup
           stop 1
        endif
        if (icheck.ne.igroup) then
@@ -336,7 +425,7 @@ contains
                   idenCOfactor,phase_permutation(1:next),&
                   channel_permutations(1:next,1:ichans(0))
              if (ios.ne.0) then
-                write (*,*) 'Malformed version-3 subprocess row; phase-space maps are required'
+                write (*,*) 'Malformed version-4 subprocess row; phase-space maps are required'
                 stop 1
              endif
              if (any(ichans(1:ichans(0)).lt.1) .or. any(ichans(1:ichans(0)).gt.ngroups)) then

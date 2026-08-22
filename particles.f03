@@ -1,12 +1,16 @@
 module particles
-  use run_parameters, only: sw,configured_top_mass=>top_mass,&
+  use run_parameters, only: sw,configured_flavour_scheme=>flavour_scheme,&
+       configured_up_mass=>up_mass,configured_strange_mass=>strange_mass,&
+       configured_charm_mass=>charm_mass,configured_bottom_mass=>bottom_mass,&
+       configured_top_mass=>top_mass,&
        configured_top_width=>top_width,configured_z_mass=>z_mass,&
        configured_z_width=>z_width,configured_w_mass=>w_mass,&
        configured_w_width=>w_width,configured_higgs_mass=>higgs_mass,&
        configured_higgs_width=>higgs_width,ignore_final_state_width_fix
   implicit none
   integer,parameter :: model_particle_capacity = 24
-  integer,parameter :: model_vertex_capacity = 240
+  integer,parameter :: model_vertex_capacity = 256
+  integer,parameter,public :: model_signature_size = 15
   private :: append_particle, append_vertex, find_particle_index, particle_property_sign&
        &, weak_coupling, weak_cosine, neutral_gauge_coupling&
        &, charged_current_coupling, particle_species_index&
@@ -14,6 +18,8 @@ module particles
        &, weak_coupling_squared, weak_cosine_squared&
        &, weak_coupling_over_cosine, higgs_self_coupling&
        &, model_particle_capacity, model_vertex_capacity,sw&
+       &, configured_flavour_scheme,configured_up_mass,configured_strange_mass&
+       &, configured_charm_mass,configured_bottom_mass&
        &, configured_top_mass,configured_top_width,configured_z_mass&
        &, configured_z_width,configured_w_mass,configured_w_width&
        &, configured_higgs_mass,configured_higgs_width&
@@ -32,7 +38,7 @@ module particles
   type physics_model
      type(particle),dimension(:),allocatable :: particle_list
      type(vertex),dimension(:),allocatable :: vertex_list
-     integer :: npart,nint
+     integer :: npart,nint,flavour_scheme=5
    contains
      procedure,public :: init_part,get_mass,get_width,get_spin&
           &,get_antipart,init_vert,get_dim,get_inter_dim,is_quark&
@@ -208,6 +214,7 @@ contains
     real(kind=8),intent(in),optional :: tmass,twidth,zmass,zwidth,wmass,wwidth,hmass,hwidth
     real(kind=8) :: tmass_local,twidth_local,zmass_local,zwidth_local
     real(kind=8) :: wmass_local,wwidth_local,hmass_local,hwidth_local
+    real(kind=8),dimension(5) :: configured_quark_masses
     tmass_local=configured_top_mass
     twidth_local=configured_top_width
     zmass_local=configured_z_mass
@@ -224,18 +231,27 @@ contains
     if (present(wwidth)) wwidth_local=wwidth
     if (present(hmass)) hmass_local=hmass
     if (present(hwidth)) hwidth_local=hwidth
+    this%flavour_scheme=configured_flavour_scheme
+    configured_quark_masses=[0d0,configured_up_mass,configured_strange_mass,&
+         configured_charm_mass,configured_bottom_mass]
     l=0
     if (allocated(this%particle_list)) deallocate(this%particle_list)
     if (allocated(this%vertex_list)) deallocate(this%vertex_list)
     this%npart=model_particle_capacity ! gluon, quarks, tensors, bosons, Higgs and leptons
     allocate(this%particle_list(this%npart))
 
-    ! 5 massless quarks
+    ! The active flavour-scheme quarks are exactly massless.  Every heavier
+    ! flavour uses its configured kinematic mass, which also switches on its
+    ! Higgs Yukawa vertex in init_vert().
     do i=1,5
        if (mod(i,2).eq.0) then
-          call append_particle(this,l,i,0d0,0d0,2,-i,4,2d0/3d0,[0.5d0,0d0],[1d0/3d0,4d0/3d0],3)
+          call append_particle(this,l,i,merge(0d0,configured_quark_masses(i),&
+               i.le.this%flavour_scheme),0d0,2,-i,4,2d0/3d0,&
+               [0.5d0,0d0],[1d0/3d0,4d0/3d0],3)
        else
-          call append_particle(this,l,i,0d0,0d0,2,-i,4,-1d0/3d0,[-0.5d0,0d0],[1d0/3d0,-2d0/3d0],3)
+          call append_particle(this,l,i,merge(0d0,configured_quark_masses(i),&
+               i.le.this%flavour_scheme),0d0,2,-i,4,-1d0/3d0,&
+               [-0.5d0,0d0],[1d0/3d0,-2d0/3d0],3)
        endif
     enddo
 
@@ -671,8 +687,10 @@ contains
   function model_signature(this) result(signature)
     implicit none
     class(physics_model),intent(in) :: this
-    real(kind=8),dimension(9) :: signature
-    signature=[sw,this%get_mass(6),this%get_width(6),this%get_mass(23),&
+    integer :: i
+    real(kind=8),dimension(model_signature_size) :: signature
+    signature=[dble(this%flavour_scheme),sw,(this%get_mass(i),i=1,6),&
+         this%get_width(6),this%get_mass(23),&
          this%get_width(23),this%get_mass(24),this%get_width(24),&
          this%get_mass(25),this%get_width(25)]
   end function model_signature
@@ -928,11 +946,9 @@ contains
     implicit none
     class(physics_model) :: this
     integer :: iPDG
-    if ((this%is_quark(iPDG).or.this%is_antiquark(iPDG).or.this%is_gluon(iPDG)) .and. &
-         this%get_mass(iPDG).eq.0d0) then
-       is_jet=.true.
-    else
-       is_jet=.false.
-    endif
+    ! A resolved heavy-flavour quark is still a jet for cuts and dynamical
+    ! scales.  Beam/inclusive-jet membership is controlled separately by the
+    ! process-list flavour scheme; top quarks are deliberately excluded here.
+    is_jet=(abs(iPDG).ge.1 .and. abs(iPDG).le.5) .or. this%is_gluon(iPDG)
   end function is_jet
 end module particles

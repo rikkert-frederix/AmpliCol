@@ -44,6 +44,11 @@ program amplicol_generate
 
   call get_run_arguments()
   call read_run_parameters(input_filename)
+  if (use_amplitude_library) then
+     call configure_flavour_scheme_from_amplitude_lib()
+  else
+     call configure_flavour_scheme_from_process_file(filename)
+  endif
   call write_run_parameters(99)
   timing_enabled=timing_mode.ne.timing_none
   if (timing_enabled) call cpu_time(tTot_B)

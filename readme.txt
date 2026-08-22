@@ -45,13 +45,31 @@ configurations with three or more quark lines are not included by
 default, but can be included by providing the '--include_3qqbar'
 option.
 
+The flavour scheme also fixes quark masses and Higgs Yukawa couplings.
+Quarks included in 'p'/'j' are exactly massless and have no Higgs
+Yukawa vertex. Quarks outside the scheme use the corresponding mass in
+run_card.dat and couple to the Higgs with that mass:
+
+  -FS=5: massless d,u,s,c,b; massive/Yukawa t
+  -FS=4: massless d,u,s,c;   massive/Yukawa b,t
+  -FS=3: massless d,u,s;     massive/Yukawa c,b,t
+  -FS=2: massless d,u;       massive/Yukawa s,c,b,t
+  -FS=1: massless d;         massive/Yukawa u,s,c,b,t
+
+Massive b/c/s/u final states are still classified as resolved jets for
+cuts and dynamical scales, but they are not members of the inclusive
+'p' or 'j' definitions. Higgs couplings to W and Z bosons are present
+in every scheme. Select a PDF and alpha_s setup appropriate for the
+chosen flavour scheme; '-FS' controls process content, masses and
+Yukawa vertices, but does not replace that PDF choice.
+
 Resonance histories are discovered automatically for every concrete
 subprocess. Supported mappings include leptonic Z/W currents (including
 single- and double-resonant four-lepton alternatives), H -> ZZ/WW ->
 leptons, and t -> b W (or the charge-conjugate decay), with an explicit
 W or a nested leptonic W decay. Competing WW and ZZ histories remain
 separate multichannel densities of the same complete matrix element;
-no diagrams or interference terms are removed. The generated version-3
+no diagrams or interference terms are removed. The generated version-4
 process file records the original request/options and, for each density,
 the resonance PDG and occurrence-tagged external descendants.
 
@@ -78,6 +96,13 @@ Physics and run parameters are read from the Fortran namelist
 couplings, collider energy, scale choice, PDF setup, and generation
 cuts. A different card can be selected with '--input=FILE' (or
 '--card=FILE'); changing these values does not require recompilation.
+
+The up_mass, strange_mass, charm_mass and bottom_mass entries are used
+only when that flavour is outside the active scheme recorded in the
+process file. Active flavours remain exactly massless even when a
+non-zero value is present in the run card. The same effective mass is
+used for external kinematics, propagators and the corresponding Higgs
+Yukawa coupling.
 
 By default, the effective width of every massive particle requested in
 the physical final state is set to zero globally before any subprocess
@@ -151,11 +176,12 @@ recompiling the amplicol_generate code. (This also means re-creating
 the process library, since a make clean removes all of the process
 library source code).
 
-Masses, effective widths, and weak-coupling parameters are compiled
-into an amplitude library. AmpliCol records these values and rejects an
-incompatible input card when '--library=use' is requested; recreate the
-library with the new card in that case. An amplitude library must be
-created and used with the same '--combine_subprocesses' setting.
+The flavour scheme, masses, effective widths, and weak-coupling
+parameters are compiled into an amplitude library. AmpliCol records
+these values and rejects an incompatible input card when
+'--library=use' is requested; recreate the library with the new card in
+that case. An amplitude library must be created and used with the same
+'--combine_subprocesses' setting.
 Collider, cut, scale and PDF settings may be changed without recreating
 the amplitude library.
 
@@ -208,6 +234,10 @@ By default, the produced LHEF also contains some lines starting with
 '#' that contain some information for debugging. The writing of these
 lines is skipped by adding the '--remove_comments' option to the
 execution of the amplicol_reweight code.
+
+Generated LHE files record the flavour scheme in their header. The
+reweighter reads this metadata before building its physics model and
+preserves it in the reweighted output.
 
 
 

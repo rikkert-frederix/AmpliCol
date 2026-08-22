@@ -1,4 +1,8 @@
 &amplicol
+  up_mass=0.003d0
+  strange_mass=0.11d0
+  charm_mass=1.5d0
+  bottom_mass=4.8d0
   top_mass=181d0
   top_width=2.3d0
   z_mass=92d0

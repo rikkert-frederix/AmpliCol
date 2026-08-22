@@ -1,6 +1,7 @@
 program matrix_element_regression
   use amplitude_QCD_mod
   use particles
+  use run_parameters, only: set_flavour_scheme
   implicit none
 
   integer,parameter :: dp=kind(1d0)
@@ -13,9 +14,7 @@ program matrix_element_regression
   call parse_arguments(mode,cases_file,golden_file)
 
   open(unit=99,file='/dev/null',status='unknown',action='write')
-  call model%init_part(173d0,1.491500d0,91.188d0,2.441404d0,&
-                       80.419002445756163d0,2.0476d0,125d0,0.0063823389999999999d0)
-  call model%init_vert()
+  call configure_model(5)
 
   if (trim(mode).eq.'--write') then
      call write_goldens(trim(cases_file),trim(golden_file))
@@ -51,19 +50,20 @@ contains
     integer,intent(in) :: iunit
     integer,intent(out) :: version,ncases
     read(iunit,*) version,ncases
-    if (version.ne.1) then
+    if (version.ne.2) then
        write (*,*) 'Unsupported matrix-element fixture version:',version
        stop 2
     endif
   end subroutine read_header
 
-  subroutine read_case(iunit,case_id,family,n,group_id,row_id,point,process,order)
+  subroutine read_case(iunit,case_id,family,flavour_scheme,n,group_id,row_id,&
+       point,process,order)
     implicit none
     integer,intent(in) :: iunit
-    integer,intent(out) :: case_id,n,group_id,row_id
+    integer,intent(out) :: case_id,flavour_scheme,n,group_id,row_id
     character(len=*),intent(out) :: family,point
     integer,dimension(:),allocatable,intent(out) :: process,order
-    read(iunit,*) case_id,family,n,group_id,row_id,point
+    read(iunit,*) case_id,family,flavour_scheme,n,group_id,row_id,point
     allocate(process(n),order(n))
     read(iunit,*) process(1:n)
     read(iunit,*) order(1:n)
@@ -73,7 +73,7 @@ contains
     implicit none
     character(len=*),intent(in) :: cases_file,golden_file
     integer :: cunit,gunit,version,ncases,icase
-    integer :: case_id,n,group_id,row_id,n_amps
+    integer :: case_id,flavour_scheme,n,group_id,row_id,n_amps
     integer,dimension(:),allocatable :: process,order
     integer,dimension(:,:),allocatable :: spins
     complex(kind=dp),dimension(:),allocatable :: amps
@@ -85,10 +85,11 @@ contains
     write(gunit,'(i0,1x,i0)') version,ncases
 
     do icase=1,ncases
-       call read_case(cunit,case_id,family,n,group_id,row_id,point,process,order)
-       call evaluate_case(n,process,order,point,n_amps,spins,amps)
-       write(gunit,'(i0,1x,a,1x,i0,1x,i0,1x,i0,1x,i0)') &
-            case_id,trim(family),n,group_id,row_id,n_amps
+       call read_case(cunit,case_id,family,flavour_scheme,n,group_id,row_id,&
+            point,process,order)
+       call evaluate_case(flavour_scheme,n,process,order,point,n_amps,spins,amps)
+       write(gunit,'(i0,1x,a,1x,i0,1x,i0,1x,i0,1x,i0,1x,i0)') &
+            case_id,trim(family),flavour_scheme,n,group_id,row_id,n_amps
        call write_int_array(gunit,process)
        call write_int_array(gunit,order)
        call write_amplitude_rows(gunit,spins,amps)
@@ -105,8 +106,8 @@ contains
     implicit none
     character(len=*),intent(in) :: cases_file,golden_file
     integer :: cunit,gunit,version,ncases,gversion,gncases,icase
-    integer :: case_id,n,group_id,row_id,n_amps
-    integer :: g_case_id,g_n,g_group_id,g_row_id,g_n_amps
+    integer :: case_id,flavour_scheme,n,group_id,row_id,n_amps
+    integer :: g_case_id,g_flavour_scheme,g_n,g_group_id,g_row_id,g_n_amps
     integer :: total_failures,total_checks,total_cases
     integer,dimension(:),allocatable :: process,order,g_process,g_order
     integer,dimension(:,:),allocatable :: spins,g_spins
@@ -126,17 +127,19 @@ contains
     total_checks=0
     total_cases=0
     do icase=1,ncases
-       call read_case(cunit,case_id,family,n,group_id,row_id,point,process,order)
-       call read_golden_case(gunit,g_case_id,g_family,g_n,g_group_id,g_row_id,&
-            g_n_amps,g_process,g_order,g_spins,g_amps)
+       call read_case(cunit,case_id,family,flavour_scheme,n,group_id,row_id,&
+            point,process,order)
+       call read_golden_case(gunit,g_case_id,g_family,g_flavour_scheme,g_n,&
+            g_group_id,g_row_id,g_n_amps,g_process,g_order,g_spins,g_amps)
 
-       if (.not.same_case_metadata(case_id,family,n,group_id,row_id,process,order,&
-            g_case_id,g_family,g_n,g_group_id,g_row_id,g_process,g_order)) then
+       if (.not.same_case_metadata(case_id,family,flavour_scheme,n,group_id,&
+            row_id,process,order,g_case_id,g_family,g_flavour_scheme,g_n,&
+            g_group_id,g_row_id,g_process,g_order)) then
           write (*,*) 'Golden metadata mismatch at case:',case_id
           stop 1
        endif
 
-       call evaluate_case(n,process,order,point,n_amps,spins,amps)
+       call evaluate_case(flavour_scheme,n,process,order,point,n_amps,spins,amps)
        call compare_case(case_id,family,group_id,row_id,n,n_amps,spins,amps,&
             g_n_amps,g_spins,g_amps,total_failures,total_checks)
        total_cases=total_cases+1
@@ -155,10 +158,11 @@ contains
     write (*,*) 'Matrix-element regression passed:',total_cases,'cases and',total_checks,'helicity amplitudes'
   end subroutine check_goldens
 
-  subroutine read_golden_case(iunit,case_id,family,n,group_id,row_id,n_amps,process,order,spins,amps)
+  subroutine read_golden_case(iunit,case_id,family,flavour_scheme,n,group_id,&
+       row_id,n_amps,process,order,spins,amps)
     implicit none
     integer,intent(in) :: iunit
-    integer,intent(out) :: case_id,n,group_id,row_id,n_amps
+    integer,intent(out) :: case_id,flavour_scheme,n,group_id,row_id,n_amps
     character(len=*),intent(out) :: family
     integer,dimension(:),allocatable,intent(out) :: process,order
     integer,dimension(:,:),allocatable,intent(out) :: spins
@@ -166,7 +170,7 @@ contains
     integer :: i
     real(kind=dp) :: re,im
 
-    read(iunit,*) case_id,family,n,group_id,row_id,n_amps
+    read(iunit,*) case_id,family,flavour_scheme,n,group_id,row_id,n_amps
     allocate(process(n),order(n),spins(n,n_amps),amps(n_amps))
     read(iunit,*) process(1:n)
     read(iunit,*) order(1:n)
@@ -176,15 +180,18 @@ contains
     enddo
   end subroutine read_golden_case
 
-  logical function same_case_metadata(case_id,family,n,group_id,row_id,process,order,&
-       g_case_id,g_family,g_n,g_group_id,g_row_id,g_process,g_order)
+  logical function same_case_metadata(case_id,family,flavour_scheme,n,group_id,&
+       row_id,process,order,g_case_id,g_family,g_flavour_scheme,g_n,g_group_id,&
+       g_row_id,g_process,g_order)
     implicit none
-    integer,intent(in) :: case_id,n,group_id,row_id,g_case_id,g_n,g_group_id,g_row_id
+    integer,intent(in) :: case_id,flavour_scheme,n,group_id,row_id,g_case_id
+    integer,intent(in) :: g_flavour_scheme,g_n,g_group_id,g_row_id
     character(len=*),intent(in) :: family,g_family
     integer,dimension(:),intent(in) :: process,order,g_process,g_order
     same_case_metadata=.false.
     if (case_id.ne.g_case_id) return
     if (trim(family).ne.trim(g_family)) return
+    if (flavour_scheme.ne.g_flavour_scheme) return
     if (n.ne.g_n) return
     if (group_id.ne.g_group_id .or. row_id.ne.g_row_id) return
     if (size(process).ne.size(g_process) .or. size(order).ne.size(g_order)) return
@@ -192,9 +199,9 @@ contains
     same_case_metadata=.true.
   end function same_case_metadata
 
-  subroutine evaluate_case(n,process,order,point,n_amps,spins,amps)
+  subroutine evaluate_case(flavour_scheme,n,process,order,point,n_amps,spins,amps)
     implicit none
-    integer,intent(in) :: n
+    integer,intent(in) :: flavour_scheme,n
     integer,dimension(n),intent(in) :: process,order
     character(len=*),intent(in) :: point
     integer,intent(out) :: n_amps
@@ -207,6 +214,8 @@ contains
     integer,dimension(:),allocatable :: hel
     real(kind=dp),dimension(:,:),allocatable :: p
     integer :: i
+
+    if (model%flavour_scheme.ne.flavour_scheme) call configure_model(flavour_scheme)
 
     allocate(part(n,1),orders(n,1),hel(n))
     part(1:n,1)=process(1:n)
@@ -226,6 +235,15 @@ contains
     enddo
     amps(1:n_amps)=amp%amps(1:n_amps)
   end subroutine evaluate_case
+
+  subroutine configure_model(flavour_scheme)
+    implicit none
+    integer,intent(in) :: flavour_scheme
+    call set_flavour_scheme(flavour_scheme)
+    call model%init_part(173d0,1.491500d0,91.188d0,2.441404d0,&
+         80.419002445756163d0,2.0476d0,125d0,0.0063823389999999999d0)
+    call model%init_vert()
+  end subroutine configure_model
 
   subroutine setup_spin(n,process,spin)
     implicit none

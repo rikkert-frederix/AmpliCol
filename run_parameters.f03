@@ -3,6 +3,14 @@ module run_parameters
   implicit none
 
   ! Particle properties used by the built-in Standard Model.
+  ! The process metadata selects which of the first five quarks are active
+  ! and exactly massless.  The masses below are used when a flavour is outside
+  ! that active scheme; the same mass then defines its Higgs Yukawa coupling.
+  integer :: flavour_scheme=5
+  real(kind=8) :: up_mass=0.0022d0
+  real(kind=8) :: strange_mass=0.095d0
+  real(kind=8) :: charm_mass=1.42d0
+  real(kind=8) :: bottom_mass=4.7d0
   real(kind=8) :: top_mass=173d0
   real(kind=8) :: top_width=1.4915d0
   real(kind=8) :: z_mass=91.188d0
@@ -58,7 +66,8 @@ module run_parameters
 
   character(len=256) :: active_run_card=''
 
-  namelist /amplicol/ top_mass,top_width,z_mass,z_width,w_mass,w_width,&
+  namelist /amplicol/ up_mass,strange_mass,charm_mass,bottom_mass,&
+       top_mass,top_width,z_mass,z_width,w_mass,w_width,&
        higgs_mass,higgs_width,sw,alphaS_MZ,alphaEW,sqrts,scale_choice,&
        include_pdf,use_lhapdf,lhapdfset,lhapdf_member,pdf_lhaid,&
        internal_pdf_grid,ignore_final_state_width_fix,&
@@ -71,6 +80,11 @@ contains
 
   subroutine reset_run_parameters()
     implicit none
+    flavour_scheme=5
+    up_mass=0.0022d0
+    strange_mass=0.095d0
+    charm_mass=1.42d0
+    bottom_mass=4.7d0
     top_mass=173d0
     top_width=1.4915d0
     z_mass=91.188d0
@@ -112,6 +126,16 @@ contains
     active_run_card=''
   end subroutine reset_run_parameters
 
+  subroutine set_flavour_scheme(new_flavour_scheme)
+    implicit none
+    integer,intent(in) :: new_flavour_scheme
+    if (new_flavour_scheme.lt.1 .or. new_flavour_scheme.gt.5) then
+       write (*,*) 'flavour_scheme must be between 1 and 5',new_flavour_scheme
+       stop 1
+    endif
+    flavour_scheme=new_flavour_scheme
+  end subroutine set_flavour_scheme
+
   subroutine read_run_parameters(filename)
     implicit none
     character(len=*),intent(in) :: filename
@@ -139,7 +163,8 @@ contains
 
   subroutine validate_run_parameters()
     implicit none
-    if (any(.not.ieee_is_finite([top_mass,top_width,z_mass,z_width,&
+    if (any(.not.ieee_is_finite([up_mass,strange_mass,charm_mass,bottom_mass,&
+         top_mass,top_width,z_mass,z_width,&
          w_mass,w_width,higgs_mass,higgs_width,sw,alphaS_MZ,alphaEW,sqrts,&
          pTj_min,DRjj_min,etaj_max,sqrt_sjj_min,pTa_min,DRaa_min,etaa_max,&
          sqrt_saa_min,pTl_min,DRll_min,etal_max,sqrt_sll_min,DRja_min,&
@@ -147,9 +172,11 @@ contains
        write (*,*) 'All real-valued input parameters must be finite'
        stop 1
     endif
-    if (top_mass.lt.0d0 .or. z_mass.le.0d0 .or. w_mass.le.0d0 .or.&
+    if (up_mass.le.0d0 .or. strange_mass.le.0d0 .or.&
+         charm_mass.le.0d0 .or. bottom_mass.le.0d0 .or.&
+         top_mass.le.0d0 .or. z_mass.le.0d0 .or. w_mass.le.0d0 .or.&
          higgs_mass.le.0d0) then
-       write (*,*) 'Particle masses in the input file must be non-negative (and boson masses positive)'
+       write (*,*) 'Configured massive-quark and boson masses must be positive'
        stop 1
     endif
     if (top_width.lt.0d0 .or. z_width.lt.0d0 .or. w_width.lt.0d0 .or.&
@@ -191,6 +218,7 @@ contains
     implicit none
     integer,intent(in) :: iunit
     write(iunit,'(a)') 'AmpliCol input parameters from '//trim(active_run_card)
+    write(iunit,'(a,i0)') 'Active flavour scheme: ',flavour_scheme
     write(iunit,nml=amplicol)
   end subroutine write_run_parameters
 

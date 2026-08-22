@@ -64,11 +64,17 @@ FAMILIES = (
 )
 
 
-def parse_process_file(path: Path, family: str) -> list[tuple[str, int, int, int, str, list[int], list[int]]]:
+def parse_process_file(path: Path, family: str) -> list[tuple]:
     lines = path.read_text().splitlines()
     n_external, n_unique, version = map(int, lines[0].split())
-    if version != 3:
-        raise ValueError(f"expected process-file version 3, found {version}")
+    if version != 4:
+        raise ValueError(f"expected process-file version 4, found {version}")
+
+    options_line = next(line for line in lines[1:] if line.startswith("# options:"))
+    flavour_scheme = int(
+        next(token.split("=", 1)[1] for token in options_line.split()
+             if token.startswith("flavour_scheme="))
+    )
 
     idx = 1
     while idx < len(lines) and lines[idx].startswith("#"):
@@ -99,7 +105,10 @@ def parse_process_file(path: Path, family: str) -> list[tuple[str, int, int, int
             order = [int(x) for x in parts[proc_start + n_external : proc_start + 2 * n_external]]
             order = direct_amplitude_order(process, order)
             point = point_name(n_external, process)
-            cases.append((family, n_external, group_id, row_id, point, process, order))
+            cases.append((
+                family, flavour_scheme, n_external, group_id, row_id,
+                point, process, order,
+            ))
 
     return cases
 
@@ -128,9 +137,9 @@ def point_name(n_external: int, process: list[int]) -> str:
 
 
 def select_cases(
-    cases: list[tuple[str, int, int, int, str, list[int], list[int]]],
+    cases: list[tuple],
     limit: int | None,
-) -> list[tuple[str, int, int, int, str, list[int], list[int]]]:
+) -> list[tuple]:
     if limit is None or len(cases) <= limit:
         return cases
     if limit <= 1:
@@ -139,7 +148,7 @@ def select_cases(
     return [cases[i] for i in indices]
 
 
-def generate_cases(repo_root: Path) -> list[tuple[str, int, int, int, str, list[int], list[int]]]:
+def generate_cases(repo_root: Path) -> list[tuple]:
     process_list = repo_root / "process_list.py"
     all_cases = []
     with tempfile.TemporaryDirectory(prefix="weyl-me-cases-") as tmp:
@@ -155,11 +164,15 @@ def generate_cases(repo_root: Path) -> list[tuple[str, int, int, int, str, list[
     return all_cases
 
 
-def write_cases(path: Path, cases: list[tuple[str, int, int, int, str, list[int], list[int]]]) -> None:
+def write_cases(path: Path, cases: list[tuple]) -> None:
     with path.open("w") as handle:
-        handle.write(f"1 {len(cases)}\n")
-        for case_id, (family, n_external, group_id, row_id, point, process, order) in enumerate(cases, 1):
-            handle.write(f"{case_id} {family} {n_external} {group_id} {row_id} {point}\n")
+        handle.write(f"2 {len(cases)}\n")
+        for case_id, case in enumerate(cases, 1):
+            family, flavour_scheme, n_external, group_id, row_id, point, process, order = case
+            handle.write(
+                f"{case_id} {family} {flavour_scheme} {n_external} "
+                f"{group_id} {row_id} {point}\n"
+            )
             handle.write(" ".join(str(x) for x in process) + "\n")
             handle.write(" ".join(str(x) for x in order) + "\n")
 

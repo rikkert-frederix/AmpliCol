@@ -2,12 +2,41 @@ module amplitude_library
   use handling_processes
   use read_process_file
   use pdf_wrap, only: set_ipdgs_for_PDF
+  use particles, only: model_signature_size
+  use run_parameters, only: flavour_scheme,set_flavour_scheme
+  implicit none
+  integer,parameter :: amplitude_library_version=6
 contains
+  subroutine configure_flavour_scheme_from_amplitude_lib()
+    implicit none
+    character(len=*),parameter :: filename='Library/amplitudes.bin'
+    integer :: iunit,ios,library_version,stored_flavour_scheme
+
+    open(newunit=iunit,file=filename,form='unformatted',access='stream',&
+         status='old',action='read',iostat=ios)
+    if (ios.ne.0) then
+       write (*,*) 'Could not open amplitude library metadata: ',filename
+       stop 1
+    endif
+    read(iunit,iostat=ios) library_version
+    if (ios.ne.0 .or. library_version.ne.amplitude_library_version) then
+       write (*,*) 'Amplitude library has an incompatible binary format; recreate it'
+       stop 1
+    endif
+    read(iunit,iostat=ios) stored_flavour_scheme
+    close(iunit)
+    if (ios.ne.0 .or. stored_flavour_scheme.lt.1 .or. stored_flavour_scheme.gt.5) then
+       write (*,*) 'Amplitude library has invalid flavour-scheme metadata'
+       stop 1
+    endif
+    call set_flavour_scheme(stored_flavour_scheme)
+  end subroutine configure_flavour_scheme_from_amplitude_lib
+
   subroutine create_amplitude_lib()
     implicit none
     character(len=170) :: tmp,line,filename
     integer :: igroup,j,iamp
-    real(kind=8),dimension(9) :: stored_model_signature
+    real(kind=8),dimension(model_signature_size) :: stored_model_signature
     filename='Library/amplib.f03'
     open(unit=14,file=filename,status='unknown')
     write(14,*) 'module amp_lib'
@@ -66,7 +95,8 @@ contains
     close(14)
     filename='Library/amplitudes.bin'
     open(unit=14,file=filename,form='unformatted',access='stream',status='unknown')
-    write(14) 5 ! binary amplitude-library format version
+    write(14) amplitude_library_version
+    write(14) flavour_scheme
     stored_model_signature=phys_model%model_signature()
     write(14) stored_model_signature
     write(14) pgl_unique%next,pgl_unique%nproc
@@ -129,14 +159,20 @@ contains
   subroutine read_amplitude_lib()
     implicit none
     character(len=170) :: filename
-    integer :: dim1,dim2,dim3,iamp,igroup,library_version
-    real(kind=8),dimension(9) :: stored_model_signature,current_model_signature
-    real(kind=8),dimension(9) :: tolerance
+    integer :: dim1,dim2,dim3,iamp,igroup,library_version,stored_flavour_scheme
+    real(kind=8),dimension(model_signature_size) :: stored_model_signature,current_model_signature
+    real(kind=8),dimension(model_signature_size) :: tolerance
     filename='Library/amplitudes.bin'
     open(unit=14,file=filename,form='unformatted',access='stream',status='old')
     read(14) library_version
-    if (library_version.ne.5) then
+    if (library_version.ne.amplitude_library_version) then
        write (*,*) 'Amplitude library has an incompatible binary format; recreate it'
+       stop 1
+    endif
+    read(14) stored_flavour_scheme
+    if (stored_flavour_scheme.ne.flavour_scheme) then
+       write (*,*) 'Amplitude library flavour scheme does not match initialized model',&
+            stored_flavour_scheme,flavour_scheme
        stop 1
     endif
     read(14) stored_model_signature

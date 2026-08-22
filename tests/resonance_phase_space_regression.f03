@@ -5,6 +5,7 @@ program resonance_phase_space_regression
 
   open(unit=99,status='scratch',action='write')
   call check_breit_wigner_quantile()
+  call check_massive_quark_external_legs()
   call check_root_breit_wigner_with_pdfs()
   call check_nested_and_disjoint_inverse()
   close(99)
@@ -75,6 +76,56 @@ contains
     call check_inverse(original_x,forward_jac,inverse_point)
     call phase_space%cleanup()
   end subroutine check_breit_wigner_quantile
+
+  subroutine check_massive_quark_external_legs()
+    type(phase_space_gen23) :: phase_space
+    type(psv) :: point,inverse_point
+    integer,parameter :: n=5
+    integer,dimension(n) :: order
+    integer,dimension(1) :: resonance_pdgs,resonance_masks
+    real(kind=8),dimension(1) :: resonance_masses,resonance_widths
+    real(kind=8),dimension(n) :: masses,pt_cut,rap_cut
+    real(kind=8),dimension(n,n) :: dr_cut,sqrt_s_min
+    real(kind=8),dimension(5) :: original_x
+    real(kind=8) :: forward_jac,mass_shell
+    integer :: i
+
+    order=[1,2,3,4,5]
+    masses=[0d0,0d0,4.7d0,1.42d0,1.42d0]
+    pt_cut=0d0
+    rap_cut=0d0
+    dr_cut=0d0
+    sqrt_s_min=0d0
+    resonance_pdgs=[23]
+    resonance_masks=[ibset(ibset(0,3),4)]
+    resonance_masses=[91.188d0]
+    resonance_widths=[2.441404d0]
+    call phase_space%configure_resonances(1,resonance_pdgs,resonance_masks,&
+         resonance_masses,resonance_widths)
+    call phase_space%init(500d0,n,masses,order,pt_cut,rap_cut,dr_cut,&
+         sqrt_s_min,.false.,.false.)
+    allocate(point%x(phase_space%ndim),point%p(0:3,n))
+    original_x=[0.29d0,0.67d0,0.38d0,0.81d0,0.46d0]
+    point%x=original_x
+    call phase_space%generate_momenta(point)
+    if (point%jac.le.0d0) then
+       write (*,*) 'Massive-quark resonance map failed',point%jac
+       stop 1
+    endif
+    do i=3,n
+       mass_shell=minkowski_square(point%p(:,i))
+       if (abs(mass_shell-masses(i)**2).gt.1d-9*max(1d0,masses(i)**2)) then
+          write (*,*) 'Massive external leg is off shell',i,mass_shell,masses(i)**2
+          stop 1
+       endif
+    enddo
+    forward_jac=point%jac
+    allocate(inverse_point%x(phase_space%ndim),inverse_point%p(0:3,n))
+    inverse_point%p=point%p
+    call phase_space%compute_x_from_momenta(inverse_point)
+    call check_inverse(original_x,forward_jac,inverse_point)
+    call phase_space%cleanup()
+  end subroutine check_massive_quark_external_legs
 
   subroutine check_root_breit_wigner_with_pdfs()
     type(phase_space_gen23) :: phase_space

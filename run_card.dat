@@ -2,6 +2,12 @@
 ! retain the defaults defined in run_parameters.f03.
 &amplicol
   ! Particle masses and nominal widths [GeV]
+  ! Flavours included in the process-list -FS choice are kept exactly
+  ! massless.  These positive values are used only when the flavour is inactive.
+  up_mass     = 0.0022d0
+  strange_mass= 0.095d0
+  charm_mass  = 1.42d0
+  bottom_mass = 4.7d0
   top_mass   = 173d0
   top_width  = 1.4915d0
   z_mass     = 91.188d0

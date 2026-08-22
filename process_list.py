@@ -32,7 +32,7 @@ from collections import Counter, defaultdict
 import multiprocessing
 import math
 
-PROCESS_FILE_VERSION = 3
+PROCESS_FILE_VERSION = 4
 
 
 # Global sets (make then 'frozenset' so that they are immutable):
@@ -42,6 +42,7 @@ singlets=frozenset({'a','z','w+','w-','e+','e-','mu+','mu-','ta+','ta-','ve','ve
 gluons=frozenset({'g'})
 all_coloured=quarks | antiquarks | gluons
 flavour_scheme=frozenset({'d','u','s','c','b'}) # all the massless quarks
+flavour_scheme_number=5
 massless_QCD=flavour_scheme | frozenset([q+'~' for q in flavour_scheme]) | gluons
 proton=massless_QCD
 jet=massless_QCD
@@ -61,7 +62,7 @@ process_provenance = ""
 _resonance_history_cache = {}
 
 
-def _build_three_point_vertices():
+def _build_three_point_vertices(active_flavours):
     """Return the physical cubic vertices needed for resonance discovery.
 
     Particles are represented in the all-outgoing convention used by the
@@ -74,7 +75,11 @@ def _build_three_point_vertices():
         vertices.add((21, flavour, -flavour))
         vertices.add((22, flavour, -flavour))
         vertices.add((23, flavour, -flavour))
-    vertices.add((25, 6, -6))
+    # A quark has a Higgs Yukawa current precisely when it is outside the
+    # active, exactly-massless flavour scheme.  Top is therefore always
+    # included, while b/c/s/u enter successively in lower schemes.
+    for flavour in range(active_flavours + 1, 7):
+        vertices.add((25, flavour, -flavour))
     for down in (1, 3, 5):
         up = down + 1
         vertices.add((24, down, -up))
@@ -88,7 +93,7 @@ def _build_three_point_vertices():
     return tuple(vertices)
 
 
-THREE_POINT_VERTICES = _build_three_point_vertices()
+THREE_POINT_VERTICES = _build_three_point_vertices(flavour_scheme_number)
 
 
 def _anti_pdg(pdg):
@@ -96,10 +101,10 @@ def _anti_pdg(pdg):
     return pdg if pdg in (21, 22, 23, 25) else -pdg
 
 
-def _build_current_combinations():
+def _build_current_combinations(vertices):
     """Map two outgoing currents to every current allowed by a cubic vertex."""
     combinations = defaultdict(set)
-    for vertex in THREE_POINT_VERTICES:
+    for vertex in vertices:
         for current_index in range(3):
             current = _anti_pdg(vertex[current_index])
             children = [vertex[index] for index in range(3)
@@ -108,7 +113,7 @@ def _build_current_combinations():
     return {key: frozenset(value) for key, value in combinations.items()}
 
 
-CURRENT_COMBINATIONS = _build_current_combinations()
+CURRENT_COMBINATIONS = _build_current_combinations(THREE_POINT_VERTICES)
 
 def SwitchFlavourScheme(FS):
     """Set which quark flavours are treated as massless proton/jet content.
@@ -119,28 +124,24 @@ def SwitchFlavourScheme(FS):
     # Overwrite the relevant global variables so that we switch to the
     # 'FS' flavour-scheme process definition.
     global flavour_scheme
+    global flavour_scheme_number
     global massless_QCD
     global proton
     global jet
+    global THREE_POINT_VERTICES
+    global CURRENT_COMBINATIONS
 
-    if FS==1:
-        flavour_scheme=frozenset({'d'}) # all the massless quarks
-    elif FS==2:
-        flavour_scheme=frozenset({'d','u'}) # all the massless quarks
-    elif FS==3:
-        flavour_scheme=frozenset({'d','u','s'}) # all the massless quarks
-    elif FS==4:
-        flavour_scheme=frozenset({'d','u','s','c'}) # all the massless quarks
-    elif FS==5:
-        flavour_scheme=frozenset({'d','u','s','c','b'}) # all the massless quarks
-    elif FS==6:
-        flavour_scheme=frozenset({'d','u','s','c','b','t'}) # all the massless quarks
-    else:
-        print("ERROR: unknown flavour scheme",FS)
-        quit()
+    ordered_flavours=('d','u','s','c','b')
+    if FS < 1 or FS > len(ordered_flavours):
+        raise ValueError(f"unknown flavour scheme {FS}; expected 1--5")
+    flavour_scheme_number=FS
+    flavour_scheme=frozenset(ordered_flavours[:FS])
     massless_QCD=flavour_scheme | frozenset([q+'~' for q in flavour_scheme]) | gluons
     proton=massless_QCD
     jet=massless_QCD
+    THREE_POINT_VERTICES=_build_three_point_vertices(FS)
+    CURRENT_COMBINATIONS=_build_current_combinations(THREE_POINT_VERTICES)
+    _resonance_history_cache.clear()
 
 def ProcessProcess(proc):
     """Return phase-space groups for all valid colour orderings of ``proc``.
@@ -463,8 +464,9 @@ def DiscoverResonanceHistories(process):
     the antiparticle current, which excludes poles that cannot occur in a
     complete tree diagram for the concrete subprocess.
     """
-    if process in _resonance_history_cache:
-        return _resonance_history_cache[process]
+    cache_key = (flavour_scheme_number, process)
+    if cache_key in _resonance_history_cache:
+        return _resonance_history_cache[cache_key]
 
     external_pdgs = tuple(int(pdgs[particle]) for particle in process)
     final_indices = tuple(range(2, len(process)))
@@ -476,7 +478,7 @@ def DiscoverResonanceHistories(process):
     )
     if len(final_leptons) < 2 and not has_top_decay_seed:
         result = ((),)
-        _resonance_history_cache[process] = result
+        _resonance_history_cache[cache_key] = result
         return result
 
     currents = _current_builder(external_pdgs)
@@ -615,7 +617,7 @@ def DiscoverResonanceHistories(process):
         len(history), tuple((len(item[1]), item[1], item[0])
                             for item in history)
     )))
-    _resonance_history_cache[process] = result
+    _resonance_history_cache[cache_key] = result
     return result
 
 def ValidProc(proc):
@@ -1573,7 +1575,7 @@ def WriteUniqueProcsIntoList(procs):
         print("ERROR: no processes found. Try './process_list.py --help' to get more information on usage")
         quit()
     line.append('# process: '+process_provenance)
-    line.append('# options: flavour_scheme='+str(options['flavour_scheme'])+
+    line.append('# options: flavour_scheme='+str(flavour_scheme_number)+
                 ' include_3qqbar='+str(options['include_3qqbar_processes']).lower()+
                 ' include_cc='+str(options['include_cc_processes']).lower()+
                 ' resonance_discovery=automatic')
@@ -1649,7 +1651,10 @@ if __name__ == "__main__":
     # Consider all the possible colour-orderings and collect all the
     # info into the phase_space_orders dictionary.
     if not options["serial"]:
-        with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
+        with multiprocessing.Pool(
+                processes=multiprocessing.cpu_count(),
+                initializer=SwitchFlavourScheme,
+                initargs=(flavour_scheme_number,)) as pool:
             results = pool.map(ProcessProcess, all_procs)  # Parallelize across procs
     else:
         results=[ProcessProcess(x) for x in all_procs]

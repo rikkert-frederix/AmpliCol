@@ -13,6 +13,7 @@ from pathlib import Path
 
 EVENT = """<LesHouchesEvents version="3.0">
 <header>
+<flavour_scheme> 4 </flavour_scheme>
 6 0
 <nevents> 1 </nevents>
 </header>
@@ -65,6 +66,9 @@ def main() -> None:
             )
 
         output = Path(f"{event_file}.rwgt").read_text(encoding="ascii")
+        if "<flavour_scheme>  4 </flavour_scheme>" not in output and \
+                "<flavour_scheme> 4 </flavour_scheme>" not in output:
+            raise AssertionError("reweighted LHE did not preserve flavour-scheme metadata")
         match = re.search(
             r"#color_expansion\s+(\S+)\s+(\S+)\s+(\S+)", output
         )

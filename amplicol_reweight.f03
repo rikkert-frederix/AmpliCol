@@ -65,9 +65,9 @@ program amplicol_reweight
 
   call cpu_time(tTot_B)
 
-  call phys_model%init_part()
   open(unit=11,file=trim(event_filename),status='old')
   call read_unique_in_file()
+  call phys_model%init_part()
   call allocate_process_info()
   open(unit=12,file=trim(event_filename)//'.rwgt',status='unknown')
   call read_init_and_allocate_events(11)
@@ -265,10 +265,30 @@ contains
   
   subroutine read_unique_in_file()
     implicit none
-    integer :: iproc
-    character :: dummy
-    read(11,*) dummy ! <LesHouchesEvents>-tag
-    read(11,*) dummy ! <header>-tag
+    integer :: iproc,event_flavour_scheme,ios,value_start
+    character(len=1024) :: line
+    read(11,'(a)',iostat=ios) line ! <LesHouchesEvents>-tag
+    if (ios.ne.0 .or. index(line,'<LesHouchesEvents').eq.0) then
+       write (*,*) 'Missing Les Houches event-file header'
+       stop 1
+    endif
+    read(11,'(a)',iostat=ios) line ! <header>-tag
+    if (ios.ne.0 .or. index(line,'<header>').eq.0) then
+       write (*,*) 'Missing AmpliCol event metadata header'
+       stop 1
+    endif
+    read(11,'(a)',iostat=ios) line
+    if (ios.ne.0 .or. index(line,'<flavour_scheme>').eq.0) then
+       write (*,*) 'LHE file does not contain flavour-scheme metadata; regenerate it'
+       stop 1
+    endif
+    value_start=index(line,'>')+1
+    read(line(value_start:),*,iostat=ios) event_flavour_scheme
+    if (ios.ne.0) then
+       write (*,*) 'Malformed flavour-scheme metadata in LHE file'
+       stop 1
+    endif
+    call set_flavour_scheme(event_flavour_scheme)
     read(11,*) next,unique_nproc
     allocate(unique_map(unique_nproc))
     allocate(unique_map_value(unique_nproc))
@@ -479,9 +499,22 @@ contains
     use overall
     implicit none
     integer,intent(in) :: ounit
+    integer :: iproc
+    integer(kind=8) :: iseed
+    common /to_seed/iseed
     real(kind=8) :: rwgt_LCtoFC
     rwgt_LCtoFC=xsec/XSECUP
     write(ounit,'(a)') '<LesHouchesEvents version="3.0">'
+    write(ounit,'(a)') '<header>'
+    write(ounit,'(a,1x,i2,1x,a)') '<flavour_scheme>',flavour_scheme,'</flavour_scheme>'
+    write(ounit,*) next,unique_nproc
+    do iproc=1,unique_nproc
+       write(ounit,*) unique_map(iproc),unique_map_value(iproc),&
+            unique_processes(1:next,iproc)
+    enddo
+    write(ounit,'(a,1x,i12,1x,a)') '<nevents>',nevents,'</nevents>'
+    write(ounit,'(a,1x,i12,1x,a)') '<seed>   ',iseed,'</seed>'
+    write(ounit,'(a)') '</header>'
     write(ounit,'(a)') '<init>'
     write(ounit,501)IDBMUP(1),IDBMUP(2),EBMUP(1),EBMUP(2),PDFGUP(1)&
          &,PDFGUP(2),PDFSUP(1),PDFSUP(2),IDWTUP,NPRUP

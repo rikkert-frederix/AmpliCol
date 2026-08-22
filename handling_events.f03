@@ -236,6 +236,7 @@ contains
     LPRUP=1
     write(11,'(a)') '<LesHouchesEvents version="3.0">'
     write(11,'(a)') '<header>'
+    write(11,'(a,1x,i2,1x,a)') '<flavour_scheme>',flavour_scheme,'</flavour_scheme>'
     write(11,*) pgl_unique%next,pgl_unique%nproc
     do iproc=1,pgl_unique%nproc
        write(11,*) unique_map(iproc),unique_map_value(iproc),pgl_unique%processes(1:pgl_unique%next,iproc)
