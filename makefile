@@ -2,7 +2,8 @@
 
 .PHONY: test_matrix_elements test_fermi_statistics test_mixed_spinors test_heft \
 	test_three_quark_line_reweight test_three_quark_line_multichannel \
-	test_run_parameters test_command_line_parser update_matrix_cases update_matrix_goldens
+	test_onebody test_run_parameters test_command_line_parser update_matrix_cases \
+	update_matrix_goldens
 
 FC = gfortran
 #FFLAGS= -fbounds-check -g -ffpe-trap=invalid,zero,overflow,underflow,denormal
@@ -99,7 +100,7 @@ $(foreach g,$(AMPGROUPS),$(eval $(call one_lib_template,$(g))))
 # ----------------------------------------------------------------------
 
 FILES_M_INT_QCD = bitset.o pdf.o NNPDFDriver.o ranmar.o phase_space.o \
-LUPdecompose.o phase_space_gen23.o color_algebra.o math_functions.o \
+phase_space_onebody.o LUPdecompose.o phase_space_gen23.o color_algebra.o math_functions.o \
 feynmanrules.o run_parameters.o particles.o amplitude_QCD.o amplicol_generate.o common.o \
 phase_space_genpt.o phase_space_haag.o cuts.o pdf_wrap.o handling_events.o \
 read_process_file.o multichannel.o handling_processes.o simple_integrator.o \
@@ -127,6 +128,8 @@ FILES_M_TEST_HEFT = bitset.o color_algebra.o math_functions.o feynmanrules.o run
 FILES_M_TEST_RUN_PARAMETERS = run_parameters.o particles.o run_parameters_regression.o
 
 FILES_M_TEST_COMMAND_LINE = command_line_parser.o command_line_parser_regression.o
+
+FILES_M_TEST_ONEBODY_PS = phase_space.o phase_space_onebody.o phase_space_onebody_regression.o
 
 # ----------------------------------------------------------------------
 # 5. Build executables
@@ -163,6 +166,9 @@ run_parameters_regression: $(FILES_M_TEST_RUN_PARAMETERS)
 command_line_parser_regression: $(FILES_M_TEST_COMMAND_LINE)
 	$(FC) $(FFLAGS) -o $@ $(FILES_M_TEST_COMMAND_LINE)
 
+phase_space_onebody_regression: $(FILES_M_TEST_ONEBODY_PS)
+	$(FC) $(FFLAGS) -o $@ $(FILES_M_TEST_ONEBODY_PS)
+
 matrix_element_regression.o: tests/matrix_elements/matrix_element_regression.f03 amplitude_QCD.o particles.o
 	$(FC) $(FFLAGS) -c -I. $< -o $@
 
@@ -185,6 +191,9 @@ run_parameters_regression.o: tests/run_parameters_regression.f03 run_parameters.
 
 command_line_parser_regression.o: tests/command_line_parser_regression.f03 command_line_parser.o
 	$(FC) $(FFLAGS) -c -I. $< -o $@
+
+phase_space_onebody_regression.o: tests/phase_space_onebody_regression.f03 phase_space_onebody.o
+	$(FC) $(FFLAGS) -c -I. -IPhaseSpace $< -o $@
 
 tests/matrix_elements/cases.dat: tests/matrix_elements/generate_matrix_cases.py process_list.py
 	$(PYTHON) tests/matrix_elements/generate_matrix_cases.py --output $@
@@ -232,6 +241,17 @@ test_three_quark_line_multichannel: \
 		process_list.py tests/process_list_three_quark_multichannel_regression.py
 	$(PYTHON) tests/process_list_three_quark_multichannel_regression.py
 
+test_onebody: phase_space_onebody_regression amplicol_generate amplicol_reweight \
+		process_list.py tests/run_onebody_regression.py run_card.dat \
+		PDF/NNPDF23nlo_as_0119_qed_mem0.grid
+	./phase_space_onebody_regression
+	$(PYTHON) tests/run_onebody_regression.py \
+		--generator $(CURDIR)/amplicol_generate \
+		--reweighter $(CURDIR)/amplicol_reweight \
+		--process-list $(CURDIR)/process_list.py \
+		--input-card $(CURDIR)/run_card.dat \
+		--pdf-grid $(CURDIR)/PDF/NNPDF23nlo_as_0119_qed_mem0.grid
+
 test_run_parameters: run_parameters_regression \
 		tests/input/invalid_electroweak_run_card.dat
 	./run_parameters_regression run_card.dat tests/input/custom_run_card.dat \
@@ -257,11 +277,12 @@ update_matrix_goldens: matrix_element_regression update_matrix_cases
 
 amplicol_reweight.o : amplitude_QCD.o math_functions.o particles.o run_parameters.o
 phase_space_gen23.o : phase_space.o LUPdecompose.o particles.o run_parameters.o
+phase_space_onebody.o : phase_space.o
 phase_space_genpt.o : phase_space.o particles.o
 phase_space.o : particles.o
 phase_space_haag.o : phase_space.o
 amplitude_QCD.o : bitset.o math_functions.o feynmanrules.o color_algebra.o particles.o
-amplicol_generate.o : amplitude_QCD.o phase_space_gen23.o common.o math_functions.o \
+amplicol_generate.o : amplitude_QCD.o phase_space_onebody.o phase_space_gen23.o common.o math_functions.o \
 	particles.o phase_space_genpt.o phase_space_haag.o cuts.o pdf_wrap.o handling_events.o \
 	read_process_file.o multichannel.o handling_processes.o simple_integrator.o amplitude_library.o \
 	command_line_parser.o scales.o
@@ -270,7 +291,7 @@ run_parameters.o : run_parameters.f03
 	$(FC) $(FFLAGS) -fno-finite-math-only -c -I. $<
 common.o : particles.o run_parameters.o simple_integrator.o
 handling_events.o : common.o handling_processes.o simple_integrator.o
-read_process_file.o : phase_space_gen23.o cuts.o handling_processes.o simple_integrator.o
+read_process_file.o : phase_space_onebody.o phase_space_gen23.o cuts.o handling_processes.o simple_integrator.o
 amplitude_library.o : pdf_wrap.o
 # The inverse-map guard must distinguish NaN/Inf values.  The finite-math
 # part of -ffast-math otherwise makes ieee_is_finite fold to true.

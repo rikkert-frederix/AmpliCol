@@ -282,12 +282,26 @@ contains
     ! Phase-space dimensionality and PDF flavour masks are run settings, not
     ! properties of the compiled matrix elements.  Reconstruct them so that a
     ! library can be reused when include_pdf changes.
-    pgl_unique%ndim=3*(pgl_unique%next-2)-4
-    if (include_pdf) pgl_unique%ndim=pgl_unique%ndim+2
+    if (pgl_unique%next.eq.3) then
+       if (.not.include_pdf) then
+          write (*,*) 'One-body cross sections require include_pdf=.true.'
+          stop 1
+       endif
+       pgl_unique%ndim=1
+    else
+       pgl_unique%ndim=3*(pgl_unique%next-2)-4
+       if (include_pdf) pgl_unique%ndim=pgl_unique%ndim+2
+    endif
     do igroup=1,ngroups
-       pgl(igroup)%ndim=3*(pgl(igroup)%next-2)-4
-       if (include_pdf) then
+       if (pgl(igroup)%next.eq.3) then
+          pgl(igroup)%ndim=1
+       else
+          pgl(igroup)%ndim=3*(pgl(igroup)%next-2)-4
+       endif
+       if (include_pdf .and. pgl(igroup)%next.gt.3) then
           pgl(igroup)%ndim=pgl(igroup)%ndim+2
+       endif
+       if (include_pdf) then
           call set_ipdgs_for_PDF(pgl(igroup))
        else
           pgl(igroup)%ipdgs=.false.

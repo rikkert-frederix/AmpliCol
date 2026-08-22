@@ -884,6 +884,13 @@ def HiggsDensityOrders(proc, perm):
         zero = perm.index(0)
         return (tuple(perm[zero:] + perm[:zero]),)
 
+    # A one-particle final state has no resolved antenna.  All formal Higgs
+    # placements on the two-leg trace describe the same rapidity density, so
+    # keep one map instead of constructing duplicate integration channels.
+    if len(proc) == 3:
+        zero = perm.index(0)
+        return (tuple(perm[zero:] + perm[:zero]),)
+
     higgs = proc.index("h")
     orders = []
     nlines = sum(p in quarks for p in proc)

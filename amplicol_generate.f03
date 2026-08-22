@@ -3,6 +3,7 @@ program amplicol_generate
   use common
 !  use mint_module
   use phase_space_base
+  use phase_space_onebody_mod
   use phase_space_gen23_mod
   use phase_space_genpt_mod
   use phase_space_haag_mod
@@ -86,7 +87,9 @@ program amplicol_generate
   do igroup=1,ngroups
      if (pgl(igroup)%nproc.eq.0) cycle
      ! allocate the amplitudes and the phase-space for each of the integration channels
-     if (PS_choice.eq.1) then
+     if (pgl(igroup)%next.eq.3) then
+        allocate(phase_space_onebody :: pgl(igroup)%phase_space)
+     elseif (PS_choice.eq.1) then
         allocate(phase_space_gen23 :: pgl(igroup)%phase_space)
      elseif  (PS_choice.eq.2) then
         allocate(phase_space_haag :: pgl(igroup)%phase_space)

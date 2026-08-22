@@ -454,6 +454,20 @@ class ThreeQuarkLineMultiChannelRegression(unittest.TestCase):
             process_list.options.clear()
             process_list.options.update(saved_options)
 
+    def test_heft_onebody_has_one_density(self):
+        saved_options = dict(process_list.options)
+        try:
+            process_list.options["heft"] = True
+            self.assertEqual(
+                process_list.HiggsDensityOrders(
+                    ("g", "g", "h"), (0, 1, 2)
+                ),
+                ((0, 1, 2),),
+            )
+        finally:
+            process_list.options.clear()
+            process_list.options.update(saved_options)
+
     def test_heft_cli_requires_exactly_one_explicit_higgs(self):
         saved_options = dict(process_list.options)
         try:

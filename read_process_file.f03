@@ -188,8 +188,18 @@ contains
     endif
     process_heft_enabled=heft_flag.eq.1
     call phys_model%set_heft_enabled(process_heft_enabled)
-    ndim=3*(next-2)-4
-    if (include_pdf) ndim=ndim+2
+    if (next.eq.3) then
+       if (.not.include_pdf) then
+          write (*,*) 'One-body cross sections require include_pdf=.true.'
+          stop 1
+       endif
+       ! The partonic invariant mass is fixed by the final-state mass.  Only
+       ! the boost rapidity remains to be integrated.
+       ndim=1
+    else
+       ndim=3*(next-2)-4
+       if (include_pdf) ndim=ndim+2
+    endif
     allocate(unique_procs(1:next,1:nproc_unique))
     do iproc=1,nproc_unique
        read(10,*) unique_procs(1:next,iproc)
@@ -357,6 +367,7 @@ contains
 
   subroutine check_unique_processes()
     use phase_space_gen23_mod
+    use phase_space_onebody_mod
     use cuts
     implicit none
     integer :: i,j,iproc,ih
@@ -366,7 +377,11 @@ contains
     real(kind=8),dimension(pgl_unique%ndim) :: x
     real(kind=8),external :: ran2
     type(psv) :: ps
-    allocate(phase_space_gen23 :: pgl_unique%phase_space)
+    if (pgl_unique%next.eq.3) then
+       allocate(phase_space_onebody :: pgl_unique%phase_space)
+    else
+       allocate(phase_space_gen23 :: pgl_unique%phase_space)
+    endif
     allocate(pgl_unique%processes(next,nproc_unique))
     allocate(pgl_unique%color_orders(next,nproc_unique))
     allocate(pgl_unique%phase_space_orders(next))
@@ -378,8 +393,10 @@ contains
     do i=1,pgl_unique%next
        mass(i)=phys_model%get_mass(pgl_unique%processes(i,1))
        width(i)=phys_model%get_width(pgl_unique%processes(i,1))
-       ! For this unique_prcess checks, use only massless particles
-       if (mass(i).ne.0d0) mass(i)=0d0
+       ! For the general unique-process check, use only massless particles.
+       ! A 2->1 map instead needs the physical final mass to resolve its
+       ! partonic delta function.
+       if (pgl_unique%next.gt.3 .and. mass(i).ne.0d0) mass(i)=0d0
        if (width(i).ne.0d0) width(i)=0d0
     enddo
     call setup_spin(pgl_unique)
