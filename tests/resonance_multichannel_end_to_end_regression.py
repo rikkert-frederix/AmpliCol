@@ -15,6 +15,7 @@ from pathlib import Path
 
 
 PROCESS = "p p > e+ e- ve ve~ b b~"
+FOUR_LEPTON_PROCESS = "p p > e+ e- ve ve~"
 SEED = 24681357
 MAX_CONSTRUCTION_SECONDS = 10.0
 MAX_STARTUP_SECONDS = 15.0
@@ -253,14 +254,18 @@ def write_single_map_control(catalogues: dict[str, object], cwd: Path) -> None:
     )
 
 
-def generate_process_file(process_list: Path, cwd: Path) -> tuple[Path, float]:
+def generate_process_file(
+    process_list: Path,
+    cwd: Path,
+    process: str = PROCESS,
+) -> tuple[Path, float]:
     started = time.perf_counter()
     run_checked([
         sys.executable,
         str(process_list),
         "--serial",
         "--flavour_scheme=4",
-        PROCESS,
+        process,
     ], cwd)
     elapsed = time.perf_counter() - started
     if elapsed >= MAX_CONSTRUCTION_SECONDS:
@@ -539,6 +544,22 @@ def main() -> None:
 
     with tempfile.TemporaryDirectory(prefix="amplicol_v6_family_") as tmp:
         root = Path(tmp)
+        four_lepton = root / "four_lepton"
+        four_lepton.mkdir()
+        (four_lepton / "Outputs").mkdir()
+        _, four_lepton_construction_seconds = generate_process_file(
+            process_list, four_lepton, FOUR_LEPTON_PROCESS
+        )
+        four_lepton_result, _, _ = check_fixed_seed_run(
+            generator,
+            input_card,
+            four_lepton,
+            tag="four_lepton",
+            combine_subprocesses=True,
+            require_bottoms=False,
+            timeout=120,
+        )
+
         first = root / "first"
         second = root / "second"
         first.mkdir()
@@ -599,6 +620,9 @@ def main() -> None:
         f"{len(catalogues['families'])} families, "
         f"{len(catalogues['maps'])} maps, "
         f"{catalogues['bytes']} bytes, "
+        f"four-lepton construction={four_lepton_construction_seconds:.3f}s, "
+        f"four-lepton={four_lepton_result[0]:.8g} +/- "
+        f"{four_lepton_result[1]:.3g}, "
         f"construction={construction_seconds:.3f}s, "
         f"startup={startup_seconds:.3f}s, "
         f"combined={combined_result[0]:.8g} +/- {combined_result[1]:.3g}, "

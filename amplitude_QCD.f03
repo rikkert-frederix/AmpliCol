@@ -233,7 +233,7 @@ contains
       implicit none
       integer :: icur,jcur,i,j,iproc
       type(bitset) :: proc
-      integer,dimension(:,:),allocatable :: curr2amp
+      integer,dimension(:,:),allocatable :: curr2amp,curr2amp_expanded
       integer,dimension(n,this%nprocs) :: procs
       do j=1,this%nprocs
          do i=1,n
@@ -244,7 +244,9 @@ contains
             endif
          enddo
       enddo
-      allocate(curr2amp(1:2,1:(this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)*(this%n_cur_end(n)-this%n_cur_start(n)+1)))
+      allocate(curr2amp(1:2,1:max(1,&
+           (this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)*&
+           (this%n_cur_end(n)-this%n_cur_start(n)+1))))
       curr2amp=0
       allocate(this%iproc_start(1:this%nprocs+1))
       this%n_amps=0
@@ -269,6 +271,15 @@ contains
                   ! to more than one target and are intentionally referenced
                   ! once from every matching process segment.
                   cycle
+               endif
+               ! A current pair can occur in several process segments.  The
+               ! old one-pair/one-amplitude bound is therefore only an
+               ! initial capacity for shared integration families.
+               if (this%n_amps.eq.size(curr2amp,2)) then
+                  allocate(curr2amp_expanded(1:2,1:2*size(curr2amp,2)))
+                  curr2amp_expanded=0
+                  curr2amp_expanded(:,1:size(curr2amp,2))=curr2amp
+                  call move_alloc(curr2amp_expanded,curr2amp)
                endif
                this%n_amps=this%n_amps+1
                curr2amp(1,this%n_amps)=icur
