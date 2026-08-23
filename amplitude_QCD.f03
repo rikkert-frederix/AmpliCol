@@ -2053,10 +2053,31 @@ contains
   end subroutine read_init_amps_from_file
   
   subroutine evaluate(this,n,p,hel,read_file,pm)
-    use FeynmanRules
+    ! gfortran 16 miscomputes bounds for allocatable component sections of a
+    ! polymorphic dummy under -fcheck=all.  Narrow the passed object to its
+    ! concrete type before entering the section-heavy evaluator.
     use particles
     implicit none
     class(amplitude_QCD) :: this
+    type(physics_model),intent(in) :: pm
+    integer :: n
+    integer,dimension(n) :: hel
+    real(kind=8),dimension(0:3,n) :: p
+    logical :: read_file
+    select type (concrete => this)
+    type is (amplitude_QCD)
+       call evaluate_concrete(concrete,n,p,hel,read_file,pm)
+    class default
+       write (*,*) 'Unsupported amplitude_QCD extension in evaluate'
+       stop 1
+    end select
+  end subroutine evaluate
+
+  subroutine evaluate_concrete(this,n,p,hel,read_file,pm)
+    use FeynmanRules
+    use particles
+    implicit none
+    type(amplitude_QCD) :: this
     type(physics_model),intent(in) :: pm
     integer :: n
     integer,dimension(n)::hel
@@ -2676,7 +2697,7 @@ contains
            this%current_list(ic)%mass,&
            this%current_list(ic)%width)
     end subroutine include_scalar_propagator
-  end subroutine evaluate
+  end subroutine evaluate_concrete
 
   subroutine init_col(this,n,col_acc)
     use color_algebra
