@@ -12,6 +12,7 @@ program resonance_phase_space_regression
   call check_massive_quark_external_legs()
   call check_root_breit_wigner_with_pdfs()
   call check_nested_and_disjoint_inverse()
+  call check_competing_pair_map_inversions()
   call check_alternative_maps_across_scales()
   call check_singular_boundary_and_nonfinite_rejection()
   call ieee_set_flag(ieee_all,.false.)
@@ -257,6 +258,116 @@ contains
     call check_inverse(original_x,forward_jac,inverse_point)
     call phase_space%cleanup()
   end subroutine check_nested_and_disjoint_inverse
+
+  subroutine check_competing_pair_map_inversions()
+    type(phase_space_gen23),dimension(7) :: maps
+    type(psv) :: point,inverse_point
+    integer,parameter :: n=6
+    integer,dimension(n,size(maps)) :: orders
+    integer,dimension(2) :: neutral_masks,charged_masks
+    integer,dimension(2) :: zz_pdgs,ww_pdgs
+    integer,dimension(3) :: ww_z_pdgs,ww_z_masks
+    real(kind=8),dimension(2) :: ww_masses,ww_widths
+    real(kind=8),dimension(3) :: ww_z_masses,ww_z_widths
+    real(kind=8),dimension(n) :: masses,pt_cut,rap_cut
+    real(kind=8),dimension(n,n) :: dr_cut,sqrt_s_min
+    real(kind=8),dimension(10) :: original_x
+    integer :: generating,alternative,attempt,i,nforward
+
+    orders(:,1)=[1,3,4,5,6,2]
+    orders(:,2)=orders(:,1)
+    orders(:,3)=orders(:,1)
+    orders(:,4)=orders(:,1)
+    orders(:,5)=[1,3,5,4,6,2]
+    orders(:,6)=[1,4,6,3,5,2]
+    orders(:,7)=[1,5,6,3,4,2]
+    masses=0d0
+    pt_cut=0d0
+    rap_cut=0d0
+    dr_cut=0d0
+    sqrt_s_min=0d0
+    neutral_masks=[ibset(ibset(0,2),3),ibset(ibset(0,4),5)]
+    charged_masks=[ibset(ibset(0,2),4),ibset(ibset(0,3),5)]
+    zz_pdgs=[23,23]
+    ww_pdgs=[24,-24]
+    ww_masses=80.419002445756163d0
+    ww_widths=2.0476d0
+    ww_z_pdgs=[24,-24,23]
+    ww_z_masks=[charged_masks(1),charged_masks(2),60]
+    ww_z_masses=[ww_masses,91.188d0]
+    ww_z_widths=[ww_widths,2.441404d0]
+
+    call maps(2)%configure_resonances(2,zz_pdgs,neutral_masks,&
+         [91.188d0,91.188d0],[2.441404d0,2.441404d0])
+    call maps(3)%configure_resonances(2,ww_pdgs,charged_masks,&
+         ww_masses,ww_widths)
+    call maps(4)%configure_resonances(3,ww_z_pdgs,ww_z_masks,&
+         ww_z_masses,ww_z_widths)
+    do i=1,size(maps)
+       call maps(i)%init(300d0,n,masses,orders(:,i),pt_cut,rap_cut,dr_cut,&
+            sqrt_s_min,.false.,.false.)
+    enddo
+    allocate(point%x(maps(1)%ndim+maps(1)%ndim_extra))
+    allocate(point%p(0:3,n))
+    allocate(inverse_point%x(maps(1)%ndim+maps(1)%ndim_extra))
+    allocate(inverse_point%p(0:3,n))
+
+    do generating=1,size(maps)
+       nforward=0
+       do attempt=1,100
+          do i=1,size(original_x)
+             original_x(i)=0.05d0+0.9d0*&
+                  modulo(dble(71*attempt+43*i),991d0)/991d0
+          enddo
+          point%x=original_x
+          call maps(generating)%generate_momenta(point)
+          if (point%jac.le.0d0 .or. .not.ieee_is_finite(point%jac)) cycle
+          nforward=nforward+1
+          do alternative=1,size(maps)
+             inverse_point%x=0.5d0
+             inverse_point%p=point%p
+             call maps(alternative)%compute_x_from_momenta(inverse_point)
+             if (inverse_point%jac.le.0d0 .or. &
+                  .not.ieee_is_finite(inverse_point%jac) .or. &
+                  any(.not.ieee_is_finite(inverse_point%x(&
+                  1:maps(alternative)%ndim))) .or. &
+                  any(inverse_point%x(1:maps(alternative)%ndim).le.0d0) .or. &
+                  any(inverse_point%x(1:maps(alternative)%ndim).ge.1d0)) then
+                write (*,*) 'Competing pair-map inversion failed',&
+                     generating,alternative,attempt,inverse_point%jac
+                write (*,*) 'generated x',original_x
+                write (*,*) 'inverse x',inverse_point%x
+                stop 1
+             endif
+             if (alternative.eq.generating) then
+                if (maxval(abs(inverse_point%x(1:maps(alternative)%ndim)-&
+                     original_x(1:maps(alternative)%ndim))).gt.2d-6) then
+                   write (*,*) 'Competing map failed its own x inverse',&
+                        generating,attempt
+                   write (*,*) original_x(1:maps(alternative)%ndim)
+                   write (*,*) inverse_point%x(1:maps(alternative)%ndim)
+                   stop 1
+                endif
+                if (abs(inverse_point%jac-point%jac).gt.&
+                     2d-6*max(1d0,abs(point%jac))) then
+                   write (*,*) 'Competing map failed its own Jacobian inverse',&
+                        generating,attempt,point%jac,inverse_point%jac
+                   stop 1
+                endif
+             endif
+          enddo
+       enddo
+       if (nforward.lt.50) then
+          write (*,*) 'Too few valid competing pair-map points',&
+               generating,nforward
+          stop 1
+       endif
+    enddo
+
+    do i=1,size(maps)
+       call maps(i)%cleanup()
+    enddo
+  end subroutine check_competing_pair_map_inversions
 
   subroutine check_alternative_maps_across_scales()
     type(phase_space_gen23) :: generating_map,alternative_map

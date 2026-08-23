@@ -1301,23 +1301,36 @@ contains
       real(kind=8),intent(out) :: var
       real(kind=8),intent(inout) :: jac
       integer(kind=4) :: ip
-      real(kind=8) :: varmin,varmax,power
-      if (var_min.lt.0d0 .and. var_max.le.0d0) then
+      real(kind=8) :: varmin,varmax,power,bound_min,bound_max,bound_tolerance
+      bound_tolerance=sqrt(epsilon(1d0))*&
+           max(1d0,abs(var_min),abs(var_max))
+      bound_min=var_min
+      bound_max=var_max
+      if (abs(bound_min).le.bound_tolerance) bound_min=0d0
+      if (abs(bound_max).le.bound_tolerance) bound_max=0d0
+      if (bound_min.lt.0d0 .and. bound_max.le.0d0) then
          power=power_in
-         varmin=-var_max
-         varmax=-var_min
-      elseif (var_min.lt.0d0 .and. var_max.gt.0d0 .and. (abs(power_in).gt.vtiny)) then
+         varmin=-bound_max
+         varmax=-bound_min
+      elseif (bound_min.lt.0d0 .and. bound_max.gt.0d0 .and. &
+           (abs(power_in).gt.vtiny)) then
          write (99,*) 'ERROR: in random_to_var one of the two limits '/&
               &/'is negative',var_min,var_max,power_in,jac,x
          write (99,*) 'using flat transformation'
          power=0d0
-         varmin=var_min
-         varmax=var_max
+         varmin=bound_min
+         varmax=bound_max
       else
          power=power_in
-         varmin=var_min
-         varmax=var_max
+         varmin=bound_min
+         varmax=bound_max
       endif
+      ! A 1/var (or stronger) transform is not integrable when its lower
+      ! absolute boundary reaches zero.  Besides producing a zero Jacobian in
+      ! the forward map, its inverse contains log(0)/log(0).  Use the smooth
+      ! integrable 1/sqrt(var) endpoint limit in that case.
+      if (power.le.-1d0 .and. varmin.le.&
+           sqrt(epsilon(1d0))*max(1d0,varmax)) power=-0.5d0
       ip=nint(power)
       if (dble(ip).eq.power) then
          ! integer
@@ -1345,7 +1358,7 @@ contains
               (varmin**(1d0+power)*(1d0-x)+varmax**(1d0+power)*x)**(-power/(1d0+power))/&
               (1d0+power)
       endif
-      if (var_min.le.0d0 .and. var_max.le.0d0) then
+      if (bound_min.le.0d0 .and. bound_max.le.0d0) then
          var=-var
       endif
     end subroutine random_to_var
@@ -1947,30 +1960,40 @@ contains
       real(kind=8),intent(out) :: x
       real(kind=8),intent(inout) :: jac
       integer(kind=4) :: ip
-      real(kind=8) :: varmin,varmax,power,var
-      if (variable.lt.var_min) then
+      real(kind=8) :: varmin,varmax,power,var,bounded_variable,tolerance,&
+           bound_min,bound_max
+      tolerance=sqrt(epsilon(1d0))*max(1d0,abs(var_min),abs(var_max))
+      bound_min=var_min
+      bound_max=var_max
+      if (abs(bound_min).le.tolerance) bound_min=0d0
+      if (abs(bound_max).le.tolerance) bound_max=0d0
+      if (variable.lt.bound_min-tolerance) then
          jac=-1d0
          return
-      elseif (variable.gt.var_max) then
+      elseif (variable.gt.bound_max+tolerance) then
          jac=-1d0
          return
       endif
-      if (var_min.lt.0d0 .and. var_max.le.0d0) then
+      bounded_variable=min(max(variable,bound_min),bound_max)
+      if (bound_min.lt.0d0 .and. bound_max.le.0d0) then
          power=power_in
-         varmin=-var_max
-         varmax=-var_min
-         var=-variable
-      elseif (var_min.lt.0d0 .and. var_max.gt.0d0 .and. (abs(power_in).gt.vtiny)) then
+         varmin=-bound_max
+         varmax=-bound_min
+         var=-bounded_variable
+      elseif (bound_min.lt.0d0 .and. bound_max.gt.0d0 .and. &
+           (abs(power_in).gt.vtiny)) then
          power=0d0
-         varmin=var_min
-         varmax=var_max
-         var=variable
+         varmin=bound_min
+         varmax=bound_max
+         var=bounded_variable
       else
          power=power_in
-         varmin=var_min
-         varmax=var_max
-         var=variable
+         varmin=bound_min
+         varmax=bound_max
+         var=bounded_variable
       endif
+      if (power.le.-1d0 .and. varmin.le.&
+           sqrt(epsilon(1d0))*max(1d0,varmax)) power=-0.5d0
       ip=nint(power)
       if (dble(ip).eq.power) then
          ! integer

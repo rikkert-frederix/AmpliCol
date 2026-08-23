@@ -390,6 +390,62 @@ def _is_lepton_pdg(pdg):
     return 11 <= abs(pdg) <= 16
 
 
+def _lepton_pair_currents(first_pdg, second_pdg):
+    """Return physical vector currents that can produce two leptons.
+
+    The cubic-vertex table already contains the flavour and charge rules.  In
+    particular, charged same-flavour pairs admit both ``gamma*`` and ``Z``,
+    neutrino-antineutrino pairs admit ``Z``, and charged-current partners of
+    one family admit exactly one of ``W+`` or ``W-``.
+    """
+    currents = CURRENT_COMBINATIONS.get(
+        tuple(sorted((first_pdg, second_pdg))), ()
+    )
+    return tuple(sorted(set(currents) & {22, 23, 24, -24}))
+
+
+def _lepton_pairings(process, labels=None):
+    """Enumerate all complete physical pairings of lepton occurrences.
+
+    Each returned pairing is a tuple of ``(labels, currents)`` records.  The
+    occurrence labels make crossed pairings of identical four-lepton states
+    distinct even when their particle names are the same.
+    """
+    external_pdgs = tuple(int(pdgs[particle]) for particle in process)
+    if labels is None:
+        labels = tuple(index for index, pdg in enumerate(external_pdgs)
+                       if _is_lepton_pdg(pdg))
+    else:
+        labels = tuple(labels)
+    if not labels:
+        return ((),)
+    if len(labels) % 2:
+        return ()
+
+    pairings = []
+
+    def pair_remaining(remaining, prefix):
+        if not remaining:
+            pairings.append(tuple(sorted(prefix, key=lambda item: item[0])))
+            return
+        first = remaining[0]
+        for position in range(1, len(remaining)):
+            second = remaining[position]
+            currents = _lepton_pair_currents(
+                external_pdgs[first], external_pdgs[second]
+            )
+            if not currents:
+                continue
+            pair = (tuple(sorted((first, second))), currents)
+            pair_remaining(
+                remaining[1:position] + remaining[position + 1:],
+                prefix + (pair,),
+            )
+
+    pair_remaining(tuple(sorted(labels)), ())
+    return tuple(sorted(set(pairings)))
+
+
 def _current_builder(external_pdgs):
     """Create a memoised tree-current finder for occurrence-tagged legs."""
     cache = {}
@@ -444,6 +500,8 @@ def _compatible_resonances(first, second):
     """Return whether two descendant sets form a laminar family."""
     first_labels = frozenset(first[1])
     second_labels = frozenset(second[1])
+    if first_labels == second_labels:
+        return False
     overlap = first_labels & second_labels
     return not overlap or first_labels <= second_labels or \
         second_labels <= first_labels
@@ -456,13 +514,89 @@ def _canonical_history(entries):
     )))
 
 
+def _history_has_physical_tree(process, history):
+    """Check that all requested poles coexist in one cubic tree.
+
+    Laminar descendant masks are necessary but not sufficient: for example,
+    an ``H`` mask and two nested photon masks are geometrically compatible but
+    this model has no tree-level ``H gamma gamma`` vertex. Required masks are
+    therefore treated as indivisible currents while the same recursive current
+    builder used for discovery closes the complete external tree.
+    """
+    if not history:
+        return True
+    external_pdgs = tuple(int(pdgs[particle]) for particle in process)
+    full_mask = (1 << len(process)) - 1
+    required = {}
+    for resonance, labels in history:
+        mask = sum(1 << label for label in labels)
+        if mask in required and required[mask] != resonance:
+            return False
+        required[mask] = resonance
+
+    cache = {}
+
+    def constrained_currents(mask):
+        if mask in cache:
+            return cache[mask]
+        if mask == 0:
+            result = frozenset()
+        elif mask & (mask - 1) == 0:
+            index = mask.bit_length() - 1
+            result = frozenset((external_pdgs[index],))
+        else:
+            found = set()
+            anchor = mask & -mask
+            subset = (mask - 1) & mask
+            while subset:
+                other = mask ^ subset
+                if other and subset & anchor:
+                    splits_required_current = any(
+                        required_mask != mask and
+                        (required_mask & mask) == required_mask and
+                        required_mask & subset and required_mask & other
+                        for required_mask in required
+                    )
+                    if not splits_required_current:
+                        for first in constrained_currents(subset):
+                            for second in constrained_currents(other):
+                                found.update(CURRENT_COMBINATIONS.get(
+                                    tuple(sorted((first, second))), ()
+                                ))
+                subset = (subset - 1) & mask
+            result = frozenset(found)
+        if mask in required:
+            result = frozenset((required[mask],)) \
+                if required[mask] in result else frozenset()
+        cache[mask] = result
+        return result
+
+    anchor = full_mask & -full_mask
+    subset = (full_mask - 1) & full_mask
+    while subset:
+        other = full_mask ^ subset
+        if other and subset & anchor:
+            if any(required_mask & subset and required_mask & other
+                   for required_mask in required):
+                subset = (subset - 1) & full_mask
+                continue
+            left = constrained_currents(subset)
+            right = constrained_currents(other)
+            if any(_anti_pdg(current) in right for current in left):
+                return True
+        subset = (subset - 1) & full_mask
+    return False
+
+
 def DiscoverResonanceHistories(process):
     """Discover physical tree-level resonance histories for ``process``.
 
     External occurrences, rather than particle names, label descendants.  A
     current is retained only when the complementary external legs can supply
     the antiparticle current, which excludes poles that cannot occur in a
-    complete tree diagram for the concrete subprocess.
+    complete tree diagram for the concrete subprocess. Photon pair assignments
+    use an ordinary pair-block density and therefore do not appear as mapped
+    finite-width poles in the returned histories.
     """
     cache_key = (flavour_scheme_number, process)
     if cache_key in _resonance_history_cache:
@@ -496,6 +630,12 @@ def DiscoverResonanceHistories(process):
                               for index in labels)
 
             if all_leptons:
+                # A photon assignment is meaningful only for a genuine
+                # two-body charged-lepton current. Massive vector parents may
+                # contain more leptons through a nested decay tree.
+                if len(labels) == 2 and 22 in values and \
+                        22 in complement_values:
+                    candidates.add((22, labels))
                 for resonance in (23, 24, -24):
                     if resonance in values and \
                             _anti_pdg(resonance) in complement_values:
@@ -536,82 +676,71 @@ def DiscoverResonanceHistories(process):
         len(item[1]), item[1], item[0]
     )))
     histories = {()}
-    histories.update((candidate,) for candidate in candidates)
+    candidate_set = set(candidates)
+    pair_candidates = {
+        candidate for candidate in candidates
+        if len(candidate[1]) == 2 and
+        all(label in final_leptons for label in candidate[1]) and
+        candidate[0] in (22, 23, 24, -24)
+    }
 
-    # All compatible combinations of two-body poles provide the alternative
-    # WW/ZZ pairings and, for six leptons, triple-resonance histories.
-    two_body = tuple(candidate for candidate in candidates
-                     if len(candidate[1]) == 2 and
-                     abs(candidate[0]) in (23, 24))
+    # A lepton-bearing density starts from one *complete* perfect matching.
+    # Choosing one vector current for every pair gives gamma/Z alternatives
+    # for charged neutral currents and the competing WW/ZZ histories in four-
+    # lepton states. A gamma* assignment is represented by the ordinary
+    # pair-block density: unlike Z/W it has no finite-width pole to serialize.
+    pair_histories = set()
+    if not final_leptons:
+        pair_histories.add(())
+    else:
+        for pairing in _lepton_pairings(process, final_leptons):
+            choices = []
+            for labels, allowed_currents in pairing:
+                available = tuple(
+                    (resonance, labels) for resonance in allowed_currents
+                    if (resonance, labels) in candidate_set
+                )
+                if not available:
+                    break
+                choices.append(available)
+            else:
+                for combination in itertools.product(*choices):
+                    pair_histories.add(_canonical_history(combination))
 
-    def add_disjoint_combinations(pool, prefix=(), start=0):
-        for index in range(start, len(pool)):
-            candidate = pool[index]
-            if all(not (set(candidate[1]) & set(item[1])) for item in prefix):
-                combined = prefix + (candidate,)
-                if len(combined) >= 2:
-                    histories.add(_canonical_history(combined))
-                add_disjoint_combinations(pool, combined, index + 1)
+    histories.update(pair_histories)
 
-    add_disjoint_combinations(two_body)
+    # Higgs, top, and broader vector poles can be layered on a complete pair
+    # history. This retains H->VV and t->bW mappings while ensuring that no
+    # added density leaves another external lepton unpaired.
+    structural = tuple(candidate for candidate in candidates
+                       if candidate not in pair_candidates)
 
-    # A broad Z/W current, Higgs, or top can coexist with nested pair poles.
-    # This captures Z/W->4l, H->ZZ/WW and t->bW->b l nu while keeping the
-    # number of adaptive grids controlled for high multiplicities.
-    for parent in candidates:
-        if len(parent[1]) <= 2:
-            continue
-        parent_labels = set(parent[1])
-        nested = tuple(candidate for candidate in two_body
-                       if set(candidate[1]) < parent_labels)
-        nested_combinations = [()]
-        for candidate in nested:
-            additions = []
-            for combination in nested_combinations:
-                if all(not (set(candidate[1]) & set(item[1]))
-                       for item in combination):
-                    additions.append(combination + (candidate,))
-            nested_combinations.extend(additions)
-        for combination in nested_combinations:
-            if combination:
-                histories.add(_canonical_history((parent,) + combination))
+    def add_structural_combinations(seed, prefix=(), start=0):
+        combined_so_far = seed + prefix
+        for index in range(start, len(structural)):
+            candidate = structural[index]
+            if not all(_compatible_resonances(candidate, existing)
+                       for existing in combined_so_far):
+                continue
+            combined = prefix + (candidate,)
+            histories.add(_canonical_history(seed + combined))
+            add_structural_combinations(seed, combined, index + 1)
 
-    # Disjoint broad poles are simultaneous histories as well.  In
-    # particular, a dileptonic ttbar subprocess needs the t and tbar poles in
-    # one density, with either or both nested W poles retained.
-    broad = tuple(candidate for candidate in candidates
-                  if len(candidate[1]) > 2)
-    broad_combinations = []
+    for pair_history in pair_histories:
+        add_structural_combinations(pair_history)
 
-    def collect_broad_combinations(prefix=(), start=0):
-        for index in range(start, len(broad)):
-            candidate = broad[index]
-            if all(not (set(candidate[1]) & set(item[1]))
-                   for item in prefix):
-                combined = prefix + (candidate,)
-                if len(combined) >= 2:
-                    broad_combinations.append(combined)
-                collect_broad_combinations(combined, index + 1)
-
-    collect_broad_combinations()
-    for parents in broad_combinations:
-        histories.add(_canonical_history(parents))
-        compatible_pairs = tuple(
-            candidate for candidate in two_body
-            if all(_compatible_resonances(candidate, parent)
-                   for parent in parents)
-        )
-        pair_combinations = [()]
-        for candidate in compatible_pairs:
-            additions = []
-            for combination in pair_combinations:
-                if all(not (set(candidate[1]) & set(item[1]))
-                       for item in combination):
-                    additions.append(combination + (candidate,))
-            pair_combinations.extend(additions)
-        for combination in pair_combinations:
-            if combination:
-                histories.add(_canonical_history(parents + combination))
+    histories = {
+        history for history in histories
+        if _history_has_physical_tree(process, history)
+    }
+    # Do not turn the massive companion of a gamma* pair into a partial
+    # resonance history. The complete gamma-bearing assignment is represented
+    # by its ordinary pair-block density; fully massive assignments retain all
+    # of their Z/W poles.
+    histories = {
+        () if any(candidate[0] == 22 for candidate in history) else history
+        for history in histories
+    }
 
     result = tuple(sorted(histories, key=lambda history: (
         len(history), tuple((len(item[1]), item[1], item[0])
@@ -633,6 +762,13 @@ def ValidProc(proc):
 #    if nq < 2 : return False    # at least two quarks
 #    if naq < 2 : return False   # at least two anti-quarks
     if nq != naq : return False # same number of quarks and anti-quarks
+    # Every external lepton line must close through a physical neutral- or
+    # charged-vector current. This rejects odd and flavour-mismatched lepton
+    # collections before factorial colour-order generation starts.
+    lepton_labels = tuple(index for index, particle in enumerate(proc)
+                          if _is_lepton_pdg(int(pdgs[particle])))
+    if lepton_labels and not _lepton_pairings(proc, lepton_labels):
+        return False
     # check charge conservation:
     if sum([charges3[x] for x in proc]) != 0 : return False
     # remove flavour changing currents:
@@ -1074,81 +1210,68 @@ def ThreeQuarkLineBlockSignature(proc, perm):
 
 
 def SingletMultiChannelOrders(proc, perm):
-    """Return colour orders equivalent through singlet placement alone."""
-    all_possible_perms = []
-    singlet_indices = [perm.index(i) for i, p in enumerate(proc) if p in singlets]
-    anti_quark_indices = tuple([perm.index(i) for i, p in enumerate(proc) if p in antiquarks])
-    nsinglets = len(singlet_indices)
-    # Precompute singlet permutations
-    if len(singlet_indices) > 1:
-        singlet_perms = tuple(itertools.permutations(singlet_indices))
-    elif len(singlet_indices) == 1:
-        singlet_perms = (tuple(singlet_indices),)
-    else:
-        singlet_perms = ()
+    """Return equivalent phase-space orders with physical lepton blocks.
 
-    # Build all possible permutations of the colour-ordering (and
-    # therefore have different phase-space orderings) but that have
-    # the same matrix elements. These will be the multi-channel
-    # partner processes. Currently, this is only based on the order of
-    # the colour-singlets and how they are distributed among the
-    # colour-strings.
-    if not singlet_perms:
-        all_possible_perms.append((perm,proc))
-    else:
-        if len(anti_quark_indices) == 1:
-            # For a single quark line, the only thing we need to consider
-            # is all the permutations of the colour singlets.
-            for s in singlet_perms:
+    Non-leptonic singlets retain the historical permutation and colour-line
+    distribution. Leptons are different: every occurrence stays next to its
+    partner from a physical ``gamma*/Z/W`` current. Four- and six-lepton
+    states enumerate all complete pairings, but never split a pair over two
+    colour lines or construct an ordering with an unpaired lepton.
+    """
+    singlet_labels = tuple(index for index, particle in enumerate(proc)
+                           if particle in singlets)
+    if not singlet_labels:
+        return ((perm, tuple(proc)),)
+
+    lepton_labels = tuple(
+        index for index in singlet_labels
+        if _is_lepton_pdg(int(pdgs[proc[index]]))
+    )
+    pairings = _lepton_pairings(proc, lepton_labels)
+    if lepton_labels and not pairings:
+        return ()
+
+    other_blocks = tuple((index,) for index in singlet_labels
+                         if index not in lepton_labels)
+    anti_positions = tuple(
+        perm.index(index) for index, particle in enumerate(proc)
+        if particle in antiquarks
+    )
+    if not anti_positions:
+        return ()
+    singlet_positions = frozenset(perm.index(index)
+                                  for index in singlet_labels)
+    all_possible_perms = set()
+
+    for pairing in pairings:
+        lepton_blocks = tuple(labels for labels, _ in pairing)
+        blocks = lepton_blocks + other_blocks
+        for ordered_blocks in itertools.permutations(blocks):
+            # A weak composition assigns consecutive blocks to each open
+            # colour string. Blocks, rather than individual leptons, are the
+            # unit of distribution.
+            separators_iter = itertools.combinations_with_replacement(
+                range(len(blocks) + 1), max(len(anti_positions) - 1, 0)
+            )
+            for separators in separators_iter:
+                boundaries = (0,) + separators + (len(blocks),)
+                blocks_by_antiquark = {
+                    position: ordered_blocks[
+                        boundaries[line]:boundaries[line + 1]
+                    ]
+                    for line, position in enumerate(anti_positions)
+                }
                 order = []
-                for i in range(len(perm)):
-                    if i == anti_quark_indices[0]:
-                        # Add all singlets in one go after the anti-quark
-                        order.extend(perm[p] for p in (anti_quark_indices + s))
-                    elif i not in singlet_indices:
-                        # Add QCD particles one at the time
-                        order.append(perm[i])
-                all_possible_perms.append((tuple(order),tuple(proc)))
-        elif len(anti_quark_indices) == 2:
-            # For two quark lines, we need to consider both all the
-            # permutations of the colour singlets AND how they are
-            # distributed between the two quark-antiquark colour
-            # groupings.
-            for j in range(nsinglets + 1): # 'j' is the number of singlets attached to the 1st quark line
-                for s in singlet_perms:
-                    order = []
-                    for i in range(len(perm)):
-                        if i == anti_quark_indices[0]:
-                            # Add j singlets after first anti-quark:
-                            order.extend(perm[p] for p in ((anti_quark_indices[0],) + s[:j]))
-                        elif i == anti_quark_indices[1]:
-                            # Add rest of singlets after second anti-quark:
-                            order.extend(perm[p] for p in ((anti_quark_indices[1],) + s[j:]))
-                        elif i not in singlet_indices:
-                            # Add the QCD particles one at the time
-                            order.append(perm[i])
-                    all_possible_perms.append((tuple(order),tuple(proc)))
-        elif len(anti_quark_indices) == 3:
-            for j1 in range(nsinglets + 1): # 'j1' is the number of singlets attached to the 1st quark line
-                for j2 in range(nsinglets-j1 + 1): # 'j2' is the number of singlets attached to the 2nd quark line
-                    for s in singlet_perms:
-                        order = []
-                        for i in range(len(perm)):
-                            if i == anti_quark_indices[0]:
-                                # Add j1 singlets after first anti-quark:
-                                order.extend(perm[p] for p in ((anti_quark_indices[0],) + s[:j1]))
-                            elif i == anti_quark_indices[1]:
-                                # Add j2 of singlets after second anti-quark:
-                                order.extend(perm[p] for p in ((anti_quark_indices[1],) + s[j1:j1+j2]))
-                            elif i == anti_quark_indices[2]:
-                                # Add rest of singlets after third anti-quark:
-                                order.extend(perm[p] for p in ((anti_quark_indices[2],) + s[j1+j2:]))
-                            elif i not in singlet_indices:
-                                # Add the QCD particles one at the time
-                                order.append(perm[i])
-                        all_possible_perms.append((tuple(order),tuple(proc)))
+                for position, label in enumerate(perm):
+                    if position in anti_positions:
+                        order.append(label)
+                        for block in blocks_by_antiquark[position]:
+                            order.extend(block)
+                    elif position not in singlet_positions:
+                        order.append(label)
+                all_possible_perms.add((tuple(order), tuple(proc)))
 
-    return tuple(all_possible_perms)
+    return tuple(sorted(all_possible_perms))
 
 
 def BuildTopologyAwareMultiChannels():

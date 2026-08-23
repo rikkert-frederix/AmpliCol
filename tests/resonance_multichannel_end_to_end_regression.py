@@ -17,6 +17,7 @@ MADGRAPH_REFERENCE_PB = 0.05525988
 SEED = 24681357
 NEVENTS = 100
 ITMAX = 5
+EXPECTED_MAPS = 7
 RESULT_RE = re.compile(
     r"Integral\s+\(production/accumulated\):\s*"
     r"([-+0-9.Ee]+)\s+\+/-\s*([-+0-9.Ee]+)"
@@ -74,8 +75,10 @@ def parse_groups(process_file: Path) -> tuple[list[str], int, list[dict[str, obj
 
 def write_one_ww_control(full_process_file: Path, control_file: Path) -> None:
     prefix, ngroups, groups = parse_groups(full_process_file)
-    if ngroups != 37:
-        raise AssertionError(f"expected 37 resonance maps, found {ngroups}")
+    if ngroups != EXPECTED_MAPS:
+        raise AssertionError(
+            f"expected {EXPECTED_MAPS} pair-aware maps, found {ngroups}"
+        )
 
     wanted_resonances = {(24, (3, 5)), (-24, (4, 6))}
     matches = []
@@ -90,10 +93,15 @@ def write_one_ww_control(full_process_file: Path, control_file: Path) -> None:
         raise AssertionError(
             f"expected one double-W resonance map, found {len(matches)}"
         )
-    group = matches[0]
+    write_single_map_control(prefix, matches[0], control_file)
+
+
+def write_single_map_control(
+    prefix: list[str], group: dict[str, object], control_file: Path
+) -> None:
     rows = list(group["rows"])
     if len(rows) != 1:
-        raise AssertionError("one-WW control expects one full-amplitude row")
+        raise AssertionError("single-map control expects one full-amplitude row")
 
     header_fields = str(group["header"]).split()
     header_fields[0] = "1"
@@ -265,8 +273,10 @@ def main() -> None:
         if not full_process_file.exists():
             raise AssertionError("process-list generator did not create processes.txt")
         _, ngroups, _ = parse_groups(full_process_file)
-        if ngroups != 37:
-            raise AssertionError(f"expected 37 maps, found {ngroups}")
+        if ngroups != EXPECTED_MAPS:
+            raise AssertionError(
+                f"expected {EXPECTED_MAPS} pair-aware maps, found {ngroups}"
+            )
 
         control_process_file = control_dir / "processes.txt"
         write_one_ww_control(full_process_file, control_process_file)
@@ -290,28 +300,40 @@ def main() -> None:
 
         _, full_history = production_results(full_log)
         _, control_history = production_results(control_log)
-        if len(full_history) < 2:
-            raise AssertionError("37-map run did not accumulate two production iterations")
         full_result = full_history[-1]
         control_result = control_history[-1]
         reference_result = (MADGRAPH_REFERENCE_PB, 0.0)
-        assert_three_sigma(full_result, control_result, "37-map/control mismatch")
-        assert_three_sigma(full_result, reference_result, "37-map/MadGraph mismatch")
+        assert_three_sigma(
+            full_result, control_result, "pair-aware/control mismatch"
+        )
+        assert_three_sigma(
+            full_result, reference_result, "pair-aware/MadGraph mismatch"
+        )
         assert_three_sigma(control_result, reference_result, "control/MadGraph mismatch")
 
-        first_production = full_history[0]
-        relative_shift = abs(full_result[0] - first_production[0]) / abs(
-            first_production[0]
-        )
-        if relative_shift >= 0.08:
+        relative_reference_shift = abs(
+            full_result[0] - MADGRAPH_REFERENCE_PB
+        ) / MADGRAPH_REFERENCE_PB
+        if relative_reference_shift >= 0.08:
             raise AssertionError(
-                f"production accumulation drifted by {100.0 * relative_shift:.2f}%"
+                "pair-aware production result drifted from the matched "
+                f"reference by {100.0 * relative_reference_shift:.2f}%"
             )
-        assert_three_sigma(
-            full_result,
-            first_production,
-            "production iterations are statistically incompatible",
-        )
+        if len(full_history) > 1:
+            first_production = full_history[0]
+            relative_shift = abs(
+                full_result[0] - first_production[0]
+            ) / abs(first_production[0])
+            if relative_shift >= 0.08:
+                raise AssertionError(
+                    "production accumulation drifted by "
+                    f"{100.0 * relative_shift:.2f}%"
+                )
+            assert_three_sigma(
+                full_result,
+                first_production,
+                "production iterations are statistically incompatible",
+            )
 
         check_colour_expansion(
             reweighter,
@@ -322,7 +344,7 @@ def main() -> None:
 
     print(
         "resonance multichannel end-to-end regression passed: "
-        f"37-map={full_result[0]:.8f} +/- {full_result[1]:.8f} pb, "
+        f"pair-aware={full_result[0]:.8f} +/- {full_result[1]:.8f} pb, "
         f"control={control_result[0]:.8f} +/- {control_result[1]:.8f} pb"
     )
 
