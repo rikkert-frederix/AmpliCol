@@ -570,7 +570,8 @@ contains
 
   subroutine check_alternative_maps_across_scales()
     type(phase_space_gen23) :: generating_map,alternative_map
-    type(psv) :: point,alternative_point
+    type(gen23_momentum_cache) :: cache
+    type(psv) :: point,alternative_point,cached_point
     integer,parameter :: n=6
     integer,dimension(n) :: generating_order,alternative_order
     real(kind=8),dimension(n) :: masses,pt_cut,rap_cut
@@ -600,6 +601,9 @@ contains
        allocate(alternative_point%x(alternative_map%ndim+&
             alternative_map%ndim_extra))
        allocate(alternative_point%p(0:3,n))
+       allocate(cached_point%x(alternative_map%ndim+&
+            alternative_map%ndim_extra))
+       allocate(cached_point%p(0:3,n))
        found=.false.
        nforward=0
        last_alternative_jac=-999d0
@@ -620,6 +624,26 @@ contains
                .not.ieee_is_finite(alternative_point%jac)) cycle
           if (any(.not.ieee_is_finite(&
                alternative_point%x(1:alternative_map%ndim)))) cycle
+          cached_point%x=0.5d0
+          cached_point%p=point%p
+          call build_gen23_momentum_cache(cached_point%p,cache)
+          ! A boosted massless momentum can acquire a tiny negative p^2 from
+          ! roundoff.  Cached inversion must still use its configured shell.
+          do i=2,n-1
+             cache%invm(ibset(0,i))=-64d0*epsilon(1d0)*&
+                  energy_scales(iscale)**2
+             cache%invm(ibclr(maskr(n),i))=cache%invm(ibset(0,i))
+          enddo
+          call alternative_map%compute_x_from_cache(cached_point,cache)
+          if (cached_point%jac.le.0d0 .or. &
+               .not.ieee_is_finite(cached_point%jac) .or.&
+               abs(cached_point%jac-alternative_point%jac).gt.&
+               2d-11*max(1d0,abs(alternative_point%jac)) .or.&
+               any(abs(cached_point%x-alternative_point%x).gt.2d-11)) then
+             write (*,*) 'Cached alternative inverse mishandled external p^2',&
+                  energy_scales(iscale),cached_point%jac,alternative_point%jac
+             stop 1
+          endif
           found=.true.
           exit
        enddo
@@ -631,6 +655,7 @@ contains
        deallocate(original_x)
        deallocate(point%x,point%p)
        deallocate(alternative_point%x,alternative_point%p)
+       deallocate(cached_point%x,cached_point%p)
        call generating_map%cleanup()
        call alternative_map%cleanup()
     enddo

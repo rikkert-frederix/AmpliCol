@@ -1851,7 +1851,7 @@ contains
     type(psv),intent(inout) :: ps
     type(gen23_momentum_cache),intent(in),optional :: cache
     real(kind=8) :: ycm,sqrtshat
-    integer :: ix
+    integer :: ix,label
     real(kind=8),dimension(0:3,0:maskr(this%next)) :: pp
     real(kind=8),dimension(maskr(this%next)) :: invm
     if (debug) write (*,*) 'computing x from momenta'
@@ -1876,6 +1876,14 @@ contains
        endif
        pp=cache%pp
        invm=cache%invm
+       ! External particles are exactly on their configured mass shells.
+       ! Reconstructing p^2 from floating-point momenta can make a massless
+       ! leg very slightly spacelike, which later turns sqrt(invm) into NaN.
+       do label=0,this%next-1
+          invm(ibset(0,label))=this%invm(ibset(0,label))
+          invm(ibclr(maskr(this%next),label))=&
+               this%invm(ibclr(maskr(this%next),label))
+       enddo
        ycm=cache%ycm
     else
        call fill_momentum_array
