@@ -31,8 +31,28 @@ import argparse
 from collections import Counter, defaultdict
 import multiprocessing
 import math
+from dataclasses import dataclass
 
-PROCESS_FILE_VERSION = 4
+from diagram_channels import (
+    AUXILIARY_PDGS,
+    BREIT_WIGNER,
+    DiagramChannel,
+    FLAT_CONTACT,
+    MASSIVE_POWER,
+    MASSLESS_POLE,
+    TRANSFORM_CODES,
+    TopologyNode,
+    anti_pdg,
+    build_sm_interaction_catalogue,
+    canonicalize_channels_by_density,
+    discover_diagram_channels,
+    discover_diagram_topologies,
+    has_physical_tree,
+    validate_topology,
+    validate_tree_vertices,
+)
+
+PROCESS_FILE_VERSION = 6
 
 
 # Global sets (make then 'frozenset' so that they are immutable):
@@ -57,48 +77,66 @@ family={'g':0,'d':1,'u':1,'s':11,'c':11,'b':21,'t':21,'d~':-1,'u~':-1,'s~':-11,'
 
 options = {}
 process_order_to_index = {}
-channel_resonances = {}
+channel_topologies = {}
 process_provenance = ""
+diagram_decay_products = None
 _resonance_history_cache = {}
+_diagram_channel_cache = {}
+_diagram_topology_cache = {}
+_physical_diagram_cache = {}
+_diagram_density_signature_cache = {}
+
+
+@dataclass(frozen=True, order=True)
+class PhaseMapRecipe:
+    """One unique numerical phase-space density."""
+
+    order: tuple[int, ...]
+    topology: tuple[TopologyNode, ...]
+
+    @property
+    def density_signature(self):
+        return (
+            self.order,
+            tuple(node.density_signature for node in self.topology),
+        )
+
+
+@dataclass(frozen=True, order=True)
+class CoefficientRow:
+    process: tuple[str, ...]
+    colour_order: tuple[int, ...]
+    coefficient: float
+
+
+@dataclass(frozen=True, order=True)
+class IntegrationFamily:
+    partner_set_id: int
+    rows: tuple[CoefficientRow, ...]
+
+
+@dataclass(frozen=True)
+class ProcessCatalogues:
+    permutations: tuple[tuple[int, ...], ...]
+    maps: tuple[PhaseMapRecipe, ...]
+    partner_sets: tuple[tuple[tuple[int, int], ...], ...]
+    families: tuple[IntegrationFamily, ...]
 
 
 def _build_three_point_vertices(active_flavours):
-    """Return the physical cubic vertices needed for resonance discovery.
+    """Compatibility view of the explicit physical cubic catalogue."""
 
-    Particles are represented in the all-outgoing convention used by the
-    process builder.  Auxiliary fields used to factorise four-point vertices
-    are deliberately absent: they are not physical Breit--Wigner poles.
-    """
-    vertices = {(21, 21, 21), (24, -24, 22), (24, -24, 23),
-                (24, -24, 25), (23, 23, 25), (25, 25, 25)}
-    for flavour in range(1, 7):
-        vertices.add((21, flavour, -flavour))
-        vertices.add((22, flavour, -flavour))
-        vertices.add((23, flavour, -flavour))
-    # A quark has a Higgs Yukawa current precisely when it is outside the
-    # active, exactly-massless flavour scheme.  Top is therefore always
-    # included, while b/c/s/u enter successively in lower schemes.
-    for flavour in range(active_flavours + 1, 7):
-        vertices.add((25, flavour, -flavour))
-    for down in (1, 3, 5):
-        up = down + 1
-        vertices.add((24, down, -up))
-        vertices.add((-24, -down, up))
-    for charged, neutrino in ((11, 12), (13, 14), (15, 16)):
-        vertices.add((22, charged, -charged))
-        vertices.add((23, charged, -charged))
-        vertices.add((23, neutrino, -neutrino))
-        vertices.add((24, charged, -neutrino))
-        vertices.add((-24, -charged, neutrino))
-    return tuple(vertices)
+    return tuple(build_sm_interaction_catalogue(active_flavours).cubic)
 
 
-THREE_POINT_VERTICES = _build_three_point_vertices(flavour_scheme_number)
+SM_CATALOGUE = build_sm_interaction_catalogue(flavour_scheme_number)
+THREE_POINT_VERTICES = tuple(SM_CATALOGUE.cubic)
+FOUR_POINT_VERTICES = tuple(SM_CATALOGUE.quartic)
 
 
 def _anti_pdg(pdg):
     """Return the antiparticle PDG for the physical fields used here."""
-    return pdg if pdg in (21, 22, 23, 25) else -pdg
+    return anti_pdg(pdg)
 
 
 def _build_current_combinations(vertices):
@@ -129,7 +167,9 @@ def SwitchFlavourScheme(FS):
     global proton
     global jet
     global THREE_POINT_VERTICES
+    global FOUR_POINT_VERTICES
     global CURRENT_COMBINATIONS
+    global SM_CATALOGUE
 
     ordered_flavours=('d','u','s','c','b')
     if FS < 1 or FS > len(ordered_flavours):
@@ -139,9 +179,15 @@ def SwitchFlavourScheme(FS):
     massless_QCD=flavour_scheme | frozenset([q+'~' for q in flavour_scheme]) | gluons
     proton=massless_QCD
     jet=massless_QCD
-    THREE_POINT_VERTICES=_build_three_point_vertices(FS)
+    SM_CATALOGUE=build_sm_interaction_catalogue(FS)
+    THREE_POINT_VERTICES=tuple(SM_CATALOGUE.cubic)
+    FOUR_POINT_VERTICES=tuple(SM_CATALOGUE.quartic)
     CURRENT_COMBINATIONS=_build_current_combinations(THREE_POINT_VERTICES)
     _resonance_history_cache.clear()
+    _diagram_channel_cache.clear()
+    _diagram_topology_cache.clear()
+    _physical_diagram_cache.clear()
+    _diagram_density_signature_cache.clear()
 
 def ProcessProcess(proc):
     """Return phase-space groups for all valid colour orderings of ``proc``.
@@ -359,8 +405,9 @@ def ParseCollision(input_string):
 
     Non-proton initial states are crossed to the final-state convention used
     by the colour-ordering logic. A final token like ``3j`` is interpreted as
-    three inclusive massless-QCD jets.  Decay products remain explicit;
-    resonance histories are discovered later for each concrete subprocess.
+    three inclusive massless-QCD jets. Decay products remain explicit;
+    diagram-derived phase-space channels are discovered later for each
+    concrete subprocess.
     """
     input_string=input_string.replace('bar','~')
     input_string=input_string.replace(' j',' 1j')
@@ -588,6 +635,98 @@ def _history_has_physical_tree(process, history):
     return False
 
 
+def _mapped_diagram_final_mask(process):
+    """Return the occurrence mask explicitly assigned to decay blocks."""
+
+    available = list(enumerate(process[2:], start=2))
+    requested = diagram_decay_products
+    if requested is None:
+        final_leptons = tuple(
+            particle for particle in process[2:]
+            if _is_lepton_pdg(int(pdgs[particle]))
+        )
+        requested = tuple(process[2:]) if len(final_leptons) >= 2 else ()
+    selected_labels = []
+    used_labels = set()
+    for particle in requested:
+        label = next((
+            label for label, candidate in available
+            if label not in used_labels and candidate == particle
+        ), None)
+        if label is not None:
+            selected_labels.append(label)
+            used_labels.add(label)
+    return sum(1 << label for label in selected_labels)
+
+
+def DiscoverDiagramChannels(process):
+    """Return complete diagram-derived phase-space maps for ``process``.
+
+    Only subtrees made entirely from explicitly requested final-state
+    particles are projected onto s-channel blocks. Inclusive QCD radiation and
+    its attachments therefore retain the ordinary compact gen23/t-channel
+    treatment. When this module is used directly rather than through the CLI,
+    final-state leptons provide the conservative default decay system.
+
+    Pure-QCD propagator trees remain the responsibility of the ordinary
+    gen23/Haag production maps.  Every returned topology therefore contains
+    at least one electroweak, Higgs, top, or leptonic current, while any QCD
+    descendants required below such a current remain part of its exact binary
+    tree.
+    """
+
+    process = tuple(process)
+    mapped_final_mask = _mapped_diagram_final_mask(process)
+
+    cache_key = (flavour_scheme_number, process, mapped_final_mask)
+    if cache_key in _diagram_channel_cache:
+        return _diagram_channel_cache[cache_key]
+    external_pdgs = tuple(int(pdgs[particle]) for particle in process)
+    if mapped_final_mask.bit_count() < 2:
+        _diagram_channel_cache[cache_key] = ()
+        return ()
+    final_mask = ((1 << len(process)) - 1) ^ 3
+    channels = discover_diagram_channels(
+        external_pdgs,
+        catalogue=SM_CATALOGUE,
+        mapped_final_mask=mapped_final_mask,
+        preserve_production_order=(mapped_final_mask == final_mask),
+    )
+
+    result = tuple(channel for channel in channels
+                   if validate_topology(channel.topology, final_mask) and
+                   channel.order[0] == 0 and channel.order[-1] == 1 and
+                   sorted(channel.order) == list(range(len(process))))
+    _diagram_channel_cache[cache_key] = result
+    return result
+
+
+def DiscoverDiagramTopologies(process):
+    """Compatibility view of the unique complete time-like topologies."""
+
+    process = tuple(process)
+    mapped_final_mask = _mapped_diagram_final_mask(process)
+    cache_key = (flavour_scheme_number, process, mapped_final_mask)
+    if cache_key not in _diagram_topology_cache:
+        _diagram_topology_cache[cache_key] = tuple(sorted({
+            channel.topology for channel in DiscoverDiagramChannels(process)
+        }))
+    return _diagram_topology_cache[cache_key]
+
+
+def _has_physical_diagram(process):
+    """Return whether the physical cubic/quartic recursion closes ``process``."""
+
+    process = tuple(process)
+    cache_key = (flavour_scheme_number, process)
+    if cache_key in _physical_diagram_cache:
+        return _physical_diagram_cache[cache_key]
+    external_pdgs = tuple(int(pdgs[particle]) for particle in process)
+    result = has_physical_tree(external_pdgs, SM_CATALOGUE)
+    _physical_diagram_cache[cache_key] = result
+    return result
+
+
 def DiscoverResonanceHistories(process):
     """Discover physical tree-level resonance histories for ``process``.
 
@@ -762,12 +901,13 @@ def ValidProc(proc):
 #    if nq < 2 : return False    # at least two quarks
 #    if naq < 2 : return False   # at least two anti-quarks
     if nq != naq : return False # same number of quarks and anti-quarks
-    # Every external lepton line must close through a physical neutral- or
-    # charged-vector current. This rejects odd and flavour-mismatched lepton
-    # collections before factorial colour-order generation starts.
+    # Reject lepton-bearing requests only when the complete model recursion
+    # has no physical tree. Diagram-derived channel construction must not
+    # impose a perfect-pairing ansatz: radiation topologies contain legitimate
+    # three-lepton fermion currents.
     lepton_labels = tuple(index for index, particle in enumerate(proc)
                           if _is_lepton_pdg(int(pdgs[particle])))
-    if lepton_labels and not _lepton_pairings(proc, lepton_labels):
+    if lepton_labels and not _has_physical_diagram(proc):
         return False
     # check charge conservation:
     if sum([charges3[x] for x in proc]) != 0 : return False
@@ -903,7 +1043,7 @@ def CombineResults(results):
                 
 def ParseArgument():
     """Parse command-line options and return the normalized process request."""
-    global process_provenance
+    global process_provenance,diagram_decay_products
     parser = argparse.ArgumentParser(description="Generate the full list of processes, ordered by phase-space order")
     parser.add_argument("process_string", type=str, help="Process to consider (e.g., 'p p > w+ z 4j', (including quotation marks))")
     parser.add_argument("-FS", "--flavour_scheme", type=int, choices=range(1, 6), metavar="[1-5]",
@@ -928,7 +1068,9 @@ def ParseArgument():
         options["serial"] = False
     options["flavour_scheme"] = args.flavour_scheme or 5
     process_provenance = args.process_string
-    return ParseCollision(args.process_string)
+    parsed_process = ParseCollision(args.process_string)
+    diagram_decay_products = tuple(parsed_process["rest"])
+    return parsed_process
 
 def IdenticalParticleSymmetryFactor(proc):
     """Return the identical-particle factor for coloured final states."""
@@ -1210,13 +1352,13 @@ def ThreeQuarkLineBlockSignature(proc, perm):
 
 
 def SingletMultiChannelOrders(proc, perm):
-    """Return equivalent phase-space orders with physical lepton blocks.
+    """Return compact ordinary gen23 orders for colour-singlet legs.
 
-    Non-leptonic singlets retain the historical permutation and colour-line
-    distribution. Leptons are different: every occurrence stays next to its
-    partner from a physical ``gamma*/Z/W`` current. Four- and six-lepton
-    states enumerate all complete pairings, but never split a pair over two
-    colour lines or construct an ordering with an unpaired lepton.
+    These are full-support safety densities, not the diagram-derived mappings.
+    Complete two-body lepton currents remain useful compact blocks where they
+    exist. A physical non-pairing topology (for example a fermion-radiation
+    chain) falls back to one occurrence-labelled lepton block instead of being
+    rejected.
     """
     singlet_labels = tuple(index for index, particle in enumerate(proc)
                            if particle in singlets)
@@ -1229,7 +1371,7 @@ def SingletMultiChannelOrders(proc, perm):
     )
     pairings = _lepton_pairings(proc, lepton_labels)
     if lepton_labels and not pairings:
-        return ()
+        pairings = ((tuple((lepton_labels, ())),),)
 
     other_blocks = tuple((index,) for index in singlet_labels
                          if index not in lepton_labels)
@@ -1463,32 +1605,100 @@ def BuildTopologyAwareMultiChannels():
 def DetermineMultiChannelPartnersAndSymmetryFactor():
     """Finalize each subprocess record with channels and symmetry factors."""
     BuildTopologyAwareMultiChannels()
-    AddResonanceMultiChannels()
+    AddDiagramMultiChannels()
 
 
-def _history_in_density_labels(history, base_to_target):
-    """Translate target occurrence labels into one density's base labels."""
+def _topology_in_density_labels(topology, base_to_target):
+    """Translate one occurrence-labelled topology into density labels."""
+
     target_to_base = [None] * len(base_to_target)
     for base_label, target_label in enumerate(base_to_target):
         target_to_base[target_label] = base_label
-    translated = []
-    for resonance, labels in history:
-        translated.append((resonance, tuple(sorted(
-            target_to_base[label] for label in labels
-        ))))
-    return _canonical_history(translated)
+
+    def translate_mask(mask):
+        translated = 0
+        for target_label, base_label in enumerate(target_to_base):
+            if mask & (1 << target_label):
+                translated |= 1 << base_label
+        return translated
+
+    translated = (
+        TopologyNode(
+            node.pdg,
+            translate_mask(node.mask),
+            translate_mask(node.left),
+            translate_mask(node.right),
+            node.kind,
+            node.parameter,
+        )
+        for node in topology
+    )
+    return tuple(sorted(translated, key=lambda node: (
+        node.mask.bit_count(), node.mask, node.pdg, node.left, node.right
+    )))
 
 
-def AddResonanceMultiChannels():
-    """Add automatic resonance densities to every existing MIS component.
+def _diagram_channel_in_density_labels(channel, base_to_target):
+    """Translate a complete diagram map from target to density labels."""
+
+    target_to_base = [None] * len(base_to_target)
+    for base_label, target_label in enumerate(base_to_target):
+        target_to_base[target_label] = base_label
+    return DiagramChannel(
+        _topology_in_density_labels(channel.topology, base_to_target),
+        tuple(target_to_base[label] for label in channel.order),
+    )
+
+
+def _diagram_density_signatures(process, base_to_target, fallback_order):
+    """Return unique maps after separating decay and QCD production roles.
+
+    When every final leg belongs to the explicitly mapped decay system, the
+    diagram's incoming-leg path distinguishes genuine production mechanisms
+    such as s-channel neutral-current and t-channel double-W production. If
+    inclusive QCD legs remain, their many diagram attachments are instead
+    covered by the existing colour-aware gen23 maps; only the complete decay
+    topology is added to that representative production order.
+    """
+
+    cache_key = (
+        flavour_scheme_number,
+        tuple(process),
+        tuple(base_to_target),
+        tuple(fallback_order),
+        tuple(diagram_decay_products) if diagram_decay_products else None,
+    )
+    cached = _diagram_density_signature_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    final_mask = ((1 << len(process)) - 1) ^ 3
+    keep_diagram_order = _mapped_diagram_final_mask(process) == final_mask
+    signatures = set()
+    for channel in DiscoverDiagramChannels(process):
+        translated = _diagram_channel_in_density_labels(
+            channel, base_to_target
+        )
+        if not keep_diagram_order:
+            translated = DiagramChannel(
+                translated.topology, tuple(fallback_order)
+            )
+        signatures.add(translated)
+    result = canonicalize_channels_by_density(signatures)
+    _diagram_density_signature_cache[cache_key] = result
+    return result
+
+
+def AddDiagramMultiChannels():
+    """Add diagram-derived densities to every existing MIS component.
 
     The matrix-element process and colour order are never changed.  Each
-    existing density is cloned for the physical histories supported by its
+    existing density is cloned for physical propagator trees supported by its
     target subprocess; the stored external-leg map translates occurrence
-    labels into that density's canonical labelling.  Every clone remains a
+    labels into that density's canonical labelling. Every clone remains a
     full-support map and all clones are linked as multichannel partners.
     """
-    global phase_space_orders, all_keys_sorted, channel_resonances
+    global phase_space_orders, all_keys_sorted, channel_topologies
 
     old_keys = tuple(all_keys_sorted)
     old_rows = tuple(tuple(phase_space_orders[key]) for key in old_keys)
@@ -1497,81 +1707,85 @@ def AddResonanceMultiChannels():
         for row in rows:
             process = row[0]
             permutation = row[4]
-            signatures_by_channel[channel].add(())
             representative = min(row[2])
             if channel != representative:
                 continue
-            for history in DiscoverResonanceHistories(process):
-                if not history:
-                    continue
-                signatures_by_channel[channel].add(
-                    _history_in_density_labels(history, permutation)
+            signatures_by_channel[channel].update(
+                _diagram_density_signatures(
+                    process,
+                    permutation,
+                    PhaseSpaceOrderFromKey(old_keys[channel]),
                 )
+            )
 
     registry = {}
-    new_keys = []
+    new_keys = set()
     for channel, old_key in enumerate(old_keys):
-        signatures = sorted(signatures_by_channel[channel], key=lambda history: (
-            len(history), tuple((len(item[1]), item[1], item[0])
-                                for item in history)
-        ))
-        for history in signatures:
-            new_key = old_key + (history,)
-            registry[(channel, history)] = new_key
-            new_keys.append(new_key)
+        ordinary_key = old_key + ((),)
+        registry[(channel, None)] = ordinary_key
+        new_keys.add(ordinary_key)
+        for signature in sorted(signatures_by_channel[channel]):
+            # The production order comes from the initial-state path of the
+            # diagram. Preserve the old adaptive-grid class and local source
+            # rank, but replace the ordinary header by that physical order.
+            new_key = (signature.order,) + old_key[1:] + \
+                (signature.topology,)
+            registry[(channel, signature)] = new_key
+            new_keys.add(new_key)
 
+    new_keys = sorted(new_keys)
     channel_number = {key: index for index, key in enumerate(new_keys)}
     rebuilt = {key: [] for key in new_keys}
     for source_channel, rows in enumerate(old_rows):
         for row in rows:
             process, order, old_partners, factor, permutation, \
                 old_partner_permutations = row
-            physical_histories = DiscoverResonanceHistories(process)
             partner_records = []
             # Keep every original QCD/singlet map as a nonresonant density.
             for partner, partner_permutation in zip(
                     old_partners, old_partner_permutations):
-                key = registry[(partner, ())]
+                key = registry[(partner, None)]
                 partner_records.append((channel_number[key], partner_permutation))
 
-            # A recursive resonance density does not need to be repeated for
-            # every singlet placement of the same coefficient.  Attach one
-            # copy of each physical history to the component's deterministic
-            # representative; all rows still see it in the same MIS sum.
+            # Attach one copy of each exact propagator tree to the component's
+            # deterministic production-map representative. All rows still see
+            # it in the same MIS sum.
             representative = min(old_partners)
             representative_index = old_partners.index(representative)
             representative_permutation = old_partner_permutations[
                 representative_index
             ]
-            for history in physical_histories:
-                if not history:
-                    continue
-                signature = _history_in_density_labels(
-                    history, representative_permutation
-                )
+            physical_signatures = _diagram_density_signatures(
+                process,
+                representative_permutation,
+                PhaseSpaceOrderFromKey(old_keys[representative]),
+            )
+            for signature in physical_signatures:
                 try:
                     key = registry[(representative, signature)]
                 except KeyError as error:
                     raise ValueError(
-                        "resonance history is missing from its multichannel "
+                        "diagram topology is missing from its multichannel "
                         f"representative: channel={representative} "
-                        f"history={signature}"
+                        f"map={signature}"
                     ) from error
                 partner_records.append((
                     channel_number[key], representative_permutation
                 ))
-            partner_records.sort(key=lambda item: (item[0], item[1]))
+            partner_records = sorted(set(partner_records),
+                                     key=lambda item: (item[0], item[1]))
             partners = tuple(item[0] for item in partner_records)
             partner_permutations = tuple(item[1] for item in partner_records)
 
-            source_histories = [()]
+            source_signatures = [None]
             if source_channel == representative:
-                source_histories.extend(
-                    history for history in physical_histories if history
-                )
-            for history in source_histories:
-                signature = _history_in_density_labels(history, permutation)
+                source_signatures.extend(physical_signatures)
+            seen_source_keys = set()
+            for signature in source_signatures:
                 key = registry[(source_channel, signature)]
+                if key in seen_source_keys:
+                    continue
+                seen_source_keys.add(key)
                 rebuilt[key].append((
                     process,
                     order,
@@ -1583,7 +1797,7 @@ def AddResonanceMultiChannels():
 
     all_keys_sorted = new_keys
     phase_space_orders = rebuilt
-    channel_resonances = {
+    channel_topologies = {
         key: key[-1] for key in all_keys_sorted
     }
     build_process_index()
@@ -1637,36 +1851,198 @@ def sort_by_pdg_codes2(proc):
     process=proc[0]
     return sort_by_pdg_codes(process)
 
-def WriteAllProcsIntoList():
-    """Serialize the phase-space groups and subprocess rows.
+def BuildIntegrationCatalogues():
+    """Collapse map replicas into the four deterministic v6 catalogues.
 
-    This is the second block in ``processes.txt``. Each group starts with the
-    group id, number of subprocess rows, maximum number of multichannel
-    partners, and phase-space order. The following rows are emitted by
-    ``ConvertProcToString``.
+    The existing colour/multichannel construction deliberately produces a row
+    in every source map. Version 6 stores each numerical recipe once, each
+    map/permutation partner signature once, and each physical coefficient row
+    once in the integration family which owns that signature.
     """
-    towrite=[]
-    towrite.append(str(len(all_keys_sorted))) # number of phase-space orderings to consider
-    towrite.append('')
-    output_channels=[]
-    for internal_key in all_keys_sorted:
-        key = PhaseSpaceOrderFromKey(internal_key)
-        rows = phase_space_orders[internal_key]
-        resonances = channel_resonances.get(internal_key, ())
-        output_channels.append((key, resonances, rows))
 
-    for i,(key,resonances,rows) in enumerate(output_channels):
-        towrite.append(str(i+1)+'   '+str(len(rows))+'   '+str(max(len(proc[2]) for proc in rows))+'   '+' '.join([str(k+1) for k in key])+'   '+str(len(resonances)))
-        for resonance, labels in resonances:
-            towrite.append(str(resonance)+'   '+str(len(labels))+'   '+' '.join(str(label+1) for label in labels))
-        # order the processes in the process_list, so that we get a neat processes.txt file:
-        process_list=sorted(rows,key=sort_by_pdg_codes2)
-        for proc in process_list:
-            process_line=ConvertProcToString(proc)
-            towrite.append(process_line)
-        towrite.append('')
-        towrite.append('')
-        towrite.append('')
+    channel_recipes = []
+    for key in all_keys_sorted:
+        recipe = PhaseMapRecipe(
+            tuple(PhaseSpaceOrderFromKey(key)),
+            tuple(channel_topologies.get(key, ())),
+        )
+        for node in recipe.topology:
+            if node.kind not in TRANSFORM_CODES:
+                raise ValueError(
+                    f"phase-map node has no numerical transform: {node}"
+                )
+        channel_recipes.append(recipe)
+
+    # Numerical identity excludes representative PDGs but includes transform
+    # parameters, the full binary split tree, and the production recipe.
+    recipe_by_signature = {}
+    for recipe in channel_recipes:
+        previous = recipe_by_signature.get(recipe.density_signature)
+        if previous is None or recipe < previous:
+            recipe_by_signature[recipe.density_signature] = recipe
+    maps = tuple(sorted(recipe_by_signature.values()))
+    map_id_by_signature = {
+        recipe.density_signature: map_id
+        for map_id, recipe in enumerate(maps)
+    }
+    channel_to_map = tuple(
+        map_id_by_signature[recipe.density_signature]
+        for recipe in channel_recipes
+    )
+
+    permutations = tuple(sorted({
+        tuple(permutation)
+        for key in all_keys_sorted
+        for row in phase_space_orders[key]
+        for permutation in row[5]
+    }))
+    permutation_id = {
+        permutation: index for index, permutation in enumerate(permutations)
+    }
+
+    rows_by_signature = defaultdict(set)
+    pairs_by_legacy_signature = {}
+    seen_family_rows = set()
+    for key in all_keys_sorted:
+        for row in phase_space_orders[key]:
+            process, colour_order, partners, coefficient = row[:4]
+            partner_permutations = row[5]
+            if len(partners) != len(partner_permutations):
+                raise ValueError("partner maps and permutations are misaligned")
+            legacy_signature = (
+                tuple(partners),
+                tuple(tuple(permutation)
+                      for permutation in partner_permutations),
+            )
+            pairs = pairs_by_legacy_signature.get(legacy_signature)
+            if pairs is None:
+                pairs = tuple(sorted({
+                    (
+                        channel_to_map[channel],
+                        permutation_id[tuple(permutation)],
+                    )
+                    for channel, permutation in zip(
+                        partners, partner_permutations
+                    )
+                }))
+                pairs_by_legacy_signature[legacy_signature] = pairs
+            if not pairs:
+                raise ValueError("an integration family cannot have no submaps")
+            coefficient_row = CoefficientRow(
+                tuple(process), tuple(colour_order), float(coefficient)
+            )
+            family_row = (pairs, coefficient_row)
+            if family_row in seen_family_rows:
+                continue
+            seen_family_rows.add(family_row)
+            rows_by_signature[pairs].add(coefficient_row)
+
+    partner_sets = tuple(sorted(rows_by_signature))
+    families = tuple(
+        IntegrationFamily(
+            partner_set_id,
+            tuple(sorted(rows_by_signature[signature])),
+        )
+        for partner_set_id, signature in enumerate(partner_sets)
+    )
+    catalogues = ProcessCatalogues(
+        permutations, maps, partner_sets, families
+    )
+    _validate_integration_catalogues(catalogues)
+    return catalogues
+
+
+def _validate_integration_catalogues(catalogues):
+    """Reject malformed or non-canonical v6 catalogue relationships."""
+
+    if not catalogues.permutations or not catalogues.maps:
+        raise ValueError("version-6 catalogues cannot be empty")
+    if len(catalogues.partner_sets) != len(catalogues.families):
+        raise ValueError("every unique partner signature must own one family")
+    for permutation in catalogues.permutations:
+        if len(permutation) != len(catalogues.maps[0].order) or \
+                sorted(permutation) != list(range(len(permutation))):
+            raise ValueError(f"invalid catalogue permutation {permutation}")
+        if permutation[:2] != (0, 1):
+            raise ValueError("catalogue permutations must fix incoming legs")
+    for partner_set in catalogues.partner_sets:
+        if tuple(sorted(set(partner_set))) != partner_set:
+            raise ValueError("partner sets must be sorted and unique")
+        for map_id, permutation_id in partner_set:
+            if not 0 <= map_id < len(catalogues.maps):
+                raise ValueError("partner map is outside the map catalogue")
+            if not 0 <= permutation_id < len(catalogues.permutations):
+                raise ValueError(
+                    "partner permutation is outside the permutation catalogue"
+                )
+    for family_id, family in enumerate(catalogues.families):
+        if family.partner_set_id != family_id or not family.rows:
+            raise ValueError("families must deterministically own one signature")
+
+
+def _coefficient_row_to_string(row):
+    crossed = [
+        pdgs[particle] if index > 1 else pdgs[anti_particle[particle]]
+        for index, particle in enumerate(row.process)
+    ]
+    return "   ".join((
+        " ".join(crossed),
+        " ".join(str(label + 1) for label in row.colour_order),
+        repr(row.coefficient),
+    ))
+
+
+def WriteAllProcsIntoList():
+    """Serialize compact version-6 process catalogues."""
+
+    catalogues = BuildIntegrationCatalogues()
+    towrite = [f"PERMUTATIONS {len(catalogues.permutations)}"]
+    for permutation_id, permutation in enumerate(
+            catalogues.permutations, start=1):
+        towrite.append(
+            f"P {permutation_id} "
+            + " ".join(str(label + 1) for label in permutation)
+        )
+
+    towrite.extend(("", f"PHASE_MAPS {len(catalogues.maps)}"))
+    for map_id, recipe in enumerate(catalogues.maps, start=1):
+        towrite.append(
+            f"M {map_id} {len(recipe.topology)} "
+            + " ".join(str(label + 1) for label in recipe.order)
+        )
+        for node in recipe.topology:
+            towrite.append(
+                "N "
+                + " ".join(str(value) for value in (
+                    node.pdg,
+                    TRANSFORM_CODES[node.kind],
+                    node.parameter,
+                    node.mask,
+                    node.left,
+                    node.right,
+                ))
+            )
+
+    towrite.extend(("", f"PARTNER_SETS {len(catalogues.partner_sets)}"))
+    for partner_set_id, partner_set in enumerate(
+            catalogues.partner_sets, start=1):
+        fields = ["S", str(partner_set_id), str(len(partner_set))]
+        for map_id, permutation_id in partner_set:
+            fields.extend((str(map_id + 1), str(permutation_id + 1)))
+        towrite.append(" ".join(fields))
+
+    towrite.extend((
+        "", f"INTEGRATION_FAMILIES {len(catalogues.families)}"
+    ))
+    for family_id, family in enumerate(catalogues.families, start=1):
+        towrite.append(
+            f"F {family_id} {family.partner_set_id + 1} {len(family.rows)}"
+        )
+        towrite.extend(
+            "C " + _coefficient_row_to_string(row)
+            for row in family.rows
+        )
+    towrite.extend(("", "END_PROCESSES"))
     return towrite
 
 def Addqq_dfProcesses(sorted_procs):
@@ -1701,7 +2077,7 @@ def WriteUniqueProcsIntoList(procs):
     line.append('# options: flavour_scheme='+str(flavour_scheme_number)+
                 ' include_3qqbar='+str(options['include_3qqbar_processes']).lower()+
                 ' include_cc='+str(options['include_cc_processes']).lower()+
-                ' resonance_discovery=automatic')
+                ' channel_discovery=diagrams')
     for proc in sorted_procs:
         line.append(' '.join(pdgs[p] for p in proc))
     line.append('')

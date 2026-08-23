@@ -17,17 +17,20 @@ program amplicol_generate
   use multichannel
   use amplitude_library
   implicit none
-  integer :: iproc,iident,target_label
+  integer :: iproc,iident,target_label,imap,recipe_id
   real(kind=8) :: weight
-  integer :: i
+  integer :: i,j
   real(kind=8),dimension(:),allocatable :: mass,width
-  real(kind=8),dimension(:),allocatable :: resonance_mass,resonance_width
+  real(kind=8),dimension(:),allocatable :: topology_mass,topology_width
+  real(kind=8),dimension(:),allocatable :: map_pt_min,map_eta_max
+  real(kind=8),dimension(:,:),allocatable :: map_dr_min,map_sqrt_s_min
   character(len=80) :: filename,logfile,tag
   character(len=256) :: input_filename
   integer(kind=4) :: PS_choice
   integer,parameter :: nevent_hel_filter=10
   integer :: igroup
   logical,dimension(1) :: to_write
+  integer,dimension(1) :: selected_map_ids
   integer,dimension(:),allocatable :: nintegrals
   integer :: ichan,iint,itmax,ncalls0,iamp
   real(kind=8),dimension(1) :: f,f_abs
@@ -73,9 +76,6 @@ program amplicol_generate
      call read_amplitude_lib()
   else
      call read_processes_from_file(filename)
-     do i=1,ngroups
-       call setup_optimised_multichannel_weight_computation(pgl(i))
-    enddo
  endif
   if (timing_mode.eq.timing_detailed) then
      call cpu_time(tAfter)
@@ -88,38 +88,12 @@ program amplicol_generate
   write (99,*) 'Initialise phase-space groups and amplitudes '//trim(formatted)
   do igroup=1,ngroups
      if (pgl(igroup)%nproc.eq.0) cycle
-     if (pgl(igroup)%nresonances.gt.0 .and.&
-          (PS_choice.eq.2 .or. PS_choice.eq.3)) then
-        write (*,*) 'Resonance mappings require the gen23 phase space (PS_choice 1 or 4)',igroup
-        stop 1
-     endif
-     ! allocate the amplitudes and the phase-space for each of the integration channels
-     if (PS_choice.eq.1) then
-        allocate(phase_space_gen23 :: pgl(igroup)%phase_space)
-     elseif  (PS_choice.eq.2) then
-        allocate(phase_space_haag :: pgl(igroup)%phase_space)
-     elseif (PS_choice.eq.3) then
-        allocate(phase_space_genpt :: pgl(igroup)%phase_space)
-     elseif (PS_choice.eq.4) then
-        allocate(phase_space_gen23 :: pgl(igroup)%phase_space)
-     endif
-
-     if (pgl(igroup)%nresonances.gt.0) then
-        allocate(resonance_mass(pgl(igroup)%nresonances))
-        allocate(resonance_width(pgl(igroup)%nresonances))
-        do i=1,pgl(igroup)%nresonances
-           resonance_mass(i)=phys_model%get_mass(pgl(igroup)%resonance_pdgs(i))
-           resonance_width(i)=phys_model%get_width(pgl(igroup)%resonance_pdgs(i))
-        enddo
-        call pgl(igroup)%phase_space%configure_resonances(&
-             pgl(igroup)%nresonances,pgl(igroup)%resonance_pdgs,&
-             pgl(igroup)%resonance_masks,resonance_mass,resonance_width)
-        deallocate(resonance_mass)
-        deallocate(resonance_width)
-     endif
-
      allocate(mass(pgl(igroup)%next))
      allocate(width(pgl(igroup)%next))
+     allocate(map_pt_min(pgl(igroup)%next))
+     allocate(map_eta_max(pgl(igroup)%next))
+     allocate(map_dr_min(pgl(igroup)%next,pgl(igroup)%next))
+     allocate(map_sqrt_s_min(pgl(igroup)%next,pgl(igroup)%next))
      do iproc=1,pgl(igroup)%nproc
         do iident=1,pgl(igroup)%iden_iproc(iproc)
            do i=1,pgl(igroup)%next
@@ -132,39 +106,100 @@ program amplicol_generate
            enddo
         enddo
      enddo
-     do i=1,pgl(igroup)%next
-        ! The phase-space generator uses the canonical density labels, while
-        ! iden_processes stores physical subprocesses in the fixed matrix-
-        ! element labelling.  Translate the former into the latter before
-        ! assigning a mass.  The reduced amplitude representative itself can
-        ! have a different crossing and must not be used for this purpose.
-        target_label=pgl(igroup)%phase_space_permutations(i,1)
-        mass(i)=phys_model%get_mass(pgl(igroup)%iden_processes(target_label,1,1))
-        width(i)=phys_model%get_width(pgl(igroup)%iden_processes(target_label,1,1))
-        do iproc=1,pgl(igroup)%nproc
-           target_label=pgl(igroup)%phase_space_permutations(i,iproc)
-           do iident=1,pgl(igroup)%iden_iproc(iproc)
-              if (mass(i).ne.phys_model%get_mass(&
-                   pgl(igroup)%iden_processes(target_label,iident,iproc)) .or. &
-                   width(i).ne.phys_model%get_width(&
-                   pgl(igroup)%iden_processes(target_label,iident,iproc))) then
-                 write (*,*) 'masses and widths not compatible among physical subprocesses'
-                 stop 1
-              endif
-           enddo
-        enddo
-     enddo
-     ! Initialise the phase-space parametrisation
      if (timing_mode.eq.timing_detailed) call cpu_time(tBefore)
      call setup_cuts_for_each_particle(pgl(igroup),igroup)
-     if (PS_choice.ge.1 .and. PS_choice.le.3) then
-        call pgl(igroup)%phase_space%init(sqrts,pgl(igroup)%next,mass,pgl(igroup)%phase_space_orders,&
-             pgl(igroup)%pt_min,pgl(igroup)%eta_max,pgl(igroup)%DR_min,pgl(igroup)%sqrt_s_min,.false.,include_pdf)
-     elseif (PS_choice.eq.4) then
-        call pgl(igroup)%phase_space%init(sqrts,pgl(igroup)%next,mass,pgl(igroup)%phase_space_orders,&
-             pgl(igroup)%pt_min,pgl(igroup)%eta_max,pgl(igroup)%DR_min,pgl(igroup)%sqrt_s_min,.true.,include_pdf)
-     endif
-     pgl(igroup)%ndim_extra=pgl(igroup)%phase_space%ndim_extra
+     pgl(igroup)%ndim_extra=1 ! one fixed-prior submap selector
+     do imap=1,pgl(igroup)%nsubmaps
+        recipe_id=pgl(igroup)%phase_maps(imap)%recipe_id
+        if (phase_map_catalogue(recipe_id)%ntopology_nodes.gt.0 .and.&
+             (PS_choice.eq.2 .or. PS_choice.eq.3)) then
+           write (*,*) 'Diagram mappings require gen23 (PS_choice 1 or 4)',&
+                igroup,imap
+           stop 1
+        endif
+        if (PS_choice.eq.1 .or. PS_choice.eq.4) then
+           allocate(phase_space_gen23 :: &
+                pgl(igroup)%phase_maps(imap)%phase_space)
+        elseif (PS_choice.eq.2) then
+           allocate(phase_space_haag :: &
+                pgl(igroup)%phase_maps(imap)%phase_space)
+        elseif (PS_choice.eq.3) then
+           allocate(phase_space_genpt :: &
+                pgl(igroup)%phase_maps(imap)%phase_space)
+        endif
+
+        if (phase_map_catalogue(recipe_id)%ntopology_nodes.gt.0) then
+           allocate(topology_mass(&
+                phase_map_catalogue(recipe_id)%ntopology_nodes))
+           allocate(topology_width(&
+                phase_map_catalogue(recipe_id)%ntopology_nodes))
+           do i=1,phase_map_catalogue(recipe_id)%ntopology_nodes
+              if (phase_map_catalogue(recipe_id)%topology_pdgs(i).eq.0) then
+                 topology_mass(i)=0d0
+                 topology_width(i)=0d0
+              else
+                 topology_mass(i)=phys_model%get_mass(&
+                      phase_map_catalogue(recipe_id)%topology_pdgs(i))
+                 topology_width(i)=phys_model%get_width(&
+                      phase_map_catalogue(recipe_id)%topology_pdgs(i))
+              endif
+           enddo
+           call pgl(igroup)%phase_maps(imap)%phase_space%configure_topology(&
+                phase_map_catalogue(recipe_id)%ntopology_nodes,&
+                phase_map_catalogue(recipe_id)%topology_pdgs,&
+                phase_map_catalogue(recipe_id)%topology_masks,&
+                phase_map_catalogue(recipe_id)%topology_left_masks,&
+                topology_mass,topology_width,&
+                phase_map_catalogue(recipe_id)%topology_kinds,&
+                phase_map_catalogue(recipe_id)%topology_parameters)
+           deallocate(topology_mass,topology_width)
+        endif
+
+        do i=1,pgl(igroup)%next
+           target_label=pgl(igroup)%phase_maps(imap)%permutation(i)
+           mass(i)=phys_model%get_mass(&
+                pgl(igroup)%iden_processes(target_label,1,1))
+           width(i)=phys_model%get_width(&
+                pgl(igroup)%iden_processes(target_label,1,1))
+           map_pt_min(i)=pgl(igroup)%pt_min(target_label)
+           map_eta_max(i)=pgl(igroup)%eta_max(target_label)
+           do j=1,pgl(igroup)%next
+              map_dr_min(i,j)=pgl(igroup)%DR_min(target_label,&
+                   pgl(igroup)%phase_maps(imap)%permutation(j))
+              map_sqrt_s_min(i,j)=pgl(igroup)%sqrt_s_min(target_label,&
+                   pgl(igroup)%phase_maps(imap)%permutation(j))
+           enddo
+           do iproc=1,pgl(igroup)%nproc
+              do iident=1,pgl(igroup)%iden_iproc(iproc)
+                 if (mass(i).ne.phys_model%get_mass(&
+                      pgl(igroup)%iden_processes(target_label,iident,iproc)) .or.&
+                      width(i).ne.phys_model%get_width(&
+                      pgl(igroup)%iden_processes(target_label,iident,iproc))) then
+                    write (*,*) 'A family submap changes the external-mass layout',&
+                         igroup,imap,iproc,iident,i
+                    stop 1
+                 endif
+              enddo
+           enddo
+        enddo
+        ! Keep one concise mass-layout record per integration family.  The
+        ! phase-space implementation itself stays quiet because a family can
+        ! own hundreds of submaps with the same external masses.
+        if (imap.eq.1) write (99,*) 'masses:',mass
+        if (PS_choice.ge.1 .and. PS_choice.le.3) then
+           call pgl(igroup)%phase_maps(imap)%phase_space%init(&
+                sqrts,pgl(igroup)%next,mass,&
+                phase_map_catalogue(recipe_id)%order,map_pt_min,map_eta_max,&
+                map_dr_min,map_sqrt_s_min,.false.,include_pdf)
+        elseif (PS_choice.eq.4) then
+           call pgl(igroup)%phase_maps(imap)%phase_space%init(&
+                sqrts,pgl(igroup)%next,mass,&
+                phase_map_catalogue(recipe_id)%order,map_pt_min,map_eta_max,&
+                map_dr_min,map_sqrt_s_min,.true.,include_pdf)
+        endif
+        pgl(igroup)%ndim_extra=max(pgl(igroup)%ndim_extra,&
+             pgl(igroup)%phase_maps(imap)%phase_space%ndim_extra+1)
+     enddo
      allocate(pgl(igroup)%ps(1))
      allocate(pgl(igroup)%ps(1)%x(1:pgl(igroup)%ndim+pgl(igroup)%ndim_extra))
      allocate(pgl(igroup)%ps(1)%p(0:3,1:pgl(igroup)%next))
@@ -174,6 +209,7 @@ program amplicol_generate
      endif
      deallocate(mass)
      deallocate(width)
+     deallocate(map_pt_min,map_eta_max,map_dr_min,map_sqrt_s_min)
 
      if (use_amplitude_library) cycle
      
@@ -288,8 +324,10 @@ program amplicol_generate
         t_Int_get=t_Int_get+(tSampleAfter-tSampleBefore)*dble(timing_sample)
      endif
      call integrand(ichan,iint,simple_integrator%x(1,1),simple_integrator%wgt(1),f(1),f_abs(1))
+     selected_map_ids(1)=pgl(ichan)%selected_map
      if (time_detail_point) call cpu_time(tSampleBefore)
-     call simple_integrator%fill_points(1,f_abs,f,to_write,done)
+     call simple_integrator%fill_points(1,f_abs,f,to_write,done,&
+          selected_map_ids)
      if (time_detail_point) then
         call cpu_time(tSampleAfter)
         t_Int_fill=t_Int_fill+(tSampleAfter-tSampleBefore)*dble(timing_sample)
@@ -449,8 +487,8 @@ contains
     real(kind=8),intent(in) :: vol
     real(kind=8),intent(out) :: f,f_abs
     real(kind=8), dimension(:),allocatable,save :: val,val_abs,vol_ichan
-    real(kind=8),dimension(pgl(ichan)%nproc) :: colour_singlet_multichannel_weight
-    integer :: ih,iproc,a,target_label
+    real(kind=8) :: family_multichannel_weight
+    integer :: ih,iproc,a,target_label,imap,selector_index
     real(kind=8),dimension(0:3,pgl(ichan)%next) :: p_generated
     real(kind=8), parameter :: pi=3.14159265358979323846d0,conv=389379660d0
     logical :: done,time_physics
@@ -482,7 +520,12 @@ contains
     ! Generate phase-space point based on the random numbers 'x(1:ndim)'
     if (time_physics) call cpu_time(tBefore)
     pgl(ichan)%ps(1)%x=x
-    call pgl(ichan)%phase_space%generate_momenta(pgl(ichan)%ps(1))
+    selector_index=pgl(ichan)%ndim+pgl(ichan)%ndim_extra
+    imap=min(int(x(selector_index)*pgl(ichan)%nsubmaps)+1,&
+         pgl(ichan)%nsubmaps)
+    pgl(ichan)%selected_map=imap
+    call pgl(ichan)%phase_maps(imap)%phase_space%generate_momenta(&
+         pgl(ichan)%ps(1))
     if (debug ) then
        write (*,*) pgl(ichan)%ps(1)%jac
        stop 1
@@ -500,7 +543,7 @@ contains
     ! before cuts, amplitudes, scales, and event output.
     p_generated=pgl(ichan)%ps(1)%p
     do a=1,pgl(ichan)%next
-       target_label=pgl(ichan)%phase_space_permutations(a,iproc)
+       target_label=pgl(ichan)%phase_maps(imap)%permutation(a)
        pgl(ichan)%ps(1)%p(:,target_label)=p_generated(:,a)
     enddo
     if (.not.pass_cuts(pgl(ichan))) then
@@ -512,7 +555,8 @@ contains
        return
     endif
     pgl(ichan)%passed(iint) = pgl(ichan)%passed(iint) + 1
-    call compute_multichannel_weight(ichan,iint,pgl(ichan)%ps(1),colour_singlet_multichannel_weight)
+    call compute_family_multichannel_weight(ichan,pgl(ichan)%ps(1),&
+         family_multichannel_weight)
     if (time_physics) then
        call cpu_time(tAfter)
        t_PS= t_PS + (tAfter-tBefore)*dble(timing_sample)
@@ -551,7 +595,6 @@ contains
     else
        alphas=alphas_Q(scale_ren,2,alphas_MZ)
     endif
-    
     ! MINT weight, phase-space jacobian and GeV -> pb conversion factor
     weight=vol*pgl(ichan)%ps(1)%jac*conv
 
@@ -567,13 +610,14 @@ contains
 
     if (keep_processes_separate) then
        val(1)=pgl(ichan)%amp2(1)*weight/dble(pgl(ichan)%iden(iint))
-       val(1)=val(1)*colour_singlet_multichannel_weight(iint)
+       val(1)=val(1)*family_multichannel_weight
        call include_PDF_and_identical_procs(val,val_abs,pgl(ichan),iint)
        f_abs=sum(val_abs(1:1))
        f=sum(val(1:1))
     else
        val(1:pgl(ichan)%nproc)=pgl(ichan)%amp2(1:pgl(ichan)%nproc)*weight/dble(pgl(ichan)%iden(1:pgl(ichan)%nproc))
-       val(1:pgl(ichan)%nproc)=val(1:pgl(ichan)%nproc)*colour_singlet_multichannel_weight(1:pgl(ichan)%nproc)
+       val(1:pgl(ichan)%nproc)=val(1:pgl(ichan)%nproc)*&
+            family_multichannel_weight
        call include_PDF_and_identical_procs(val,val_abs,pgl(ichan),-1)
        f_abs=sum(val_abs(1:pgl(ichan)%nproc))
        f=sum(val(1:pgl(ichan)%nproc))

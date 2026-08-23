@@ -3,12 +3,22 @@ module phase_space_gen23_mod
   use phase_space_base
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
+  type,public :: gen23_momentum_cache
+     integer(kind=4) :: next=0
+     real(kind=8) :: ycm=0d0
+     real(kind=8),dimension(:,:),allocatable :: pp
+     real(kind=8),dimension(:),allocatable :: invm
+  end type gen23_momentum_cache
   type,extends(phase_space_type),public :: phase_space_gen23
      integer(kind=4),dimension(:),allocatable :: decay_left,decay_right
+     integer(kind=4),dimension(:),allocatable :: topology_roots
+     integer(kind=4),dimension(:,:),allocatable :: production_sets
+     integer(kind=4),dimension(2) :: nproduction_set=0
    contains
      procedure :: init => gen23_init
      procedure :: generate_momenta => gen23_generate_momenta
      procedure :: compute_x_from_momenta => gen23_compute_x_from_momenta
+     procedure :: compute_x_from_cache => gen23_compute_x_from_cache
      procedure :: cleanup => gen23_cleanup
      final :: gen23_finalize
   end type phase_space_gen23
@@ -16,7 +26,7 @@ module phase_space_gen23_mod
   logical :: includePDF
   ! TECHNIAL PARAMETERS
   ! vebose:
-  logical,parameter :: verbose=.true.
+  logical,parameter :: verbose=.false.
   logical,parameter,public :: debug=.false.
   ! importance sampling (0d0=flat transformation; -1d0=1/x transformation):
   real(kind=8) :: ip,ip_shat,ip_dt,ip_mass
@@ -25,6 +35,7 @@ module phase_space_gen23_mod
   real(kind=8),parameter :: pi=3.1415926535897932d0
   logical,parameter :: use_t_channel_at_start=.true.
   logical,save :: forward_failure_reported=.false.
+  public :: build_gen23_momentum_cache
 
 contains
   subroutine gen23_init(this,sqrts,n,m,o,pt_cut,rap_cut,dr_cut,sqrt_s_min,t_chan,include_pdf,flat)
@@ -189,10 +200,10 @@ contains
     if (verbose) then
        write (99,*) "Additional random numbers needed:",ndim_extra
     endif
-    if (this%nresonances.gt.0) then
-       call setup_resonance_tree(this)
-       this%ndim_extra=0
-       if (verbose) write (99,*) 'Using recursive resonance phase-space tree'
+    if (this%ntopology_nodes.gt.0) then
+       call setup_topology_tree(this)
+       call setup_topology_production(this)
+       if (verbose) write (99,*) 'Using diagram-derived phase-space tree'
     endif
     if (present(flat)) then
        if (flat) then
@@ -315,69 +326,91 @@ contains
     if (allocated(this%sqrt_s_min)) deallocate(this%sqrt_s_min)
     if (allocated(this%decay_left)) deallocate(this%decay_left)
     if (allocated(this%decay_right)) deallocate(this%decay_right)
-    if (allocated(this%resonance_pdgs)) deallocate(this%resonance_pdgs)
-    if (allocated(this%resonance_masks)) deallocate(this%resonance_masks)
-    if (allocated(this%resonance_masses)) deallocate(this%resonance_masses)
-    if (allocated(this%resonance_widths)) deallocate(this%resonance_widths)
-    this%nresonances=0
+    if (allocated(this%topology_roots)) deallocate(this%topology_roots)
+    if (allocated(this%production_sets)) deallocate(this%production_sets)
+    if (allocated(this%topology_pdgs)) deallocate(this%topology_pdgs)
+    if (allocated(this%topology_masks)) deallocate(this%topology_masks)
+    if (allocated(this%topology_left_masks)) deallocate(this%topology_left_masks)
+    if (allocated(this%topology_kinds)) deallocate(this%topology_kinds)
+    if (allocated(this%topology_parameters)) deallocate(this%topology_parameters)
+    if (allocated(this%topology_masses)) deallocate(this%topology_masses)
+    if (allocated(this%topology_widths)) deallocate(this%topology_widths)
+    this%ntopology_nodes=0
   end subroutine gen23_cleanup
 
-  subroutine setup_resonance_tree(this)
-    ! Build a binary decay tree in which every requested resonance descendant
-    ! mask is an explicit node.  Laminar histories permit arbitrary nesting
-    ! and any number of disjoint branches.
+  subroutine setup_topology_tree(this)
+    ! Build the exact diagram-derived binary decay forest. Legacy resonance
+    ! records have zero left masks and retain the old order-derived tree.
     implicit none
     class(phase_space_gen23),intent(inout) :: this
-    integer(kind=4) :: i,j,root,overlap
+    integer(kind=4) :: i,j,root,overlap,left,right
     root=maskr(this%next)-3
     allocate(this%decay_left(0:maskr(this%next)))
     allocate(this%decay_right(0:maskr(this%next)))
     this%decay_left=0
     this%decay_right=0
-    do i=1,this%nresonances
-       if (popcnt(this%resonance_masks(i)).lt.2 .or.&
-            iand(this%resonance_masks(i),root).ne.this%resonance_masks(i)) then
-          write (*,*) 'Invalid resonance descendant mask',this%resonance_pdgs(i),&
-               this%resonance_masks(i)
+    do i=1,this%ntopology_nodes
+       if (popcnt(this%topology_masks(i)).lt.2 .or.&
+            iand(this%topology_masks(i),root).ne.this%topology_masks(i)) then
+          write (*,*) 'Invalid topology descendant mask',this%topology_pdgs(i),&
+               this%topology_masks(i)
           stop 1
        endif
        do j=1,i-1
-          overlap=iand(this%resonance_masks(i),this%resonance_masks(j))
-          if (this%resonance_masks(i).eq.this%resonance_masks(j) .or.&
-               (overlap.ne.0 .and. overlap.ne.this%resonance_masks(i) .and.&
-               overlap.ne.this%resonance_masks(j))) then
-             write (*,*) 'Resonance descendant masks must be distinct and laminar'
+          overlap=iand(this%topology_masks(i),this%topology_masks(j))
+          if (this%topology_masks(i).eq.this%topology_masks(j) .or.&
+               (overlap.ne.0 .and. overlap.ne.this%topology_masks(i) .and.&
+               overlap.ne.this%topology_masks(j))) then
+             write (*,*) 'Topology descendant masks must be distinct and laminar'
              stop 1
           endif
        enddo
     enddo
-    call build_decay_node(root)
+    if (all(this%topology_left_masks.ne.0)) then
+       do i=1,this%ntopology_nodes
+          left=this%topology_left_masks(i)
+          right=ieor(this%topology_masks(i),left)
+          if (iand(left,this%topology_masks(i)).ne.left .or. right.eq.0 .or.&
+               iand(left,right).ne.0) then
+             write (*,*) 'Invalid topology child split',i,&
+                  this%topology_masks(i),left,right
+             stop 1
+          endif
+          this%decay_left(this%topology_masks(i))=left
+          this%decay_right(this%topology_masks(i))=right
+       enddo
+    elseif (all(this%topology_left_masks.eq.0)) then
+       call build_decay_node(root)
+    else
+       write (*,*) 'Topology nodes mix explicit and legacy child splits'
+       stop 1
+    endif
   contains
     recursive subroutine build_decay_node(node)
       integer(kind=4),intent(in) :: node
-      integer(kind=4),dimension(this%next+this%nresonances) :: items
+      integer(kind=4),dimension(this%next+this%ntopology_nodes) :: items
       integer(kind=4) :: nitems,covered,resmask,combined,parent,tmp
       integer :: ir,jr,ibit,item_index,sort_index
       logical :: direct_child
       nitems=0
       covered=0
-      do ir=1,this%nresonances
-         resmask=this%resonance_masks(ir)
+      do ir=1,this%ntopology_nodes
+         resmask=this%topology_masks(ir)
          if (resmask.eq.node .or. iand(resmask,node).ne.resmask) cycle
          direct_child=.true.
-         do jr=1,this%nresonances
+         do jr=1,this%ntopology_nodes
             if (jr.eq.ir) cycle
-            if (this%resonance_masks(jr).eq.node) cycle
-            if (iand(resmask,this%resonance_masks(jr)).eq.resmask .and.&
-                 resmask.ne.this%resonance_masks(jr) .and.&
-                 iand(this%resonance_masks(jr),node).eq.this%resonance_masks(jr)) then
+            if (this%topology_masks(jr).eq.node) cycle
+            if (iand(resmask,this%topology_masks(jr)).eq.resmask .and.&
+                 resmask.ne.this%topology_masks(jr) .and.&
+                 iand(this%topology_masks(jr),node).eq.this%topology_masks(jr)) then
                direct_child=.false.
                exit
             endif
          enddo
          if (.not.direct_child) cycle
          if (iand(covered,resmask).ne.0) then
-            write (*,*) 'Overlapping direct resonance children in decay tree',node
+            write (*,*) 'Overlapping direct topology children in decay tree',node
             stop 1
          endif
          nitems=nitems+1
@@ -392,7 +425,7 @@ contains
          items(nitems)=ibset(0,ibit)
       enddo
       if (nitems.lt.2) then
-         write (*,*) 'Could not split resonance decay node',node,nitems
+         write (*,*) 'Could not split topology decay node',node,nitems
          stop 1
       endif
       do item_index=2,nitems
@@ -411,7 +444,7 @@ contains
          if (this%decay_left(parent).ne.0 .and.&
               (this%decay_left(parent).ne.items(item_index) .or.&
               this%decay_right(parent).ne.combined)) then
-            write (*,*) 'Inconsistent binary resonance decay tree',parent
+            write (*,*) 'Inconsistent binary topology decay tree',parent
             stop 1
          endif
          this%decay_left(parent)=items(item_index)
@@ -419,7 +452,7 @@ contains
          combined=parent
       enddo
       if (combined.ne.node) then
-         write (*,*) 'Incomplete binary resonance decay tree',node,combined
+         write (*,*) 'Incomplete binary topology decay tree',node,combined
          stop 1
       endif
     end subroutine build_decay_node
@@ -436,20 +469,149 @@ contains
          endif
       enddo
     end function order_position
-  end subroutine setup_resonance_tree
+  end subroutine setup_topology_tree
 
-  integer function resonance_index(this,mask)
+  subroutine setup_topology_production(this)
+    ! Collapse every maximal time-like diagram subtree to one effective
+    ! production item. The remaining ordered items are generated by the
+    ! ordinary gen23/t-channel recurrence before the subtrees are decayed.
+    implicit none
+    class(phase_space_gen23),intent(inout) :: this
+    integer(kind=4),dimension(this%ntopology_nodes) :: roots
+    integer(kind=4) :: i,j,nroots,mask,other,item,bit,emitted
+    integer :: position,label,side,ndim_extra,nitems
+    logical :: contained
+
+    nroots=0
+    do i=1,this%ntopology_nodes
+       mask=this%topology_masks(i)
+       contained=.false.
+       do j=1,this%ntopology_nodes
+          other=this%topology_masks(j)
+          if (mask.ne.other .and. iand(mask,other).eq.mask) then
+             contained=.true.
+             exit
+          endif
+       enddo
+       if (.not.contained) then
+          nroots=nroots+1
+          roots(nroots)=mask
+       endif
+    enddo
+    if (nroots.lt.1) then
+       write (*,*) 'Diagram topology has no maximal decay block'
+       stop 1
+    endif
+    allocate(this%topology_roots(nroots))
+    this%topology_roots=roots(1:nroots)
+    do i=1,nroots
+       call validate_decay_block(this%topology_roots(i))
+    enddo
+
+    allocate(this%production_sets(0:this%next-2,2))
+    this%production_sets=0
+    this%nproduction_set=0
+    emitted=0
+    side=1
+    do position=2,this%next
+       label=this%order(position)
+       if (label.eq.2) then
+          side=2
+          cycle
+       endif
+       bit=ibset(0,label-1)
+       item=bit
+       do i=1,nroots
+          if (iand(bit,this%topology_roots(i)).eq.bit) then
+             item=this%topology_roots(i)
+             exit
+          endif
+       enddo
+       if (iand(emitted,item).eq.item) cycle
+       emitted=ior(emitted,item)
+       this%nproduction_set(side)=this%nproduction_set(side)+1
+       this%production_sets(this%nproduction_set(side),side)=item
+       this%production_sets(0,side)=ior(this%production_sets(0,side),item)
+    enddo
+    if (emitted.ne.maskr(this%next)-3) then
+       write (*,*) 'Diagram production items do not cover the final state',&
+            emitted,maskr(this%next)-3
+       stop 1
+    endif
+
+    nitems=sum(this%nproduction_set)
+    if (nitems.eq.1 .and. any(this%topology_roots.eq.maskr(this%next)-3)) then
+       this%ndim_extra=0
+    else
+       ndim_extra=0
+       if (this%nproduction_set(1).eq.2 .and.&
+            this%nproduction_set(2).gt.0) ndim_extra=ndim_extra+1
+       if (this%nproduction_set(2).eq.2 .and.&
+            this%nproduction_set(1).gt.0) ndim_extra=ndim_extra+1
+       if (this%nproduction_set(1).ge.3) ndim_extra=ndim_extra+&
+            this%nproduction_set(1)-2
+       if (this%nproduction_set(2).ge.3) ndim_extra=ndim_extra+&
+            this%nproduction_set(2)-2
+       this%ndim_extra=ndim_extra
+    endif
+    if (verbose) then
+       write (99,*) 'Diagram decay roots:',this%topology_roots
+       write (99,*) 'Diagram production item counts:',this%nproduction_set
+       write (99,*) 'Additional random numbers needed:',this%ndim_extra
+    endif
+  contains
+    recursive subroutine validate_decay_block(node)
+      integer(kind=4),intent(in) :: node
+      integer(kind=4) :: left,right
+      if (popcnt(node).le.1) return
+      left=this%decay_left(node)
+      right=this%decay_right(node)
+      if (left.eq.0 .or. right.eq.0 .or. ior(left,right).ne.node .or.&
+           iand(left,right).ne.0) then
+         write (*,*) 'Incomplete diagram decay block',node,left,right
+         stop 1
+      endif
+      call validate_decay_block(left)
+      call validate_decay_block(right)
+    end subroutine validate_decay_block
+  end subroutine setup_topology_production
+
+  integer function topology_index(this,mask)
     class(phase_space_gen23),intent(in) :: this
     integer(kind=4),intent(in) :: mask
     integer :: i
-    resonance_index=0
-    do i=1,this%nresonances
-       if (this%resonance_masks(i).eq.mask) then
-          resonance_index=i
+    topology_index=0
+    do i=1,this%ntopology_nodes
+       if (this%topology_masks(i).eq.mask) then
+          topology_index=i
           return
        endif
     enddo
-  end function resonance_index
+  end function topology_index
+
+  real(kind=8) function topology_power(this,mask)
+    class(phase_space_gen23),intent(in) :: this
+    integer(kind=4),intent(in) :: mask
+    integer :: inode
+    inode=topology_index(this,mask)
+    topology_power=ip_mass
+    if (inode.gt.0) then
+       select case (this%topology_kinds(inode))
+       case (transform_massless_pole)
+          topology_power=-1d0
+       case (transform_massive_power)
+          topology_power=ip_mass
+       case (transform_flat_contact)
+          topology_power=0d0
+       case (transform_breit_wigner)
+          topology_power=ip_mass
+       case default
+          write (*,*) 'Unknown topology transform kind',&
+               this%topology_kinds(inode)
+          stop 1
+       end select
+    endif
+  end function topology_power
 
   subroutine random_to_breit_wigner(x,smin,smax,mass,width,s,jac)
     implicit none
@@ -505,8 +667,8 @@ contains
     else
        sqrtshat=this%sqrts
     endif
-    if (this%nresonances.gt.0) then
-       call generate_resonance_momenta
+    if (this%ntopology_nodes.gt.0) then
+       call generate_topology_momenta
     else
        call generate_momenta
     endif
@@ -531,6 +693,72 @@ contains
        endif
     enddo
   contains
+    logical function is_production_item(mask)
+      implicit none
+      integer(kind=4),intent(in) :: mask
+      integer :: iside,iitem
+      is_production_item=.false.
+      if (.not.allocated(this%production_sets)) return
+      do iside=1,2
+         do iitem=1,this%nproduction_set(iside)
+            if (this%production_sets(iitem,iside).eq.mask) then
+               is_production_item=.true.
+               return
+            endif
+         enddo
+      enddo
+    end function is_production_item
+
+    logical function is_atomic_item(mask,production)
+      implicit none
+      integer(kind=4),intent(in) :: mask
+      logical,intent(in),optional :: production
+      is_atomic_item=popcnt(mask).eq.1
+      if (present(production)) then
+         if (production) is_atomic_item=is_atomic_item.or.&
+              is_production_item(mask)
+      endif
+    end function is_atomic_item
+
+    real(kind=8) function production_threshold(mask)
+      implicit none
+      integer(kind=4),intent(in) :: mask
+      integer :: iside,iitem
+      integer(kind=4) :: item,covered
+      production_threshold=0d0
+      covered=0
+      do iside=1,2
+         do iitem=1,this%nproduction_set(iside)
+            item=this%production_sets(iitem,iside)
+            if (iand(item,mask).ne.item) cycle
+            production_threshold=production_threshold+&
+                 sqrt(max(invm(item),0d0))
+            covered=ior(covered,item)
+         enddo
+      enddo
+      if (iand(covered,mask).ne.mask) then
+         production_threshold=0d0
+      endif
+    end function production_threshold
+
+    subroutine adjust_production_mass_limits(i,ir,production,shatmin,shatmax)
+      implicit none
+      integer(kind=4),intent(in) :: i,ir
+      logical,intent(in),optional :: production
+      real(kind=8),intent(inout) :: shatmin,shatmax
+      real(kind=8) :: parent_mass,recoil_threshold
+      if (.not.present(production)) return
+      if (.not.production) return
+      shatmin=max(shatmin,production_threshold(i)**2)
+      parent_mass=sqrt(max(invm(i+ir),0d0))
+      recoil_threshold=production_threshold(ir)
+      if (parent_mass.le.recoil_threshold) then
+         shatmax=0d0
+      else
+         shatmax=min(shatmax,(parent_mass-recoil_threshold)**2)
+      endif
+    end subroutine adjust_production_mass_limits
+
     subroutine generate_initial_state
       implicit none
       real(kind=8) :: tau
@@ -550,10 +778,16 @@ contains
       smin=max(this%invm_min(maskr(this%next)-3),this%ETmin(maskr(this%next)-3)**2)
       smax=this%sqrts**2
       ix=ix+1
-      ires=resonance_index(this,maskr(this%next)-3)
+      ires=topology_index(this,maskr(this%next)-3)
       if (ires.gt.0) then
-         call random_to_breit_wigner(ps%x(ix),smin,smax,&
-              this%resonance_masses(ires),this%resonance_widths(ires),shat,ps%jac)
+         if (this%topology_kinds(ires).eq.transform_breit_wigner) then
+            call random_to_breit_wigner(ps%x(ix),smin,smax,&
+                 this%topology_masses(ires),this%topology_widths(ires),&
+                 shat,ps%jac)
+         else
+            call random_to_var(ps%x(ix),topology_power(this,&
+                 maskr(this%next)-3),smin,smax,shat,ps%jac)
+         endif
       else
          call random_to_var(ps%x(ix),ip_shat,smin,smax,shat,ps%jac)
       endif
@@ -698,9 +932,10 @@ contains
       ps%jac=ps%jac/(2d0*sqrtshat**2)
     end subroutine generate_momenta
 
-    subroutine generate_resonance_momenta
+    subroutine generate_topology_momenta
       implicit none
       integer(kind=4) :: root
+      integer :: iroot
       root=maskr(this%next)-3
       pp(0,1)=sqrtshat/2d0
       pp(0,2)=sqrtshat/2d0
@@ -708,21 +943,178 @@ contains
       pp(1:2,2)=0d0
       pp(3,1)=sqrtshat/2d0
       pp(3,2)=-sqrtshat/2d0
-      pp(0:3,root)=0d0
-      pp(0,root)=sqrtshat
+      pp(0:3,maskr(this%next)-1)=pp(0:3,1)
+      pp(0:3,maskr(this%next)-2)=pp(0:3,2)
       invm(3)=sqrtshat**2
       invm(root)=sqrtshat**2
-      call decay_resonance_node(root)
-      if (ps%jac.le.0d0) return
+      if (size(this%topology_roots).eq.1 .and.&
+           this%topology_roots(1).eq.root) then
+         pp(0:3,root)=0d0
+         pp(0,root)=sqrtshat
+         call decay_topology_node(root)
+         if (ps%jac.le.0d0) return
+      else
+         call generate_topology_root_masses
+         if (ps%jac.le.0d0) return
+         call generate_production_skeleton
+         if (ps%jac.le.0d0) return
+         do iroot=1,size(this%topology_roots)
+            call decay_topology_node(this%topology_roots(iroot))
+            if (ps%jac.le.0d0) return
+         enddo
+      endif
       ps%jac=ps%jac/((2d0*pi)**(3*(this%next-2)-4))
       ps%jac=ps%jac/(2d0*sqrtshat**2)
       if (debug .and. ix.ne.this%ndim) then
-         write (*,*) 'Resonance map used an inconsistent number of dimensions',ix,this%ndim
+         write (*,*) 'Topology map used an inconsistent number of dimensions',ix,this%ndim
          stop 1
       endif
-    end subroutine generate_resonance_momenta
+    end subroutine generate_topology_momenta
 
-    recursive subroutine decay_resonance_node(node)
+    subroutine generate_topology_root_masses
+      implicit none
+      integer(kind=4),dimension(this%next-2) :: items
+      integer :: nitems,iside,iitem,j
+      real(kind=8) :: used_mass,remaining_min,smin,smax,maxmass
+
+      nitems=0
+      do iside=1,2
+         do iitem=1,this%nproduction_set(iside)
+            nitems=nitems+1
+            items(nitems)=this%production_sets(iitem,iside)
+         enddo
+      enddo
+      used_mass=0d0
+      do iitem=1,nitems
+         remaining_min=0d0
+         do j=iitem+1,nitems
+            remaining_min=remaining_min+minimum_item_mass(items(j))
+         enddo
+         if (is_production_root(items(iitem))) then
+            smin=minimum_item_mass(items(iitem))**2
+            maxmass=sqrtshat-used_mass-remaining_min
+            smax=maxmass**2
+            if (maxmass.le.0d0 .or. smin.ge.smax) then
+               ps%jac=-7d0
+               return
+            endif
+            call generate_mass(items(iitem),smin,smax)
+            if (ps%jac.le.0d0) return
+         endif
+         used_mass=used_mass+sqrt(max(invm(items(iitem)),0d0))
+      enddo
+    end subroutine generate_topology_root_masses
+
+    real(kind=8) function minimum_item_mass(item)
+      implicit none
+      integer(kind=4),intent(in) :: item
+      integer :: label
+      minimum_item_mass=0d0
+      do label=0,this%next-1
+         if (btest(item,label)) minimum_item_mass=minimum_item_mass+&
+              sqrt(max(this%invm(ibset(0,label)),0d0))
+      enddo
+      minimum_item_mass=max(minimum_item_mass,&
+           sqrt(max(this%invm_min(item),0d0)))
+    end function minimum_item_mass
+
+    logical function is_production_root(item)
+      implicit none
+      integer(kind=4),intent(in) :: item
+      integer :: iroot
+      is_production_root=.false.
+      do iroot=1,size(this%topology_roots)
+         if (this%topology_roots(iroot).eq.item) then
+            is_production_root=.true.
+            return
+         endif
+      enddo
+    end function is_production_root
+
+    subroutine generate_production_skeleton
+      implicit none
+      integer(kind=4) :: i,j,inext,im1
+      integer(kind=4),dimension(2) :: set
+      integer,dimension(2) :: nset
+
+      set=this%production_sets(0,1:2)
+      nset=this%nproduction_set
+      if (nset(1).gt.1 .and. nset(2).gt.1) then
+         if (use_t_channel_at_start) then
+            call gent_one_step(set(2),set(1),1,.true.)
+         else
+            call gens_one_step(set(2),set(1),.true.)
+         endif
+         if (ps%jac.le.0d0) return
+         pp(0:3,set(2)+2)=pp(0:3,1)-pp(0:3,set(1))
+         invm(set(2)+2)=dot(pp(0:3,set(2)+2),pp(0:3,set(2)+2))
+      elseif (nset(1).eq.1 .and. nset(2).gt.1) then
+         call double_t(set(1),set(2),1,2,.true.)
+         if (ps%jac.le.0d0) return
+         pp(0:3,set(2)+2)=pp(0:3,1)-pp(0:3,set(1))
+         invm(set(2)+2)=dot(pp(0:3,set(2)+2),pp(0:3,set(2)+2))
+      elseif (nset(1).gt.1 .and. nset(2).eq.1) then
+         call double_t(set(2),set(1),1,2,.true.)
+         if (ps%jac.le.0d0) return
+         pp(0:3,set(1)+1)=pp(0:3,2)-pp(0:3,set(2))
+         invm(set(1)+1)=dot(pp(0:3,set(1)+1),pp(0:3,set(1)+1))
+      elseif (nset(1).eq.1 .and. nset(2).eq.1) then
+         call gent_one_step(set(2),set(1),1,.true.)
+         if (ps%jac.le.0d0) return
+         pp(0:3,set(2)+2)=pp(0:3,1)-pp(0:3,set(1))
+         invm(set(2)+2)=dot(pp(0:3,set(2)+2),pp(0:3,set(2)+2))
+      endif
+
+      do i=1,2
+         if (nset(i).le.1) cycle
+         inext=this%production_sets(1,i)
+         set(i)=set(i)-inext
+         if (nset(i)-1.ge.2) then
+            call gent_one_step(set(i),inext,i,.true.)
+            if (ps%jac.le.0d0) return
+            pp(0:3,(3-i)+set(i)+inext)=pp(0:3,i)-&
+                 pp(0:3,this%production_sets(0,3-i))
+            invm((3-i)+set(i)+inext)=dot(&
+                 pp(0:3,(3-i)+set(i)+inext),&
+                 pp(0:3,(3-i)+set(i)+inext))
+            pp(0:3,(3-i)+set(i))=pp(0:3,i)-&
+                 pp(0:3,this%production_sets(0,3-i))-pp(0:3,inext)
+            invm((3-i)+set(i))=dot(pp(0:3,(3-i)+set(i)),&
+                 pp(0:3,(3-i)+set(i)))
+            do j=2,nset(i)-1
+               inext=this%production_sets(j,i)
+               set(i)=set(i)-inext
+               ! Composite decay blocks are massive external objects at the
+               ! production level. The ordinary t-channel step supports that
+               ! kinematics directly and remains a full-support gen23 map.
+               call gent_one_step(inext,set(i),3-i,.true.)
+               if (ps%jac.le.0d0) return
+            enddo
+         elseif (nset(i)-1.eq.1 .and. nset(3-i).ne.0) then
+            im1=3-i
+            pp(0:3,set(i)+inext+im1)=pp(0:3,set(i)+inext)-pp(0:3,im1)
+            pp(0:3,set(i)+inext+i+im1)=&
+                 pp(0:3,set(i)+inext+im1)-pp(0:3,i)
+            invm(set(i)+inext+im1)=dot(pp(0:3,set(i)+inext+im1),&
+                 pp(0:3,set(i)+inext+im1))
+            invm(set(i)+inext+i+im1)=dot(&
+                 pp(0:3,set(i)+inext+im1+i),&
+                 pp(0:3,set(i)+inext+im1+i))
+            call gent_one_step(set(i),inext,i,.true.)
+            if (ps%jac.le.0d0) return
+         elseif (nset(i)-1.eq.1 .and. nset(3-i).eq.0) then
+            call gent_one_step(set(i),inext,i,.true.)
+            if (ps%jac.le.0d0) return
+         else
+            write (*,*) 'Inconsistent diagram production sets',nset
+            stop 1
+         endif
+         pp(0:3,set(i))=pp(0:3,set(i)+inext+(3-i))+&
+              pp(0:3,(3-i))-pp(0:3,inext)
+      enddo
+    end subroutine generate_production_skeleton
+
+    recursive subroutine decay_topology_node(node)
       implicit none
       integer(kind=4),intent(in) :: node
       integer(kind=4) :: left,right
@@ -731,15 +1123,15 @@ contains
       right=this%decay_right(node)
       if (left.eq.0 .or. right.eq.0 .or. ior(left,right).ne.node .or.&
            iand(left,right).ne.0) then
-         write (*,*) 'Invalid resonance decay node during generation',node,left,right
+         write (*,*) 'Invalid topology decay node during generation',node,left,right
          stop 1
       endif
       call gens_one_step(left,right)
       if (ps%jac.le.0d0) return
-      if (popcnt(left).gt.1) call decay_resonance_node(left)
+      if (popcnt(left).gt.1) call decay_topology_node(left)
       if (ps%jac.le.0d0) return
-      if (popcnt(right).gt.1) call decay_resonance_node(right)
-    end subroutine decay_resonance_node
+      if (popcnt(right).gt.1) call decay_topology_node(right)
+    end subroutine decay_topology_node
 
     subroutine test_momenta
       ! Writes the momenta to the screen.
@@ -771,7 +1163,7 @@ contains
     end subroutine test_momenta
 
 
-    subroutine double_t(i,ir,ia,ib)
+    subroutine double_t(i,ir,ia,ib,production)
       ! Generates the p_a+p_b->p_i+p_ir process, with (p_a+p_i)^2 and
       ! (p_b+p_i)^2 (and phi) as integration variables. Note that this means
       ! that the mass of the system ir is derived from the integration
@@ -781,21 +1173,43 @@ contains
       ! back-to-back incoming particles. The mass of i is fixed.
       implicit none
       integer(kind=4),intent(in) :: i,ir,ia,ib
+      logical,intent(in),optional :: production
       real(kind=8) :: tmin,tmax,phi,pt2,yr,Eimax,pzmax
-      if (popcnt(i).ne.1 .or. popcnt(ir).le.1) then
+      real(kind=8) :: ir_min,etmin_i,etmin_ir
+      if (.not.is_atomic_item(i,production) .or.&
+           is_atomic_item(ir,production)) then
          write (*,*) 'Subroutine only for i is a single particle '&
               //'and ir is more than 1',i,ir,popcnt(i),popcnt(ir)
          stop 1
       endif
-      yr=sqrt(lambda(invm(ia+ib),invm(i),this%invm_min(ir)))
-      tmin=(-invm(ia+ib)+invm(i)+this%invm_min(ir)-yr)/2d0
-      tmax=(-invm(ia+ib)+invm(i)+this%invm_min(ir)+yr)/2d0
+      ir_min=this%invm_min(ir)
+      etmin_i=this%ETmin(i)
+      etmin_ir=this%ETmin(ir)
+      if (present(production)) then
+         if (production) then
+            ir_min=max(ir_min,production_threshold(ir)**2)
+            etmin_i=max(etmin_i,production_threshold(i))
+            etmin_ir=max(etmin_ir,production_threshold(ir))
+         endif
+      endif
+      if (lambda(invm(ia+ib),invm(i),ir_min).lt.0d0) then
+         ps%jac=-1d0
+         return
+      endif
+      yr=sqrt(lambda(invm(ia+ib),invm(i),ir_min))
+      tmin=(-invm(ia+ib)+invm(i)+ir_min-yr)/2d0
+      tmax=(-invm(ia+ib)+invm(i)+ir_min+yr)/2d0
       if (this%invm_max(ir+ib).ne.0d0) tmax=min(tmax,this%invm_max(ir+ib))
       if (this%invm_min(ir+ib).ne.0d0) tmin=max(tmin,this%invm_min(ir+ib))
       ! Additional constraints on tmin and tmax due to pp(0,i) and pp(0,ir)
       ! being larger than ETmin(i) and ETmin(ir), respectively:
-      pzmax=sqrt(lambda(sqrtshat**2,this%ETmin(i)**2,this%ETmin(ir)**2))/(2d0*sqrtshat)
-      Eimax=sqrtshat-sqrt(this%ETmin(ir)**2+pzmax**2)
+      if (lambda(sqrtshat**2,etmin_i**2,etmin_ir**2).lt.0d0) then
+         ps%jac=-1d0
+         return
+      endif
+      pzmax=sqrt(lambda(sqrtshat**2,etmin_i**2,etmin_ir**2))/&
+           (2d0*sqrtshat)
+      Eimax=sqrtshat-sqrt(etmin_ir**2+pzmax**2)
       tmin=max(tmin,invm(i)-sqrtshat*(Eimax+pzmax))
       tmax=min(tmax,invm(i)-sqrtshat*(Eimax-pzmax))
       if (tmin.ge.tmax) then
@@ -808,14 +1222,16 @@ contains
       if (debug) then
          write (*,*) 'dt- i+ia',i+ia,invm(i+ia),tmin,tmax
       endif
-      tmin=-invm(ia+ib)-invm(i+ia)+invm(i)+this%invm_min(ir)
+      tmin=-invm(ia+ib)-invm(i+ia)+invm(i)+ir_min
       tmax=invm(i)*(invm(i)-invm(ia+ib)-invm(i+ia))/(invm(i)-invm(i+ia))
       if (this%invm_max(ir+ib).ne.0d0) tmax=min(tmax,this%invm_max(ir+ib))
       if (this%invm_min(ir+ib).ne.0d0) tmin=max(tmin,this%invm_min(ir+ib))
       ! Additional constraints on tmin and tmax due to pp(0,i) and pp(0,ir)
       ! being larger than ETmin(i) and ETmin(ir), respectively:
-      tmin=max(tmin,invm(i)-sqrtshat**2*(1-this%ETmin(ir)**2/(sqrtshat**2+invm(i+ia)-invm(i))))
-      tmax=min(tmax,invm(i)-sqrtshat**2*(this%ETmin(i)**2/(invm(i)-invm(i+ia))))
+      tmin=max(tmin,invm(i)-sqrtshat**2*&
+           (1-etmin_ir**2/(sqrtshat**2+invm(i+ia)-invm(i))))
+      tmax=min(tmax,invm(i)-sqrtshat**2*&
+           (etmin_i**2/(invm(i)-invm(i+ia))))
       if (tmin.ge.tmax) then
          ps%jac=-2d0
          if (debug) write (*,*) 'tmin.ge.tmax',tmin,tmax
@@ -859,7 +1275,7 @@ contains
       ps%jac = ps%jac/(4d0*sqrt(lambda(invm(ir+i),0d0,0d0)))
     end subroutine double_t
 
-    subroutine gen23_one_step(i,ir,ib,im1)
+    subroutine gen23_one_step(i,ir,ib,im1,production)
       ! Generates one step using the 2->3 setup, using the invariants
       ! shat(i), s(i) and t(i) as defined in E.~Byckling and K.~Kajantie,
       ! ``Reductions of the phase-space integral in terms of simpler
@@ -867,17 +1283,20 @@ contains
       ! doi:10.1103/PhysRev.187.2008.  Assumes massless incoming particles.
       implicit none
       integer(kind=4),intent(in) :: im1,i,ir,ib
+      logical,intent(in),optional :: production
       real(kind=8) :: tmin,tmax,smin,smax,phi1,phi2,gram4,V,sqrtGG,shatmin,shatmax,y,base,root,phi_rot,&
            etminir,etmini
       real(kind=8),dimension(0:3) :: pi1,pr1,ppibir1,pi2,pr2,ppibir2,piir,pib,pim1,piirr,pim1r
       logical :: s_limits_ok,gram_ok
-      if (popcnt(i).gt.1) then
-         if (popcnt(ir).gt.1) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
+      if (.not.is_atomic_item(i,production)) then
+         if (.not.is_atomic_item(ir,production)) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
          call shatminmax(this,i,ir,shatmin,shatmax,invm)
+         call adjust_production_mass_limits(i,ir,production,shatmin,shatmax)
          call generate_mass(i,shatmin,shatmax)
       endif
-      if (popcnt(ir).gt.1) then
+      if (.not.is_atomic_item(ir,production)) then
          call shatminmax(this,ir,i,shatmin,shatmax,invm)
+         call adjust_production_mass_limits(ir,i,production,shatmin,shatmax)
          call generate_mass(ir,shatmin,shatmax)
       endif
       if (ps%jac.le.0d0) return
@@ -896,12 +1315,14 @@ contains
       y=log((pp(0,i+ir)+pp(3,i+ir))/(pp(0,i+ir)-pp(3,i+ir)))/2d0
       call boostz(pp(0,i+ir),y,piir)
       call boostz(pp(0,ib),y,pib)
-      if ( piir(1)**2+piir(2)**2.lt.this%ETmin(i)**2-invm(i) .and. popcnt(i).eq.1 ) then
+      if ( piir(1)**2+piir(2)**2.lt.this%ETmin(i)**2-invm(i) .and.&
+           is_atomic_item(i,production) ) then
          etminir=max(this%ETmin(ir),sqrt(invm(ir)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(this%ETmin(i)**2-invm(i)))**2) )
       else
          etminir=max(this%ETmin(ir),sqrt(invm(ir)))
       endif
-      if ( piir(1)**2+piir(2)**2.lt.this%ETmin(ir)**2-invm(ir) .and. popcnt(ir).eq.1 ) then
+      if ( piir(1)**2+piir(2)**2.lt.this%ETmin(ir)**2-invm(ir) .and.&
+           is_atomic_item(ir,production) ) then
          etmini=max(this%ETmin(i),sqrt(invm(i)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(this%ETmin(ir)**2-invm(ir)))**2) )
       else
          etmini=max(this%ETmin(i),sqrt(invm(i)))
@@ -1043,22 +1464,24 @@ contains
 
 
 
-    subroutine gent_one_step(i,ir,ib)
+    subroutine gent_one_step(i,ir,ib,production)
       ! One step in the usual MadGraph t-channel phase-space generation.
       implicit none
       integer(kind=4),intent(in) :: i,ir,ib
+      logical,intent(in),optional :: production
       real(kind=8) :: tmin,tmax,phi,Eimax,shatmin,shatmax,base,etminir,root,y,etmini
       real(kind=8),dimension(0:3) :: piir,pib
-      if (popcnt(i).gt.1) then
-         if (popcnt(ir).gt.1) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
+      if (.not.is_atomic_item(i,production)) then
+         if (.not.is_atomic_item(ir,production)) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
          call shatminmax(this,i,ir,shatmin,shatmax,invm)
+         call adjust_production_mass_limits(i,ir,production,shatmin,shatmax)
          if (popcnt(i+ir).eq.this%next-2) then
             ! The energy of i will be
             ! Ei=(sqrtshat+(invm(i)-invm(ir))/sqrtshat)/2d0. This gives a
             ! constraint on the allowed value of invm(i), since Ei>ETmin(i)
             shatmin=max(shatmin,max(invm(ir),this%invm_min(ir))+sqrtshat*(2d0*this%ETmin(i)-sqrtshat))
             Eimax=sqrtshat-this%ETmin(ir) ! maximum energy for i
-            if (popcnt(ir).eq.1) then
+            if (is_atomic_item(ir,production)) then
                shatmax=min(shatmax,invm(ir)+sqrtshat*(2d0*Eimax-sqrtshat))
             else
                shatmax=min(shatmax,Eimax**2)
@@ -1069,8 +1492,9 @@ contains
             write (*,*) 't - i    ',i,invm(i),shatmin,shatmax
          endif
       endif
-      if (popcnt(ir).gt.1) then
+      if (.not.is_atomic_item(ir,production)) then
          call shatminmax(this,ir,i,shatmin,shatmax,invm)
+         call adjust_production_mass_limits(ir,i,production,shatmin,shatmax)
          if (popcnt(i+ir).eq.this%next-2) then
             ! The energy of ir will be
             ! Eir=(sqrtshat+(invm(ir)-invm(i))/sqrtshat)/2d0. This gives a
@@ -1095,12 +1519,14 @@ contains
       y=log((pp(0,i+ir)+pp(3,i+ir))/(pp(0,i+ir)-pp(3,i+ir)))/2d0
       call boostz(pp(0,i+ir),y,piir)
       call boostz(pp(0,ib),y,pib)
-      if ( piir(1)**2+piir(2)**2.lt.this%ETmin(i)**2-invm(i) .and. popcnt(i).eq.1 ) then
+      if ( piir(1)**2+piir(2)**2.lt.this%ETmin(i)**2-invm(i) .and.&
+           is_atomic_item(i,production) ) then
          etminir=max(this%ETmin(ir),sqrt(invm(ir)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(this%ETmin(i)**2-invm(i)))**2) )
       else
          etminir=max(this%ETmin(ir),sqrt(invm(ir)))
       endif
-      if ( piir(1)**2+piir(2)**2.lt.this%ETmin(ir)**2-invm(ir) .and. popcnt(ir).eq.1 ) then
+      if ( piir(1)**2+piir(2)**2.lt.this%ETmin(ir)**2-invm(ir) .and.&
+           is_atomic_item(ir,production) ) then
          etmini=max(this%ETmin(i),sqrt(invm(i)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(this%ETmin(ir)**2-invm(ir)))**2) )
       else
          etmini=max(this%ETmin(i),sqrt(invm(i)))
@@ -1138,18 +1564,21 @@ contains
       ps%jac = ps%jac/(4d0*sqrt(lambda(invm(ir+i),0d0,invm(ir+i+ib))))
     end subroutine gent_one_step
 
-    subroutine gens_one_step(i,ir)
+    subroutine gens_one_step(i,ir,production)
       implicit none
       integer(kind=4),intent(in) :: i,ir
+      logical,intent(in),optional :: production
       real(kind=8) :: esum,costh,phi,shatmin,shatmax
       real(kind=8),dimension(0:3) :: p_i,p_ir
-      if (popcnt(i).gt.1) then
-         if (popcnt(ir).gt.1) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
+      if (.not.is_atomic_item(i,production)) then
+         if (.not.is_atomic_item(ir,production)) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
          call shatminmax(this,i,ir,shatmin,shatmax,invm)
+         call adjust_production_mass_limits(i,ir,production,shatmin,shatmax)
          call generate_mass(i,shatmin,shatmax)
       endif
-      if (popcnt(ir).gt.1) then
+      if (.not.is_atomic_item(ir,production)) then
          call shatminmax(this,ir,i,shatmin,shatmax,invm)
+         call adjust_production_mass_limits(ir,i,production,shatmin,shatmax)
          call generate_mass(ir,shatmin,shatmax)
       endif
       if (ps%jac.le.0d0) return
@@ -1185,10 +1614,16 @@ contains
          return
       endif
       ix=ix+1
-      ires=resonance_index(this,i)
+      ires=topology_index(this,i)
       if (ires.gt.0) then
-         call random_to_breit_wigner(ps%x(ix),shatmin,shatmax,&
-              this%resonance_masses(ires),this%resonance_widths(ires),invm(i),ps%jac)
+         if (this%topology_kinds(ires).eq.transform_breit_wigner) then
+            call random_to_breit_wigner(ps%x(ix),shatmin,shatmax,&
+                 this%topology_masses(ires),this%topology_widths(ires),&
+                 invm(i),ps%jac)
+         else
+            call random_to_var(ps%x(ix),topology_power(this,i),&
+                 shatmin,shatmax,invm(i),ps%jac)
+         endif
       else
          call random_to_var(ps%x(ix),ip_mass,shatmin,shatmax,invm(i),ps%jac)
       endif
@@ -1364,10 +1799,57 @@ contains
     end subroutine random_to_var
   end subroutine gen23_generate_momenta
 
+  subroutine build_gen23_momentum_cache(p,cache)
+    implicit none
+    real(kind=8),dimension(0:,:),intent(in) :: p
+    type(gen23_momentum_cache),intent(inout) :: cache
+    real(kind=8),dimension(0:3) :: subset_momentum
+    integer :: n,mask,label
+    n=size(p,dim=2)
+    if (allocated(cache%pp)) deallocate(cache%pp)
+    if (allocated(cache%invm)) deallocate(cache%invm)
+    cache%next=n
+    allocate(cache%pp(0:3,0:maskr(n)))
+    allocate(cache%invm(maskr(n)))
+    cache%pp=0d0
+    cache%invm=0d0
+    cache%ycm=log((p(0,1)+p(0,2)+p(3,1)+p(3,2))/&
+         (p(0,1)+p(0,2)-p(3,1)-p(3,2)))/2d0
+    do mask=1,maskr(n)
+       subset_momentum=0d0
+       do label=0,n-1
+          if (.not.btest(mask,label)) cycle
+          if (label.le.1 .and. popcnt(mask).ne.1) then
+             subset_momentum=subset_momentum-p(:,label+1)
+          else
+             subset_momentum=subset_momentum+p(:,label+1)
+          endif
+       enddo
+       call boostz(subset_momentum,cache%ycm,cache%pp(:,mask))
+       cache%invm(mask)=dot(cache%pp(:,mask),cache%pp(:,mask))
+    enddo
+  end subroutine build_gen23_momentum_cache
+
   subroutine gen23_compute_x_from_momenta(this,ps)
     implicit none
     class(phase_space_gen23),intent(inout) :: this
     type(psv),intent(inout) :: ps
+    call gen23_compute_x_worker(this,ps)
+  end subroutine gen23_compute_x_from_momenta
+
+  subroutine gen23_compute_x_from_cache(this,ps,cache)
+    implicit none
+    class(phase_space_gen23),intent(inout) :: this
+    type(psv),intent(inout) :: ps
+    type(gen23_momentum_cache),intent(in) :: cache
+    call gen23_compute_x_worker(this,ps,cache)
+  end subroutine gen23_compute_x_from_cache
+
+  subroutine gen23_compute_x_worker(this,ps,cache)
+    implicit none
+    class(phase_space_gen23),intent(inout) :: this
+    type(psv),intent(inout) :: ps
+    type(gen23_momentum_cache),intent(in),optional :: cache
     real(kind=8) :: ycm,sqrtshat
     integer :: ix
     real(kind=8),dimension(0:3,0:maskr(this%next)) :: pp
@@ -1382,11 +1864,22 @@ contains
     
     call setup_PS_cuts(this)
        
-       invm=this%invm
+    invm=this%invm
 
     ! Fill the full momentum array, including all possible
     ! intermediate states:
-    call fill_momentum_array
+    if (present(cache)) then
+       if (cache%next.ne.this%next .or. .not.allocated(cache%pp) .or.&
+            .not.allocated(cache%invm)) then
+          ps%jac=-1d0
+          return
+       endif
+       pp=cache%pp
+       invm=cache%invm
+       ycm=cache%ycm
+    else
+       call fill_momentum_array
+    endif
     ! get the two random number corresponding to the initial state
     if (includePDF) then
        call compute_x_initial_state
@@ -1395,8 +1888,8 @@ contains
       sqrtshat=this%sqrts
     endif
     ! The final-state momenta configuration gives all the other random numbers
-    if (this%nresonances.gt.0) then
-       call compute_x_resonance_final_state
+    if (this%ntopology_nodes.gt.0) then
+       call compute_x_topology_final_state
     else
        call compute_x_final_state
     endif
@@ -1410,6 +1903,70 @@ contains
          any(ps%x(1:this%ndim).ge.1d0)) ps%jac=-1d0
 
   contains
+    logical function is_production_item(mask)
+      implicit none
+      integer(kind=4),intent(in) :: mask
+      integer :: iside,iitem
+      is_production_item=.false.
+      if (.not.allocated(this%production_sets)) return
+      do iside=1,2
+         do iitem=1,this%nproduction_set(iside)
+            if (this%production_sets(iitem,iside).eq.mask) then
+               is_production_item=.true.
+               return
+            endif
+         enddo
+      enddo
+    end function is_production_item
+
+    logical function is_atomic_item(mask,production)
+      implicit none
+      integer(kind=4),intent(in) :: mask
+      logical,intent(in),optional :: production
+      is_atomic_item=popcnt(mask).eq.1
+      if (present(production)) then
+         if (production) is_atomic_item=is_atomic_item.or.&
+              is_production_item(mask)
+      endif
+    end function is_atomic_item
+
+    real(kind=8) function production_threshold(mask)
+      implicit none
+      integer(kind=4),intent(in) :: mask
+      integer :: iside,iitem
+      integer(kind=4) :: item,covered
+      production_threshold=0d0
+      covered=0
+      do iside=1,2
+         do iitem=1,this%nproduction_set(iside)
+            item=this%production_sets(iitem,iside)
+            if (iand(item,mask).ne.item) cycle
+            production_threshold=production_threshold+&
+                 sqrt(max(invm(item),0d0))
+            covered=ior(covered,item)
+         enddo
+      enddo
+      if (iand(covered,mask).ne.mask) production_threshold=0d0
+    end function production_threshold
+
+    subroutine adjust_production_mass_limits(i,ir,production,shatmin,shatmax)
+      implicit none
+      integer(kind=4),intent(in) :: i,ir
+      logical,intent(in),optional :: production
+      real(kind=8),intent(inout) :: shatmin,shatmax
+      real(kind=8) :: parent_mass,recoil_threshold
+      if (.not.present(production)) return
+      if (.not.production) return
+      shatmin=max(shatmin,production_threshold(i)**2)
+      parent_mass=sqrt(max(invm(i+ir),0d0))
+      recoil_threshold=production_threshold(ir)
+      if (parent_mass.le.recoil_threshold) then
+         shatmax=0d0
+      else
+         shatmax=min(shatmax,(parent_mass-recoil_threshold)**2)
+      endif
+    end subroutine adjust_production_mass_limits
+
     subroutine compute_x_initial_state
       implicit none
       real(kind=8) :: tau
@@ -1427,10 +1984,16 @@ contains
       shat=dot(pp(0:3,3),pp(0:3,3))
       sqrtshat=sqrt(shat)
       ix=ix+1
-      ires=resonance_index(this,maskr(this%next)-3)
+      ires=topology_index(this,maskr(this%next)-3)
       if (ires.gt.0) then
-         call breit_wigner_to_random(shat,smin,smax,&
-              this%resonance_masses(ires),this%resonance_widths(ires),ps%x(ix),ps%jac)
+         if (this%topology_kinds(ires).eq.transform_breit_wigner) then
+            call breit_wigner_to_random(shat,smin,smax,&
+                 this%topology_masses(ires),this%topology_widths(ires),&
+                 ps%x(ix),ps%jac)
+         else
+            call var_to_random(shat,topology_power(this,&
+                 maskr(this%next)-3),smin,smax,ps%x(ix),ps%jac)
+         endif
       else
          call var_to_random(shat,ip_shat,smin,smax,ps%x(ix),ps%jac)
       endif
@@ -1557,23 +2120,163 @@ contains
 
     end subroutine compute_x_final_state
 
-    subroutine compute_x_resonance_final_state
+    subroutine compute_x_topology_final_state
       implicit none
       integer(kind=4) :: root
+      integer :: iroot
       root=maskr(this%next)-3
       invm(3)=sqrtshat**2
       invm(root)=sqrtshat**2
-      call invert_resonance_node(root)
-      if (ps%jac.lt.0d0) return
+      if (size(this%topology_roots).eq.1 .and.&
+           this%topology_roots(1).eq.root) then
+         call invert_topology_node(root)
+         if (ps%jac.lt.0d0) return
+      else
+         call compute_x_topology_root_masses
+         if (ps%jac.lt.0d0) return
+         call compute_x_production_skeleton
+         if (ps%jac.lt.0d0) return
+         do iroot=1,size(this%topology_roots)
+            call invert_topology_node(this%topology_roots(iroot))
+            if (ps%jac.lt.0d0) return
+         enddo
+      endif
       ps%jac=ps%jac/((2d0*pi)**(3*(this%next-2)-4))
       ps%jac=ps%jac/(2d0*sqrtshat**2)
       if (debug .and. ix.ne.this%ndim) then
-         write (*,*) 'Inverse resonance map used inconsistent dimensions',ix,this%ndim
+         write (*,*) 'Inverse topology map used inconsistent dimensions',ix,this%ndim
          stop 1
       endif
-    end subroutine compute_x_resonance_final_state
+    end subroutine compute_x_topology_final_state
 
-    recursive subroutine invert_resonance_node(node)
+    subroutine compute_x_topology_root_masses
+      implicit none
+      integer(kind=4),dimension(this%next-2) :: items
+      integer :: nitems,iside,iitem,j
+      real(kind=8) :: used_mass,remaining_min,smin,smax,maxmass
+
+      nitems=0
+      do iside=1,2
+         do iitem=1,this%nproduction_set(iside)
+            nitems=nitems+1
+            items(nitems)=this%production_sets(iitem,iside)
+         enddo
+      enddo
+      used_mass=0d0
+      do iitem=1,nitems
+         remaining_min=0d0
+         do j=iitem+1,nitems
+            remaining_min=remaining_min+minimum_item_mass(items(j))
+         enddo
+         if (is_production_root(items(iitem))) then
+            smin=minimum_item_mass(items(iitem))**2
+            maxmass=sqrtshat-used_mass-remaining_min
+            smax=maxmass**2
+            if (maxmass.le.0d0 .or. smin.ge.smax) then
+               ps%jac=-1d0
+               return
+            endif
+            call generate_mass_inverse(items(iitem),smin,smax)
+            if (ps%jac.lt.0d0) return
+         endif
+         used_mass=used_mass+sqrt(max(invm(items(iitem)),0d0))
+      enddo
+    end subroutine compute_x_topology_root_masses
+
+    real(kind=8) function minimum_item_mass(item)
+      implicit none
+      integer(kind=4),intent(in) :: item
+      integer :: label
+      minimum_item_mass=0d0
+      do label=0,this%next-1
+         if (btest(item,label)) minimum_item_mass=minimum_item_mass+&
+              sqrt(max(this%invm(ibset(0,label)),0d0))
+      enddo
+      minimum_item_mass=max(minimum_item_mass,&
+           sqrt(max(this%invm_min(item),0d0)))
+    end function minimum_item_mass
+
+    logical function is_production_root(item)
+      implicit none
+      integer(kind=4),intent(in) :: item
+      integer :: iroot
+      is_production_root=.false.
+      do iroot=1,size(this%topology_roots)
+         if (this%topology_roots(iroot).eq.item) then
+            is_production_root=.true.
+            return
+         endif
+      enddo
+    end function is_production_root
+
+    subroutine compute_x_production_skeleton
+      implicit none
+      integer(kind=4) :: i,j,inext,im1
+      integer(kind=4),dimension(2) :: set
+      integer,dimension(2) :: nset
+
+      set=this%production_sets(0,1:2)
+      nset=this%nproduction_set
+      if (nset(1).gt.1 .and. nset(2).gt.1) then
+         if (use_t_channel_at_start) then
+            call gent_one_step_inverse(set(2),set(1),1,.true.)
+         else
+            call gens_one_step_inverse(set(2),set(1),.true.)
+         endif
+         if (ps%jac.lt.0d0) return
+         invm(set(2)+2)=dot(pp(0:3,set(2)+2),pp(0:3,set(2)+2))
+      elseif (nset(1).eq.1 .and. nset(2).gt.1) then
+         call double_t_inverse(set(1),set(2),1,2,.true.)
+         if (ps%jac.lt.0d0) return
+         invm(set(2)+2)=dot(pp(0:3,set(2)+2),pp(0:3,set(2)+2))
+      elseif (nset(1).gt.1 .and. nset(2).eq.1) then
+         call double_t_inverse(set(2),set(1),1,2,.true.)
+         if (ps%jac.lt.0d0) return
+         invm(set(1)+1)=dot(pp(0:3,set(1)+1),pp(0:3,set(1)+1))
+      elseif (nset(1).eq.1 .and. nset(2).eq.1) then
+         call gent_one_step_inverse(set(2),set(1),1,.true.)
+         if (ps%jac.lt.0d0) return
+         invm(set(2)+2)=dot(pp(0:3,set(2)+2),pp(0:3,set(2)+2))
+      endif
+
+      do i=1,2
+         if (nset(i).le.1) cycle
+         inext=this%production_sets(1,i)
+         set(i)=set(i)-inext
+         if (nset(i)-1.ge.2) then
+            call gent_one_step_inverse(set(i),inext,i,.true.)
+            if (ps%jac.lt.0d0) return
+            invm((3-i)+set(i)+inext)=dot(&
+                 pp(0:3,(3-i)+set(i)+inext),&
+                 pp(0:3,(3-i)+set(i)+inext))
+            invm((3-i)+set(i))=dot(pp(0:3,(3-i)+set(i)),&
+                 pp(0:3,(3-i)+set(i)))
+            do j=2,nset(i)-1
+               inext=this%production_sets(j,i)
+               set(i)=set(i)-inext
+               call gent_one_step_inverse(inext,set(i),3-i,.true.)
+               if (ps%jac.lt.0d0) return
+            enddo
+         elseif (nset(i)-1.eq.1 .and. nset(3-i).ne.0) then
+            im1=3-i
+            invm(set(i)+inext+im1)=dot(pp(0:3,set(i)+inext+im1),&
+                 pp(0:3,set(i)+inext+im1))
+            invm(set(i)+inext+i+im1)=dot(&
+                 pp(0:3,set(i)+inext+im1+i),&
+                 pp(0:3,set(i)+inext+im1+i))
+            call gent_one_step_inverse(set(i),inext,i,.true.)
+            if (ps%jac.lt.0d0) return
+         elseif (nset(i)-1.eq.1 .and. nset(3-i).eq.0) then
+            call gent_one_step_inverse(set(i),inext,i,.true.)
+            if (ps%jac.lt.0d0) return
+         else
+            write (*,*) 'Inconsistent diagram production sets',nset
+            stop 1
+         endif
+      enddo
+    end subroutine compute_x_production_skeleton
+
+    recursive subroutine invert_topology_node(node)
       implicit none
       integer(kind=4),intent(in) :: node
       integer(kind=4) :: left,right
@@ -1582,27 +2285,29 @@ contains
       right=this%decay_right(node)
       if (left.eq.0 .or. right.eq.0 .or. ior(left,right).ne.node .or.&
            iand(left,right).ne.0) then
-         write (*,*) 'Invalid resonance decay node during inversion',node,left,right
+         write (*,*) 'Invalid topology decay node during inversion',node,left,right
          stop 1
       endif
       call gens_one_step_inverse(left,right)
       if (ps%jac.lt.0d0) return
-      if (popcnt(left).gt.1) call invert_resonance_node(left)
+      if (popcnt(left).gt.1) call invert_topology_node(left)
       if (ps%jac.lt.0d0) return
-      if (popcnt(right).gt.1) call invert_resonance_node(right)
-    end subroutine invert_resonance_node
-    subroutine gent_one_step_inverse(i,ir,ib)
+      if (popcnt(right).gt.1) call invert_topology_node(right)
+    end subroutine invert_topology_node
+    subroutine gent_one_step_inverse(i,ir,ib,production)
       implicit none
       integer(kind=4),intent(in) :: i,ir,ib
+      logical,intent(in),optional :: production
       real(kind=8) :: tmin,tmax,phi,Eimax,shatmin,shatmax,base,etminir,root,y,etmini,esum
       real(kind=8),dimension(0:3) :: piir,pib,p_boost,pi_rot,pa_cms
-      if (popcnt(i).gt.1) then
-         if (popcnt(ir).gt.1) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
+      if (.not.is_atomic_item(i,production)) then
+         if (.not.is_atomic_item(ir,production)) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
          call shatminmax(this,i,ir,shatmin,shatmax,invm)
+         call adjust_production_mass_limits(i,ir,production,shatmin,shatmax)
          if (popcnt(i+ir).eq.this%next-2) then
             shatmin=max(shatmin,max(invm(ir),this%invm_min(ir))+sqrtshat*(2d0*this%ETmin(i)-sqrtshat))
             Eimax=sqrtshat-this%ETmin(ir) ! maximum energy for i
-            if (popcnt(ir).eq.1) then
+            if (is_atomic_item(ir,production)) then
                shatmax=min(shatmax,invm(ir)+sqrtshat*(2d0*Eimax-sqrtshat))
             else
                shatmax=min(shatmax,Eimax**2)
@@ -1612,8 +2317,9 @@ contains
          call generate_mass_inverse(i,shatmin,shatmax)
          if (ps%jac.lt.0d0) return
       endif
-      if (popcnt(ir).gt.1) then
+      if (.not.is_atomic_item(ir,production)) then
          call shatminmax(this,ir,i,shatmin,shatmax,invm)
+         call adjust_production_mass_limits(ir,i,production,shatmin,shatmax)
          if (popcnt(i+ir).eq.this%next-2) then
             shatmin=max(shatmin,invm(i)+sqrtshat*(2d0*this%ETmin(ir)-sqrtshat))
             shatmax=min(shatmax,invm(i)+sqrtshat*(sqrtshat-2d0*max(sqrt(invm(i)),this%ETmin(i))))
@@ -1632,12 +2338,14 @@ contains
       y=log((pp(0,i+ir)+pp(3,i+ir))/(pp(0,i+ir)-pp(3,i+ir)))/2d0
       call boostz(pp(0,i+ir),y,piir)
       call boostz(pp(0,ib),y,pib)
-      if ( piir(1)**2+piir(2)**2.lt.this%ETmin(i)**2-invm(i) .and. popcnt(i).eq.1 ) then
+      if ( piir(1)**2+piir(2)**2.lt.this%ETmin(i)**2-invm(i) .and.&
+           is_atomic_item(i,production) ) then
          etminir=max(this%ETmin(ir),sqrt(invm(ir)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(this%ETmin(i)**2-invm(i)))**2) )
       else
          etminir=max(this%ETmin(ir),sqrt(invm(ir)))
       endif
-      if ( piir(1)**2+piir(2)**2.lt.this%ETmin(ir)**2-invm(ir) .and. popcnt(ir).eq.1 ) then
+      if ( piir(1)**2+piir(2)**2.lt.this%ETmin(ir)**2-invm(ir) .and.&
+           is_atomic_item(ir,production) ) then
          etmini=max(this%ETmin(i),sqrt(invm(i)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(this%ETmin(ir)**2-invm(ir)))**2) )
       else
          etmini=max(this%ETmin(i),sqrt(invm(i)))
@@ -1682,20 +2390,23 @@ contains
       if (ps%jac.lt.0d0) return
       ps%jac = ps%jac/(4d0*sqrt(lambda(invm(ir+i),0d0,invm(ir+i+ib))))
     end subroutine gent_one_step_inverse
-    subroutine gens_one_step_inverse(i,ir)
+    subroutine gens_one_step_inverse(i,ir,production)
       implicit none
       integer(kind=4),intent(in) :: i,ir
+      logical,intent(in),optional :: production
       real(kind=8) :: esum,costh,phi,shatmin,shatmax
       real(kind=8),dimension(0:3) :: p_i,p_boost
-      if (popcnt(i).gt.1) then
-         if (popcnt(ir).gt.1) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
+      if (.not.is_atomic_item(i,production)) then
+         if (.not.is_atomic_item(ir,production)) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
          call shatminmax(this,i,ir,shatmin,shatmax,invm)
+         call adjust_production_mass_limits(i,ir,production,shatmin,shatmax)
          if (debug) write (*,*) 'generate_mass_inverse gens 1',i
          call generate_mass_inverse(i,shatmin,shatmax)
          if (ps%jac.lt.0d0) return
       endif
-      if (popcnt(ir).gt.1) then
+      if (.not.is_atomic_item(ir,production)) then
          call shatminmax(this,ir,i,shatmin,shatmax,invm)
+         call adjust_production_mass_limits(ir,i,production,shatmin,shatmax)
          if (debug) write (*,*) 'generate_mass_inverse gent 2',ir
          call generate_mass_inverse(ir,shatmin,shatmax)
          if (ps%jac.lt.0d0) return
@@ -1730,22 +2441,44 @@ contains
       invm(ir+1)=dot(pp(0:3,ir+1),pp(0:3,ir+1))
       invm(ir+2)=dot(pp(0:3,ir+2),pp(0:3,ir+2))
     end subroutine gens_one_step_inverse
-    subroutine double_t_inverse(i,ir,ia,ib)
+    subroutine double_t_inverse(i,ir,ia,ib,production)
       implicit none
       integer(kind=4),intent(in) :: i,ir,ia,ib
+      logical,intent(in),optional :: production
       real(kind=8) :: tmin,tmax,phi,yr,Eimax,pzmax
-      if (popcnt(i).ne.1 .or. popcnt(ir).le.1) then
+      real(kind=8) :: ir_min,etmin_i,etmin_ir
+      if (.not.is_atomic_item(i,production) .or.&
+           is_atomic_item(ir,production)) then
          write (*,*) 'Subroutine only for i is a single particle '&
               //'and ir is more than 1',i,ir,popcnt(i),popcnt(ir)
          stop 1
       endif
-      yr=sqrt(lambda(invm(ia+ib),invm(i),this%invm_min(ir)))
-      tmin=(-invm(ia+ib)+invm(i)+this%invm_min(ir)-yr)/2d0
-      tmax=(-invm(ia+ib)+invm(i)+this%invm_min(ir)+yr)/2d0
+      ir_min=this%invm_min(ir)
+      etmin_i=this%ETmin(i)
+      etmin_ir=this%ETmin(ir)
+      if (present(production)) then
+         if (production) then
+            ir_min=max(ir_min,production_threshold(ir)**2)
+            etmin_i=max(etmin_i,production_threshold(i))
+            etmin_ir=max(etmin_ir,production_threshold(ir))
+         endif
+      endif
+      if (lambda(invm(ia+ib),invm(i),ir_min).lt.0d0) then
+         ps%jac=-1d0
+         return
+      endif
+      yr=sqrt(lambda(invm(ia+ib),invm(i),ir_min))
+      tmin=(-invm(ia+ib)+invm(i)+ir_min-yr)/2d0
+      tmax=(-invm(ia+ib)+invm(i)+ir_min+yr)/2d0
       if (this%invm_max(ir+ib).ne.0d0) tmax=min(tmax,this%invm_max(ir+ib))
       if (this%invm_min(ir+ib).ne.0d0) tmin=max(tmin,this%invm_min(ir+ib))
-      pzmax=sqrt(lambda(sqrtshat**2,this%ETmin(i)**2,this%ETmin(ir)**2))/(2d0*sqrtshat)
-      Eimax=sqrtshat-sqrt(this%ETmin(ir)**2+pzmax**2)
+      if (lambda(sqrtshat**2,etmin_i**2,etmin_ir**2).lt.0d0) then
+         ps%jac=-1d0
+         return
+      endif
+      pzmax=sqrt(lambda(sqrtshat**2,etmin_i**2,etmin_ir**2))/&
+           (2d0*sqrtshat)
+      Eimax=sqrtshat-sqrt(etmin_ir**2+pzmax**2)
       tmin=max(tmin,invm(i)-sqrtshat*(Eimax+pzmax))
       tmax=min(tmax,invm(i)-sqrtshat*(Eimax-pzmax))
       if (tmin.ge.tmax) then
@@ -1759,14 +2492,16 @@ contains
       ix=ix+1
       call var_to_random(invm(i+ia),ip_dt,tmin,tmax,ps%x(ix),ps%jac)
       if (ps%jac.lt.0d0) return
-      tmin=-invm(ia+ib)-invm(i+ia)+invm(i)+this%invm_min(ir)
+      tmin=-invm(ia+ib)-invm(i+ia)+invm(i)+ir_min
       tmax=invm(i)*(invm(i)-invm(ia+ib)-invm(i+ia))/(invm(i)-invm(i+ia))
       if (this%invm_max(ir+ib).ne.0d0) tmax=min(tmax,this%invm_max(ir+ib))
       if (this%invm_min(ir+ib).ne.0d0) tmin=max(tmin,this%invm_min(ir+ib))
       ! Additional constraints on tmin and tmax due to pp(0,i) and pp(0,ir)
       ! being larger than ETmin(i) and ETmin(ir), respectively:
-      tmin=max(tmin,invm(i)-sqrtshat**2*(1-this%ETmin(ir)**2/(sqrtshat**2+invm(i+ia)-invm(i))))
-      tmax=min(tmax,invm(i)-sqrtshat**2*(this%ETmin(i)**2/(invm(i)-invm(i+ia))))
+      tmin=max(tmin,invm(i)-sqrtshat**2*&
+           (1-etmin_ir**2/(sqrtshat**2+invm(i+ia)-invm(i))))
+      tmax=min(tmax,invm(i)-sqrtshat**2*&
+           (etmin_i**2/(invm(i)-invm(i+ia))))
       if (tmin.ge.tmax) then
          ps%jac=-1d0
          return
@@ -1794,22 +2529,25 @@ contains
       endif
       ps%jac = ps%jac/(4d0*sqrt(lambda(invm(ir+i),0d0,0d0)))
     end subroutine double_t_inverse
-    subroutine gen23_one_step_inverse(i,ir,ib,im1)
+    subroutine gen23_one_step_inverse(i,ir,ib,im1,production)
       implicit none
       integer(kind=4),intent(in) :: im1,i,ir,ib
+      logical,intent(in),optional :: production
       real(kind=8) :: tmin,tmax,smin,smax,phi1,phi2,gram4,V,sqrtGG,shatmin,shatmax,y,base,root,phi_rot,&
            etminir,etmini
       real(kind=8),dimension(0:3) :: pi1,pr1,ppibir1,pi2,pr2,ppibir2,piir,pib,pim1,piirr,pim1r
       logical :: s_limits_ok,gram_ok,phi_ok
-      if (popcnt(i).gt.1) then
-         if (popcnt(ir).gt.1) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
+      if (.not.is_atomic_item(i,production)) then
+         if (.not.is_atomic_item(ir,production)) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
          call shatminmax(this,i,ir,shatmin,shatmax,invm)
+         call adjust_production_mass_limits(i,ir,production,shatmin,shatmax)
          if (debug) write (*,*) 'generate_mass_inverse gen23 1',i
          call generate_mass_inverse(i,shatmin,shatmax)
          if (ps%jac.lt.0d0) return
       endif
-      if (popcnt(ir).gt.1) then
+      if (.not.is_atomic_item(ir,production)) then
          call shatminmax(this,ir,i,shatmin,shatmax,invm)
+         call adjust_production_mass_limits(ir,i,production,shatmin,shatmax)
          if (debug) write (*,*) 'generate_mass_inverse gen23 2',ir
          call generate_mass_inverse(ir,shatmin,shatmax)
          if (ps%jac.lt.0d0) return
@@ -1821,12 +2559,14 @@ contains
       y=log((pp(0,i+ir)+pp(3,i+ir))/(pp(0,i+ir)-pp(3,i+ir)))/2d0
       call boostz(pp(0,i+ir),y,piir)
       call boostz(pp(0,ib),y,pib)
-      if ( piir(1)**2+piir(2)**2.lt.this%ETmin(i)**2-invm(i) .and. popcnt(i).eq.1 ) then
+      if ( piir(1)**2+piir(2)**2.lt.this%ETmin(i)**2-invm(i) .and.&
+           is_atomic_item(i,production) ) then
          etminir=max(this%ETmin(ir),sqrt(invm(ir)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(this%ETmin(i)**2-invm(i)))**2) )
       else
          etminir=max(this%ETmin(ir),sqrt(invm(ir)))
       endif
-      if ( piir(1)**2+piir(2)**2.lt.this%ETmin(ir)**2-invm(ir) .and. popcnt(ir).eq.1 ) then
+      if ( piir(1)**2+piir(2)**2.lt.this%ETmin(ir)**2-invm(ir) .and.&
+           is_atomic_item(ir,production) ) then
          etmini=max(this%ETmin(i),sqrt(invm(i)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(this%ETmin(ir)**2-invm(ir)))**2) )
       else
          etmini=max(this%ETmin(i),sqrt(invm(i)))
@@ -2033,17 +2773,23 @@ contains
          write (*,*) 'mi- i',i,shatmin,shatmax,invm(i)
       endif
       ix=ix+1
-      ires=resonance_index(this,i)
+      ires=topology_index(this,i)
       if (ires.gt.0) then
-         call breit_wigner_to_random(invm(i),shatmin,shatmax,&
-              this%resonance_masses(ires),this%resonance_widths(ires),ps%x(ix),ps%jac)
+         if (this%topology_kinds(ires).eq.transform_breit_wigner) then
+            call breit_wigner_to_random(invm(i),shatmin,shatmax,&
+                 this%topology_masses(ires),this%topology_widths(ires),&
+                 ps%x(ix),ps%jac)
+         else
+            call var_to_random(invm(i),topology_power(this,i),&
+                 shatmin,shatmax,ps%x(ix),ps%jac)
+         endif
       else
          call var_to_random(invm(i),ip_mass,shatmin,shatmax,ps%x(ix),ps%jac)
       endif
       if (ps%jac.lt.0d0) return
     end subroutine generate_mass_inverse
 
-  end subroutine gen23_compute_x_from_momenta
+  end subroutine gen23_compute_x_worker
   real(kind=8) function dot(p1,p2)
     ! Inner product between two 4-vectors
     implicit none

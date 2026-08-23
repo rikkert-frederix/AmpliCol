@@ -12,8 +12,12 @@ program resonance_phase_space_regression
   call check_massive_quark_external_legs()
   call check_root_breit_wigner_with_pdfs()
   call check_nested_and_disjoint_inverse()
+  call check_exact_partial_topology_inverse()
+  call check_exact_disjoint_topology_inverse()
+  call check_contact_topology_with_pdfs()
   call check_competing_pair_map_inversions()
   call check_alternative_maps_across_scales()
+  call check_cached_inverse_matches_direct()
   call check_singular_boundary_and_nonfinite_rejection()
   call ieee_set_flag(ieee_all,.false.)
   rewind(99)
@@ -31,6 +35,65 @@ program resonance_phase_space_regression
   write (*,*) 'resonance phase-space regression: PASS'
 
 contains
+
+  subroutine check_cached_inverse_matches_direct()
+    type(phase_space_gen23) :: phase_space
+    type(gen23_momentum_cache) :: cache
+    type(psv) :: point,direct_inverse,cached_inverse
+    integer,parameter :: n=5,nnodes=1
+    integer,dimension(n) :: order
+    integer,dimension(nnodes) :: topology_pdgs,topology_masks,left_masks
+    integer,dimension(nnodes) :: topology_kinds,topology_parameters
+    real(kind=8),dimension(nnodes) :: topology_masses,topology_widths
+    real(kind=8),dimension(n) :: masses,pt_cut,rap_cut
+    real(kind=8),dimension(n,n) :: dr_cut,sqrt_s_min
+    real(kind=8),dimension(5) :: original_x
+    real(kind=8) :: scale
+
+    order=[1,3,4,5,2]
+    masses=0d0
+    pt_cut=0d0
+    rap_cut=0d0
+    dr_cut=0d0
+    sqrt_s_min=0d0
+    topology_pdgs=[23]
+    topology_masks=[ibset(ibset(0,3),4)]
+    left_masks=[ibset(0,3)]
+    topology_kinds=[transform_breit_wigner]
+    topology_parameters=[23]
+    topology_masses=[91.188d0]
+    topology_widths=[2.441404d0]
+    call phase_space%configure_topology(nnodes,topology_pdgs,topology_masks,&
+         left_masks,topology_masses,topology_widths,topology_kinds,&
+         topology_parameters)
+    call phase_space%init(500d0,n,masses,order,pt_cut,rap_cut,dr_cut,&
+         sqrt_s_min,.false.,.false.)
+    allocate(point%x(phase_space%ndim),point%p(0:3,n))
+    original_x=[0.37d0,0.21d0,0.63d0,0.44d0,0.72d0]
+    point%x=original_x
+    call phase_space%generate_momenta(point)
+    if (point%jac.le.0d0) then
+       write (*,*) 'Cached-inverse forward map failed',point%jac
+       stop 1
+    endif
+    allocate(direct_inverse%x(phase_space%ndim),direct_inverse%p(0:3,n))
+    allocate(cached_inverse%x(phase_space%ndim),cached_inverse%p(0:3,n))
+    direct_inverse%p=point%p
+    cached_inverse%p=point%p
+    call phase_space%compute_x_from_momenta(direct_inverse)
+    call build_gen23_momentum_cache(cached_inverse%p,cache)
+    call phase_space%compute_x_from_cache(cached_inverse,cache)
+    call check_inverse(original_x,point%jac,direct_inverse)
+    call check_inverse(original_x,point%jac,cached_inverse)
+    scale=max(1d0,abs(direct_inverse%jac),abs(cached_inverse%jac))
+    if (abs(direct_inverse%jac-cached_inverse%jac).gt.2d-11*scale .or.&
+         any(abs(direct_inverse%x-cached_inverse%x).gt.2d-11)) then
+       write (*,*) 'Cached and direct inverse maps disagree',&
+            direct_inverse%jac,cached_inverse%jac
+       stop 1
+    endif
+    call phase_space%cleanup()
+  end subroutine check_cached_inverse_matches_direct
 
   subroutine check_breit_wigner_quantile()
     type(phase_space_gen23) :: phase_space
@@ -258,6 +321,142 @@ contains
     call check_inverse(original_x,forward_jac,inverse_point)
     call phase_space%cleanup()
   end subroutine check_nested_and_disjoint_inverse
+
+  subroutine check_exact_partial_topology_inverse()
+    type(phase_space_gen23) :: phase_space
+    type(psv) :: point,inverse_point
+    integer,parameter :: n=6,nnodes=2
+    integer,dimension(n) :: order
+    integer,dimension(nnodes) :: topology_pdgs,topology_masks,left_masks
+    real(kind=8),dimension(nnodes) :: topology_masses,topology_widths
+    real(kind=8),dimension(n) :: masses,pt_cut,rap_cut
+    real(kind=8),dimension(n,n) :: dr_cut,sqrt_s_min
+    real(kind=8),dimension(8) :: original_x
+    real(kind=8) :: forward_jac
+
+    order=[1,2,3,4,5,6]
+    masses=0d0
+    pt_cut=0d0
+    rap_cut=0d0
+    dr_cut=0d0
+    sqrt_s_min=0d0
+    topology_pdgs=[23,11]
+    topology_masks=[ibset(ibset(0,4),5),&
+         ibset(ibset(ibset(0,3),4),5)]
+    left_masks=[ibset(0,4),ibset(0,3)]
+    topology_masses=[91.188d0,0d0]
+    topology_widths=[2.441404d0,0d0]
+    call phase_space%configure_topology(nnodes,topology_pdgs,topology_masks,&
+         left_masks,topology_masses,topology_widths)
+    call phase_space%init(500d0,n,masses,order,pt_cut,rap_cut,dr_cut,&
+         sqrt_s_min,.false.,.false.)
+    if (phase_space%ndim.ne.8 .or. phase_space%ndim_extra.ne.0) then
+       write (*,*) 'Unexpected exact partial-topology dimensionality',&
+            phase_space%ndim,phase_space%ndim_extra
+       stop 1
+    endif
+    allocate(point%x(phase_space%ndim),point%p(0:3,n))
+    original_x=[0.31d0,0.64d0,0.27d0,0.73d0,0.42d0,0.58d0,0.36d0,0.69d0]
+    point%x=original_x
+    call phase_space%generate_momenta(point)
+    if (point%jac.le.0d0 .or. .not.ieee_is_finite(point%jac)) then
+       write (*,*) 'Exact partial-topology forward map failed',point%jac
+       stop 1
+    endif
+    forward_jac=point%jac
+    allocate(inverse_point%x(phase_space%ndim),inverse_point%p(0:3,n))
+    inverse_point%p=point%p
+    call phase_space%compute_x_from_momenta(inverse_point)
+    call check_inverse(original_x,forward_jac,inverse_point)
+    call phase_space%cleanup()
+  end subroutine check_exact_partial_topology_inverse
+
+  subroutine check_exact_disjoint_topology_inverse()
+    type(phase_space_gen23) :: phase_space
+    type(psv) :: point,inverse_point
+    integer,parameter :: n=6,nnodes=2
+    integer,dimension(n) :: order
+    integer,dimension(nnodes) :: topology_pdgs,topology_masks,left_masks
+    real(kind=8),dimension(nnodes) :: topology_masses,topology_widths
+    real(kind=8),dimension(n) :: masses,pt_cut,rap_cut
+    real(kind=8),dimension(n,n) :: dr_cut,sqrt_s_min
+    real(kind=8),dimension(8) :: original_x
+    real(kind=8) :: forward_jac
+
+    order=[1,2,3,4,5,6]
+    masses=0d0
+    pt_cut=0d0
+    rap_cut=0d0
+    dr_cut=0d0
+    sqrt_s_min=0d0
+    topology_pdgs=[23,23]
+    topology_masks=[ibset(ibset(0,2),3),ibset(ibset(0,4),5)]
+    left_masks=[ibset(0,2),ibset(0,4)]
+    topology_masses=91.188d0
+    topology_widths=2.441404d0
+    call phase_space%configure_topology(nnodes,topology_pdgs,topology_masks,&
+         left_masks,topology_masses,topology_widths)
+    call phase_space%init(500d0,n,masses,order,pt_cut,rap_cut,dr_cut,&
+         sqrt_s_min,.false.,.false.)
+    allocate(point%x(phase_space%ndim),point%p(0:3,n))
+    original_x=[0.44d0,0.57d0,0.28d0,0.71d0,0.39d0,0.62d0,0.33d0,0.76d0]
+    point%x=original_x
+    call phase_space%generate_momenta(point)
+    if (point%jac.le.0d0 .or. .not.ieee_is_finite(point%jac)) then
+       write (*,*) 'Exact disjoint-topology forward map failed',point%jac
+       stop 1
+    endif
+    forward_jac=point%jac
+    allocate(inverse_point%x(phase_space%ndim),inverse_point%p(0:3,n))
+    inverse_point%p=point%p
+    call phase_space%compute_x_from_momenta(inverse_point)
+    call check_inverse(original_x,forward_jac,inverse_point)
+    call phase_space%cleanup()
+  end subroutine check_exact_disjoint_topology_inverse
+
+  subroutine check_contact_topology_with_pdfs()
+    type(phase_space_gen23) :: phase_space
+    type(psv) :: point,inverse_point
+    integer,parameter :: n=5,nnodes=2
+    integer,dimension(n) :: order
+    integer,dimension(nnodes) :: topology_pdgs,topology_masks,left_masks
+    real(kind=8),dimension(nnodes) :: topology_masses,topology_widths
+    real(kind=8),dimension(n) :: masses,pt_cut,rap_cut
+    real(kind=8),dimension(n,n) :: dr_cut,sqrt_s_min
+    real(kind=8),dimension(7) :: original_x
+    real(kind=8) :: forward_jac
+
+    order=[1,2,3,4,5]
+    masses=0d0
+    pt_cut=0d0
+    rap_cut=0d0
+    dr_cut=0d0
+    sqrt_s_min=0d0
+    topology_pdgs=[23,126]
+    topology_masks=[ibset(ibset(0,3),4),&
+         ibset(ibset(ibset(0,2),3),4)]
+    left_masks=[ibset(0,3),ibset(0,2)]
+    topology_masses=[91.188d0,0d0]
+    topology_widths=[2.441404d0,0d0]
+    call phase_space%configure_topology(nnodes,topology_pdgs,topology_masks,&
+         left_masks,topology_masses,topology_widths)
+    call phase_space%init(700d0,n,masses,order,pt_cut,rap_cut,dr_cut,&
+         sqrt_s_min,.false.,.true.)
+    allocate(point%x(phase_space%ndim),point%p(0:3,n))
+    original_x=[0.43d0,0.52d0,0.37d0,0.68d0,0.29d0,0.61d0,0.74d0]
+    point%x=original_x
+    call phase_space%generate_momenta(point)
+    if (point%jac.le.0d0 .or. .not.ieee_is_finite(point%jac)) then
+       write (*,*) 'Contact-topology forward map failed',point%jac
+       stop 1
+    endif
+    forward_jac=point%jac
+    allocate(inverse_point%x(phase_space%ndim),inverse_point%p(0:3,n))
+    inverse_point%p=point%p
+    call phase_space%compute_x_from_momenta(inverse_point)
+    call check_inverse(original_x,forward_jac,inverse_point)
+    call phase_space%cleanup()
+  end subroutine check_contact_topology_with_pdfs
 
   subroutine check_competing_pair_map_inversions()
     type(phase_space_gen23),dimension(7) :: maps

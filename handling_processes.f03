@@ -2,6 +2,21 @@ module handling_processes
   use common
   use amplitude_QCD_mod
   use phase_space_base
+  type :: phase_map_recipe
+     integer,dimension(:),allocatable :: order
+     integer,dimension(:),allocatable :: topology_pdgs,topology_kinds,&
+          topology_parameters,topology_masks,topology_left_masks
+     integer :: ntopology_nodes=0
+   contains
+     final :: finalize_phase_map_recipe
+  end type phase_map_recipe
+  type :: phase_map_instance
+     class(phase_space_type),allocatable :: phase_space
+     integer,dimension(:),allocatable :: permutation
+     integer :: recipe_id=0,permutation_id=0
+   contains
+     final :: finalize_phase_map_instance
+  end type phase_map_instance
   type :: multichan_info
      ! if adding variables here, also update the finalize_multichan_info subroutine
      integer,dimension(:,:),allocatable :: channels,unique_channelgroup_list
@@ -15,13 +30,16 @@ module handling_processes
      ! if adding variables here, also update the finalize_phase_space_order_group subroutine
      type(amplitude_QCD),dimension(:),allocatable :: amps
      class(phase_space_type),allocatable :: phase_space
+     type(phase_map_instance),dimension(:),allocatable :: phase_maps
      type(multichan_info) :: multichan
      type(psv),dimension(:),allocatable :: ps
      integer,dimension(:,:),allocatable :: processes,color_orders
      integer,dimension(:,:),allocatable :: phase_space_permutations
      integer,dimension(:),allocatable :: iden_iproc,phase_space_orders,nhel
-     integer,dimension(:),allocatable :: resonance_pdgs,resonance_masks
-     integer :: nresonances=0
+     integer,dimension(:),allocatable :: topology_pdgs,topology_masks,&
+          topology_left_masks
+     integer :: ntopology_nodes=0
+     integer :: nsubmaps=0,selected_map=0
      integer :: nproc
      real(kind=8),dimension(:,:),allocatable :: val_procs,idenCOandMAPfactor
      integer,dimension(:,:,:),allocatable :: iden_processes,same_flavour
@@ -40,10 +58,35 @@ module handling_processes
      final :: finalize_phase_space_order_group
   end type phase_space_order_group
   integer :: next,nproc_unique,ngroups,nprocs,c_o,nquarks
+  integer :: nphase_maps=0,nphase_permutations=0
+  type(phase_map_recipe),dimension(:),allocatable :: phase_map_catalogue
+  integer,dimension(:,:),allocatable :: phase_permutation_catalogue
   type(phase_space_order_group),dimension(:),allocatable :: pgl
   logical :: read_proc_from_file
   integer(kind=4),dimension(:),allocatable :: o,part
 contains
+  subroutine finalize_phase_map_recipe(recipe)
+    type(phase_map_recipe),intent(inout) :: recipe
+    if (allocated(recipe%order)) deallocate(recipe%order)
+    if (allocated(recipe%topology_pdgs)) deallocate(recipe%topology_pdgs)
+    if (allocated(recipe%topology_kinds)) deallocate(recipe%topology_kinds)
+    if (allocated(recipe%topology_parameters)) deallocate(recipe%topology_parameters)
+    if (allocated(recipe%topology_masks)) deallocate(recipe%topology_masks)
+    if (allocated(recipe%topology_left_masks)) deallocate(recipe%topology_left_masks)
+    recipe%ntopology_nodes=0
+  end subroutine finalize_phase_map_recipe
+
+  subroutine finalize_phase_map_instance(instance)
+    type(phase_map_instance),intent(inout) :: instance
+    if (allocated(instance%phase_space)) then
+       call instance%phase_space%cleanup()
+       deallocate(instance%phase_space)
+    endif
+    if (allocated(instance%permutation)) deallocate(instance%permutation)
+    instance%recipe_id=0
+    instance%permutation_id=0
+  end subroutine finalize_phase_map_instance
+
   subroutine determine_phase_space_orders(part,col_o,n_ps,PS_o)
     use math_functions
     implicit none
@@ -685,6 +728,7 @@ contains
        call pgl%phase_space%cleanup()
        deallocate(pgl%phase_space)
     endif
+    if (allocated(pgl%phase_maps)) deallocate(pgl%phase_maps)
     if (allocated(pgl%ps)) then
        do i=1,size(pgl%ps)
           if (allocated(pgl%ps(i)%p)) deallocate(pgl%ps(i)%p)
@@ -698,8 +742,9 @@ contains
     if (allocated(pgl%phase_space_permutations)) deallocate(pgl%phase_space_permutations)
     if (allocated(pgl%iden_iproc)) deallocate(pgl%iden_iproc)
     if (allocated(pgl%phase_space_orders)) deallocate(pgl%phase_space_orders)
-    if (allocated(pgl%resonance_pdgs)) deallocate(pgl%resonance_pdgs)
-    if (allocated(pgl%resonance_masks)) deallocate(pgl%resonance_masks)
+    if (allocated(pgl%topology_pdgs)) deallocate(pgl%topology_pdgs)
+    if (allocated(pgl%topology_masks)) deallocate(pgl%topology_masks)
+    if (allocated(pgl%topology_left_masks)) deallocate(pgl%topology_left_masks)
     if (allocated(pgl%val_procs)) deallocate(pgl%val_procs)
     if (allocated(pgl%idenCOandMAPfactor)) deallocate(pgl%idenCOandMAPfactor)
     if (allocated(pgl%iden_processes)) deallocate(pgl%iden_processes)

@@ -5,7 +5,7 @@ module amplitude_library
   use particles, only: model_signature_size
   use run_parameters, only: flavour_scheme,set_flavour_scheme
   implicit none
-  integer,parameter :: amplitude_library_version=6
+  integer,parameter :: amplitude_library_version=8
 contains
   subroutine configure_flavour_scheme_from_amplitude_lib()
     implicit none
@@ -35,7 +35,7 @@ contains
   subroutine create_amplitude_lib()
     implicit none
     character(len=170) :: tmp,line,filename
-    integer :: igroup,j,iamp
+    integer :: igroup,j,iamp,imap
     real(kind=8),dimension(model_signature_size) :: stored_model_signature
     filename='Library/amplib.f03'
     open(unit=14,file=filename,status='unknown')
@@ -103,6 +103,22 @@ contains
     write(14) unique_map
     write(14) unique_map_value
     write(14) pgl_unique%processes
+    ! The compiled library owns the same immutable phase-map catalogues as
+    ! the text process file.  Persist recipes and permutations once; family
+    ! records below only retain integer references to them.
+    write(14) nphase_permutations,nphase_maps
+    write(14) phase_permutation_catalogue
+    do imap=1,nphase_maps
+       write(14) phase_map_catalogue(imap)%order
+       write(14) phase_map_catalogue(imap)%ntopology_nodes
+       if (phase_map_catalogue(imap)%ntopology_nodes.gt.0) then
+          write(14) phase_map_catalogue(imap)%topology_pdgs
+          write(14) phase_map_catalogue(imap)%topology_kinds
+          write(14) phase_map_catalogue(imap)%topology_parameters
+          write(14) phase_map_catalogue(imap)%topology_masks
+          write(14) phase_map_catalogue(imap)%topology_left_masks
+       endif
+    enddo
     write(14) ngroups
     do igroup=1,ngroups
        ! amplitudes
@@ -116,26 +132,28 @@ contains
           write(14) shape(pgl(igroup)%amps(iamp)%spins),pgl(igroup)%amps(iamp)%spins
           write(14) size(pgl(igroup)%amps(iamp)%amps)
        enddo
-       ! multichannel
-       write(14) pgl(igroup)%multichan%n_unique_channels,pgl(igroup)%multichan%n_unique_channelgroups
-       write(14) shape(pgl(igroup)%multichan%unique_channelgroup_list),&
-            pgl(igroup)%multichan%unique_channelgroup_list
-       write(14) size(pgl(igroup)%multichan%unique_channel_list),pgl(igroup)%multichan%unique_channel_list
-       write(14) size(pgl(igroup)%multichan%map_proc_to_channelgroup),&
-            pgl(igroup)%multichan%map_proc_to_channelgroup
+       ! Legacy row-level channel arrays are retained for amplitude metadata;
+       ! density evaluation uses the compact family phase-map references.
+       write(14) pgl(igroup)%multichan%max_channels
        write(14) size(pgl(igroup)%multichan%number_of_channels),pgl(igroup)%multichan%number_of_channels
        write(14) shape(pgl(igroup)%multichan%channels),pgl(igroup)%multichan%channels
        write(14) shape(pgl(igroup)%multichan%channel_permutations),&
             pgl(igroup)%multichan%channel_permutations
+       write(14) pgl(igroup)%nsubmaps
+       do imap=1,pgl(igroup)%nsubmaps
+          write(14) pgl(igroup)%phase_maps(imap)%recipe_id,&
+               pgl(igroup)%phase_maps(imap)%permutation_id
+       enddo
        ! rest
        write(14) shape(pgl(igroup)%processes),pgl(igroup)%processes
        write(14) shape(pgl(igroup)%phase_space_permutations),pgl(igroup)%phase_space_permutations
        write(14) size(pgl(igroup)%iden_iproc),pgl(igroup)%iden_iproc
        write(14) size(pgl(igroup)%phase_space_orders),pgl(igroup)%phase_space_orders
-       write(14) pgl(igroup)%nresonances
-       if (pgl(igroup)%nresonances.gt.0) then
-          write(14) pgl(igroup)%resonance_pdgs
-          write(14) pgl(igroup)%resonance_masks
+       write(14) pgl(igroup)%ntopology_nodes
+       if (pgl(igroup)%ntopology_nodes.gt.0) then
+          write(14) pgl(igroup)%topology_pdgs
+          write(14) pgl(igroup)%topology_masks
+          write(14) pgl(igroup)%topology_left_masks
        endif
        write(14) size(pgl(igroup)%nhel),pgl(igroup)%nhel
        write(14) pgl(igroup)%nproc
@@ -159,7 +177,8 @@ contains
   subroutine read_amplitude_lib()
     implicit none
     character(len=170) :: filename
-    integer :: dim1,dim2,dim3,iamp,igroup,library_version,stored_flavour_scheme
+    integer :: dim1,dim2,dim3,iamp,igroup,imap,library_version,&
+         stored_flavour_scheme
     real(kind=8),dimension(model_signature_size) :: stored_model_signature,current_model_signature
     real(kind=8),dimension(model_signature_size) :: tolerance
     filename='Library/amplitudes.bin'
@@ -185,6 +204,36 @@ contains
     read(14) unique_map_value
     allocate(pgl_unique%processes(pgl_unique%next,pgl_unique%nproc))
     read(14) pgl_unique%processes
+    read(14) nphase_permutations,nphase_maps
+    if (nphase_permutations.lt.1 .or. nphase_maps.lt.1) then
+       write (*,*) 'Amplitude library has invalid phase-map catalogues'
+       stop 1
+    endif
+    allocate(phase_permutation_catalogue(next,nphase_permutations))
+    read(14) phase_permutation_catalogue
+    allocate(phase_map_catalogue(nphase_maps))
+    do imap=1,nphase_maps
+       allocate(phase_map_catalogue(imap)%order(next))
+       read(14) phase_map_catalogue(imap)%order
+       read(14) phase_map_catalogue(imap)%ntopology_nodes
+       dim1=phase_map_catalogue(imap)%ntopology_nodes
+       if (dim1.lt.0) then
+          write (*,*) 'Amplitude library has an invalid phase-map recipe',imap
+          stop 1
+       endif
+       allocate(phase_map_catalogue(imap)%topology_pdgs(dim1))
+       allocate(phase_map_catalogue(imap)%topology_kinds(dim1))
+       allocate(phase_map_catalogue(imap)%topology_parameters(dim1))
+       allocate(phase_map_catalogue(imap)%topology_masks(dim1))
+       allocate(phase_map_catalogue(imap)%topology_left_masks(dim1))
+       if (dim1.gt.0) then
+          read(14) phase_map_catalogue(imap)%topology_pdgs
+          read(14) phase_map_catalogue(imap)%topology_kinds
+          read(14) phase_map_catalogue(imap)%topology_parameters
+          read(14) phase_map_catalogue(imap)%topology_masks
+          read(14) phase_map_catalogue(imap)%topology_left_masks
+       endif
+    enddo
     read(14)ngroups
     allocate(pgl(ngroups))
     do igroup=1,ngroups
@@ -208,17 +257,8 @@ contains
           read(14) dim1
           allocate(pgl(igroup)%amps(iamp)%amps(dim1))
        enddo
-       ! multichannel
-       read(14) pgl(igroup)%multichan%n_unique_channels,pgl(igroup)%multichan%n_unique_channelgroups
-       read(14) dim1,dim2
-       allocate(pgl(igroup)%multichan%unique_channelgroup_list(0:dim1-1,dim2))
-       read(14) pgl(igroup)%multichan%unique_channelgroup_list
-       read(14) dim1
-       allocate(pgl(igroup)%multichan%unique_channel_list(dim1))
-       read(14) pgl(igroup)%multichan%unique_channel_list
-       read(14) dim1
-       allocate(pgl(igroup)%multichan%map_proc_to_channelgroup(dim1))
-       read(14)pgl(igroup)%multichan%map_proc_to_channelgroup
+       ! Compact family phase-map metadata.
+       read(14) pgl(igroup)%multichan%max_channels
        read(14) dim1
        allocate(pgl(igroup)%multichan%number_of_channels(dim1))
        read(14) pgl(igroup)%multichan%number_of_channels
@@ -229,6 +269,29 @@ contains
        read(14) dim1,dim2,dim3
        allocate(pgl(igroup)%multichan%channel_permutations(dim1,dim2,dim3))
        read(14) pgl(igroup)%multichan%channel_permutations
+       read(14) pgl(igroup)%nsubmaps
+       if (pgl(igroup)%nsubmaps.lt.1) then
+          write (*,*) 'Amplitude library has an empty integration family',igroup
+          stop 1
+       endif
+       allocate(pgl(igroup)%phase_maps(pgl(igroup)%nsubmaps))
+       do imap=1,pgl(igroup)%nsubmaps
+          read(14) pgl(igroup)%phase_maps(imap)%recipe_id,&
+               pgl(igroup)%phase_maps(imap)%permutation_id
+          if (pgl(igroup)%phase_maps(imap)%recipe_id.lt.1 .or.&
+               pgl(igroup)%phase_maps(imap)%recipe_id.gt.nphase_maps .or.&
+               pgl(igroup)%phase_maps(imap)%permutation_id.lt.1 .or.&
+               pgl(igroup)%phase_maps(imap)%permutation_id.gt.&
+               nphase_permutations) then
+             write (*,*) 'Amplitude library has an invalid family map reference',&
+                  igroup,imap
+             stop 1
+          endif
+          allocate(pgl(igroup)%phase_maps(imap)%permutation(next))
+          pgl(igroup)%phase_maps(imap)%permutation=&
+               phase_permutation_catalogue(:,&
+               pgl(igroup)%phase_maps(imap)%permutation_id)
+       enddo
        ! rest
        read(14) dim1,dim2
        allocate(pgl(igroup)%processes(dim1,dim2))
@@ -242,12 +305,14 @@ contains
        read(14) dim1
        allocate(pgl(igroup)%phase_space_orders(dim1))
        read(14) pgl(igroup)%phase_space_orders
-       read(14) pgl(igroup)%nresonances
-       allocate(pgl(igroup)%resonance_pdgs(pgl(igroup)%nresonances))
-       allocate(pgl(igroup)%resonance_masks(pgl(igroup)%nresonances))
-       if (pgl(igroup)%nresonances.gt.0) then
-          read(14) pgl(igroup)%resonance_pdgs
-          read(14) pgl(igroup)%resonance_masks
+       read(14) pgl(igroup)%ntopology_nodes
+       allocate(pgl(igroup)%topology_pdgs(pgl(igroup)%ntopology_nodes))
+       allocate(pgl(igroup)%topology_masks(pgl(igroup)%ntopology_nodes))
+       allocate(pgl(igroup)%topology_left_masks(pgl(igroup)%ntopology_nodes))
+       if (pgl(igroup)%ntopology_nodes.gt.0) then
+          read(14) pgl(igroup)%topology_pdgs
+          read(14) pgl(igroup)%topology_masks
+          read(14) pgl(igroup)%topology_left_masks
        endif
        read(14) dim1
        allocate(pgl(igroup)%nhel(dim1))

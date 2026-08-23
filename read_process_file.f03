@@ -2,7 +2,7 @@ module read_process_file
   use handling_processes
   use run_parameters, only: ignore_final_state_width_fix,flavour_scheme,set_flavour_scheme
   implicit none
-  integer,parameter :: supported_process_file_version=4
+  integer,parameter :: supported_process_file_version=6
   integer :: sf_nprocs
   integer,dimension(:,:),allocatable :: unique_procs,processes,color_orders,multi_chans
   integer,dimension(:,:),allocatable :: phase_space_permutations
@@ -12,7 +12,17 @@ module read_process_file
   integer,dimension(:),allocatable :: unique_map,iden_iproc
   integer,dimension(:,:,:),allocatable :: iden_processes
   real(kind=8),dimension(:,:),allocatable :: idenCOandMAPfactor
+  type :: partner_set_file
+     integer :: npairs=0
+     integer,dimension(:),allocatable :: map_ids,permutation_ids
+  end type partner_set_file
 contains
+  logical function is_supported_process_file_version(version)
+    implicit none
+    integer,intent(in) :: version
+    is_supported_process_file_version=version.eq.supported_process_file_version
+  end function is_supported_process_file_version
+
   subroutine parse_process_options(options_line,file_flavour_scheme)
     implicit none
     character(len=*),intent(in) :: options_line
@@ -20,7 +30,7 @@ contains
     integer :: key_position,value_start,value_length,value_end,ios
 
     if (index(adjustl(options_line),'# options:').ne.1) then
-       write (*,*) 'Missing process options in version-4 process file'
+       write (*,*) 'Missing process options in version-6 process file'
        stop 1
     endif
     key_position=index(options_line,'flavour_scheme=')
@@ -65,19 +75,20 @@ contains
        write (*,*) 'Malformed process-file header while reading model metadata'
        stop 1
     endif
-    if (process_file_version.ne.supported_process_file_version) then
-       write (*,*) 'Only version-4 process files are supported; regenerate processes.txt'
+    if (.not.is_supported_process_file_version(process_file_version)) then
+       write (*,*) 'Unsupported process-file version; regenerate processes.txt',&
+            process_file_version
        stop 1
     endif
     read(iunit,'(a)',iostat=ios) buffer
     if (ios.ne.0 .or. index(adjustl(buffer),'# process:').ne.1) then
-       write (*,*) 'Missing process provenance in version-4 process file'
+       write (*,*) 'Missing process provenance in version-6 process file'
        stop 1
     endif
     read(iunit,'(a)',iostat=ios) buffer
     close(iunit)
     if (ios.ne.0) then
-       write (*,*) 'Missing process options in version-4 process file'
+       write (*,*) 'Missing process options in version-6 process file'
        stop 1
     endif
     call parse_process_options(buffer,file_flavour_scheme)
@@ -88,20 +99,19 @@ contains
     implicit none
     character(len=*),intent(in) :: filename
     character(len=65536) :: buffer
-    integer :: iunit,ios,n_external,n_unique,version,iproc,igroup,ngroup_file
-    integer :: group_index,nproc_in_group,max_channels,nchannels,nresonances,iresonance
-    integer :: resonance_pdg,iresonance_species,file_flavour_scheme
-    integer,dimension(4),parameter :: resonance_species=[6,23,24,25]
+    character(len=1) :: record_kind
+    integer :: iunit,ios,n_external,n_unique,version,iproc
+    integer :: topology_pdg,itopology_species,file_flavour_scheme
+    integer,dimension(4),parameter :: topology_species=[6,23,24,25]
     logical,dimension(4) :: mapped_species
     real(kind=8),dimension(4) :: nominal_widths
-    integer,dimension(:),allocatable :: phase_order,channels
     integer,dimension(:,:),allocatable :: physical_process
 
     if (ignore_final_state_width_fix) return
     mapped_species=.false.
-    do iresonance_species=1,size(resonance_species)
-       nominal_widths(iresonance_species)=phys_model%get_width(&
-            resonance_species(iresonance_species))
+    do itopology_species=1,size(topology_species)
+       nominal_widths(itopology_species)=phys_model%get_width(&
+            topology_species(itopology_species))
     enddo
     open(newunit=iunit,file=trim(filename),status='old',action='read',iostat=ios)
     if (ios.ne.0) then
@@ -118,18 +128,18 @@ contains
        write (*,*) 'Malformed process-file header while applying final-state widths'
        stop 1
     endif
-    if (version.ne.supported_process_file_version) then
-       write (*,*) 'Only version-4 process files are supported; regenerate processes.txt'
+    if (.not.is_supported_process_file_version(version)) then
+       write (*,*) 'Unsupported process-file version; regenerate processes.txt',version
        stop 1
     endif
     read(iunit,'(a)',iostat=ios) buffer
     if (ios.ne.0 .or. index(adjustl(buffer),'# process:').ne.1) then
-       write (*,*) 'Missing process provenance in version-4 process file'
+       write (*,*) 'Missing process provenance in version-6 process file'
        stop 1
     endif
     read(iunit,'(a)',iostat=ios) buffer
     if (ios.ne.0) then
-       write (*,*) 'Missing process options in version-4 process file'
+       write (*,*) 'Missing process options in version-6 process file'
        stop 1
     endif
     call parse_process_options(buffer,file_flavour_scheme)
@@ -145,70 +155,30 @@ contains
           stop 1
        endif
     enddo
-    ! The first block contains canonical amplitude representatives, not the
-    ! physical subprocess labelling.  Walk the phase-space-group rows instead;
-    ! their first process field is the one later stored in iden_processes and
-    ! has physical incoming/final-state positions.
-    read(iunit,*,iostat=ios)
-    read(iunit,*,iostat=ios)
-    read(iunit,*,iostat=ios) ngroup_file
-    if (ios.ne.0 .or. ngroup_file.lt.1) then
-       write (*,*) 'Could not read phase-space groups while applying final-state widths'
-       stop 1
-    endif
-    read(iunit,*,iostat=ios)
-    allocate(phase_order(n_external))
     allocate(physical_process(n_external,1))
-    do igroup=1,ngroup_file
-       read(iunit,*,iostat=ios) group_index,nproc_in_group,max_channels,phase_order,nresonances
-       if (ios.ne.0 .or. group_index.ne.igroup .or. nproc_in_group.lt.1 .or.&
-            max_channels.lt.1 .or. nresonances.lt.0) then
-          write (*,*) 'Malformed phase-space group while applying final-state widths',igroup
-          stop 1
-       endif
-       do iresonance=1,nresonances
-          read(iunit,'(a)',iostat=ios) buffer
+    do
+       read(iunit,'(a)',iostat=ios) buffer
+       if (ios.ne.0) exit
+       if (len_trim(buffer).lt.1) cycle
+       record_kind=adjustl(buffer)
+       if (record_kind.eq.'N') then
+          read(buffer,*,iostat=ios) record_kind,topology_pdg
           if (ios.ne.0) then
-             write (*,*) 'Malformed resonance record while applying final-state widths',igroup
+             write (*,*) 'Malformed phase-map node while applying final-state widths'
              stop 1
           endif
-          read(buffer,*,iostat=ios) resonance_pdg
-          if (ios.ne.0) then
-             write (*,*) 'Malformed resonance PDG while applying final-state widths',igroup
-             stop 1
-          endif
-          do iresonance_species=1,size(resonance_species)
-             if (abs(resonance_pdg).eq.resonance_species(iresonance_species)) then
-                mapped_species(iresonance_species)=.true.
+          do itopology_species=1,size(topology_species)
+             if (abs(topology_pdg).eq.topology_species(itopology_species)) then
+                mapped_species(itopology_species)=.true.
              endif
           enddo
-       enddo
-       do iproc=1,nproc_in_group
-          read(iunit,'(a)',iostat=ios) buffer
-          if (ios.ne.0 .or. len_trim(buffer).eq.len(buffer)) then
-             write (*,*) 'Could not read subprocess row while applying final-state widths',igroup,iproc
-             stop 1
-          endif
-          read(buffer,*,iostat=ios) nchannels
-          if (ios.ne.0 .or. nchannels.lt.1 .or. nchannels.gt.max_channels) then
-             write (*,*) 'Invalid multichannel count while applying final-state widths',igroup,iproc
-             stop 1
-          endif
-          allocate(channels(nchannels))
-          read(buffer,*,iostat=ios) nchannels,channels,physical_process(:,1)
-          deallocate(channels)
+       elseif (record_kind.eq.'C') then
+          read(buffer,*,iostat=ios) record_kind,physical_process(:,1)
           if (ios.ne.0) then
-             write (*,*) 'Malformed subprocess process field while applying final-state widths',igroup,iproc
+             write (*,*) 'Malformed coefficient row while applying final-state widths'
              stop 1
           endif
           call phys_model%apply_final_state_widths(n_external,1,physical_process)
-       enddo
-       read(iunit,*,iostat=ios)
-       read(iunit,*,iostat=ios)
-       read(iunit,*,iostat=ios)
-       if (ios.ne.0 .and. igroup.ne.ngroup_file) then
-          write (*,*) 'Unexpected end of process file while applying final-state widths'
-          stop 1
        endif
     enddo
     close(iunit)
@@ -216,34 +186,33 @@ contains
     ! can therefore only be made stable globally.  Restore the nominal width
     ! for species that also occur as mapped internal resonances; otherwise the
     ! corresponding Breit-Wigner and matrix-element propagator would be lost.
-    do iresonance_species=1,size(resonance_species)
-       if (mapped_species(iresonance_species)) call phys_model%set_width(&
-            resonance_species(iresonance_species),nominal_widths(iresonance_species))
+    do itopology_species=1,size(topology_species)
+       if (mapped_species(itopology_species)) call phys_model%set_width(&
+            topology_species(itopology_species),nominal_widths(itopology_species))
     enddo
-    deallocate(phase_order)
     deallocate(physical_process)
   end subroutine apply_final_state_widths_from_process_file
 
   subroutine apply_final_state_widths_from_loaded_groups()
     implicit none
-    integer :: igroup,iproc,iident,iresonance,iresonance_species
-    integer,dimension(4),parameter :: resonance_species=[6,23,24,25]
+    integer :: igroup,iproc,iident,imap,itopology,itopology_species
+    integer,dimension(4),parameter :: topology_species=[6,23,24,25]
     logical,dimension(4) :: mapped_species
     real(kind=8),dimension(4) :: nominal_widths
     integer,dimension(:,:),allocatable :: physical_processes
 
     if (ignore_final_state_width_fix) return
     mapped_species=.false.
-    do iresonance_species=1,size(resonance_species)
-       nominal_widths(iresonance_species)=phys_model%get_width(&
-            resonance_species(iresonance_species))
+    do itopology_species=1,size(topology_species)
+       nominal_widths(itopology_species)=phys_model%get_width(&
+            topology_species(itopology_species))
     enddo
-    do igroup=1,ngroups
-       do iresonance=1,pgl(igroup)%nresonances
-          do iresonance_species=1,size(resonance_species)
-             if (abs(pgl(igroup)%resonance_pdgs(iresonance)).eq.&
-                  resonance_species(iresonance_species)) then
-                mapped_species(iresonance_species)=.true.
+    do imap=1,nphase_maps
+       do itopology=1,phase_map_catalogue(imap)%ntopology_nodes
+          do itopology_species=1,size(topology_species)
+             if (abs(phase_map_catalogue(imap)%topology_pdgs(itopology)).eq.&
+                  topology_species(itopology_species)) then
+                mapped_species(itopology_species)=.true.
              endif
           enddo
        enddo
@@ -262,21 +231,459 @@ contains
             physical_processes(:,1:iident))
        deallocate(physical_processes)
     enddo
-    do iresonance_species=1,size(resonance_species)
-       if (mapped_species(iresonance_species)) call phys_model%set_width(&
-            resonance_species(iresonance_species),nominal_widths(iresonance_species))
+    do itopology_species=1,size(topology_species)
+       if (mapped_species(itopology_species)) call phys_model%set_width(&
+            topology_species(itopology_species),nominal_widths(itopology_species))
     enddo
   end subroutine apply_final_state_widths_from_loaded_groups
 
+  subroutine read_next_nonblank(iunit,buffer,ios)
+    implicit none
+    integer,intent(in) :: iunit
+    integer,intent(out) :: ios
+    character(len=*),intent(out) :: buffer
+    do
+       read(iunit,'(a)',iostat=ios) buffer
+       if (ios.ne.0 .or. len_trim(buffer).gt.0) return
+    enddo
+  end subroutine read_next_nonblank
+
+  logical function valid_physical_topology_pdg(pdg)
+    implicit none
+    integer,intent(in) :: pdg
+    valid_physical_topology_pdg=pdg.eq.0 .or. pdg.eq.21 .or.&
+         pdg.eq.22 .or. pdg.eq.23 .or. abs(pdg).eq.24 .or.&
+         pdg.eq.25 .or. (abs(pdg).ge.1 .and. abs(pdg).le.6) .or.&
+         (abs(pdg).ge.11 .and. abs(pdg).le.16)
+  end function valid_physical_topology_pdg
+
   subroutine read_processes_from_file(filename)
+    use phase_space_base, only: transform_breit_wigner,&
+         transform_massless_pole,transform_massive_power,&
+         transform_flat_contact
+    implicit none
+    character(len=80),intent(in) :: filename
+    character(len=65536) :: buffer
+    character(len=32) :: marker
+    integer :: ios,process_file_version,file_flavour_scheme,ndim
+    integer :: iproc,imap,inode,ipermutation,iset,ifamily,iflav
+    integer :: map_index,node_pdg,node_kind,node_parameter,node_mask
+    integer :: node_left,node_right,permutation_index,partner_set_index
+    integer :: nsets,nfamilies,nrows,max_channels,icheck,i,j,overlap
+    integer :: final_mask
+    real(kind=8) :: idenCOfactor
+    type(partner_set_file),dimension(:),allocatable :: partner_sets
+    integer,dimension(:),allocatable :: process,order,phase_permutation
+    integer,dimension(:),allocatable :: phase_space_orders,ichans
+    integer,dimension(:,:),allocatable :: channel_permutations
+    integer,dimension(:,:),allocatable :: raw_processes,raw_orders
+    real(kind=8),dimension(:),allocatable :: raw_factors
+
+    open(unit=10,file=filename,status='old',action='read',iostat=ios)
+    if (ios.ne.0) then
+       write (*,*) 'Could not open process file: ',trim(filename)
+       stop 1
+    endif
+    read(10,'(a)',iostat=ios) buffer
+    if (ios.ne.0) then
+       write (*,*) 'Could not read process-file header'
+       stop 1
+    endif
+    read(buffer,*,iostat=ios) next,nproc_unique,process_file_version
+    if (ios.ne.0 .or. next.lt.3 .or. nproc_unique.lt.1) then
+       write (*,*) 'Malformed process-file header'
+       stop 1
+    endif
+    if (.not.is_supported_process_file_version(process_file_version)) then
+       write (*,*) 'Only version-6 process files are supported; regenerate processes.txt'
+       stop 1
+    endif
+    read(10,'(a)',iostat=ios) buffer
+    if (ios.ne.0 .or. index(adjustl(buffer),'# process:').ne.1) then
+       write (*,*) 'Missing process provenance in version-6 process file'
+       stop 1
+    endif
+    read(10,'(a)',iostat=ios) buffer
+    if (ios.ne.0) then
+       write (*,*) 'Missing process options in version-6 process file'
+       stop 1
+    endif
+    call parse_process_options(buffer,file_flavour_scheme)
+    if (file_flavour_scheme.ne.flavour_scheme) then
+       write (*,*) 'Process flavour scheme does not match initialized model',&
+            file_flavour_scheme,flavour_scheme
+       stop 1
+    endif
+
+    ndim=3*(next-2)-4
+    if (include_pdf) ndim=ndim+2
+    allocate(unique_procs(next,nproc_unique))
+    do iproc=1,nproc_unique
+       read(10,*,iostat=ios) unique_procs(:,iproc)
+       if (ios.ne.0) then
+          write (*,*) 'Malformed unique-process catalogue',iproc
+          stop 1
+       endif
+    enddo
+    allocate(pgl_unique)
+    pgl_unique%next=next
+    pgl_unique%ndim=ndim
+    call check_unique_processes()
+
+    call read_next_nonblank(10,buffer,ios)
+    read(buffer,*,iostat=ios) marker,nphase_permutations
+    if (ios.ne.0 .or. trim(marker).ne.'PERMUTATIONS' .or.&
+         nphase_permutations.lt.1) then
+       write (*,*) 'Missing version-6 permutation catalogue'
+       stop 1
+    endif
+    allocate(phase_permutation_catalogue(next,nphase_permutations))
+    do ipermutation=1,nphase_permutations
+       call read_next_nonblank(10,buffer,ios)
+       read(buffer,*,iostat=ios) marker,permutation_index,&
+            phase_permutation_catalogue(:,ipermutation)
+       if (ios.ne.0 .or. trim(marker).ne.'P' .or.&
+            permutation_index.ne.ipermutation) then
+          write (*,*) 'Malformed permutation-catalogue entry',ipermutation
+          stop 1
+       endif
+       if (phase_permutation_catalogue(1,ipermutation).ne.1 .or.&
+            phase_permutation_catalogue(2,ipermutation).ne.2) then
+          write (*,*) 'Phase-map permutations must fix incoming legs'
+          stop 1
+       endif
+       do i=1,next
+          if (count(phase_permutation_catalogue(:,ipermutation).eq.i).ne.1) then
+             write (*,*) 'Invalid phase-map permutation',ipermutation
+             stop 1
+          endif
+       enddo
+    enddo
+
+    call read_next_nonblank(10,buffer,ios)
+    read(buffer,*,iostat=ios) marker,nphase_maps
+    if (ios.ne.0 .or. trim(marker).ne.'PHASE_MAPS' .or.&
+         nphase_maps.lt.1) then
+       write (*,*) 'Missing version-6 phase-map catalogue'
+       stop 1
+    endif
+    allocate(phase_map_catalogue(nphase_maps))
+    final_mask=ibclr(ibclr(2**next-1,0),1)
+    do imap=1,nphase_maps
+       call read_next_nonblank(10,buffer,ios)
+       allocate(phase_map_catalogue(imap)%order(next))
+       read(buffer,*,iostat=ios) marker,map_index,&
+            phase_map_catalogue(imap)%ntopology_nodes,&
+            phase_map_catalogue(imap)%order
+       if (ios.ne.0 .or. trim(marker).ne.'M' .or. map_index.ne.imap .or.&
+            phase_map_catalogue(imap)%ntopology_nodes.lt.0) then
+          write (*,*) 'Malformed phase-map recipe',imap
+          stop 1
+       endif
+       do i=1,next
+          if (count(phase_map_catalogue(imap)%order.eq.i).ne.1) then
+             write (*,*) 'Invalid phase-map production order',imap
+             stop 1
+          endif
+       enddo
+       if (phase_map_catalogue(imap)%order(1).ne.1) then
+          write (*,*) 'Phase-map production order must start at incoming leg 1'
+          stop 1
+       endif
+       i=phase_map_catalogue(imap)%ntopology_nodes
+       allocate(phase_map_catalogue(imap)%topology_pdgs(i))
+       allocate(phase_map_catalogue(imap)%topology_kinds(i))
+       allocate(phase_map_catalogue(imap)%topology_parameters(i))
+       allocate(phase_map_catalogue(imap)%topology_masks(i))
+       allocate(phase_map_catalogue(imap)%topology_left_masks(i))
+       do inode=1,i
+          call read_next_nonblank(10,buffer,ios)
+          read(buffer,*,iostat=ios) marker,node_pdg,node_kind,node_parameter,&
+               node_mask,node_left,node_right
+          if (ios.ne.0 .or. trim(marker).ne.'N') then
+             write (*,*) 'Malformed phase-map node',imap,inode
+             stop 1
+          endif
+          if (.not.valid_physical_topology_pdg(node_pdg)) then
+             write (*,*) 'Auxiliary or unknown field in physical phase map',node_pdg
+             stop 1
+          endif
+          if (node_kind.lt.transform_breit_wigner .or.&
+               node_kind.gt.transform_flat_contact) then
+             write (*,*) 'Unknown phase-map transform kind',node_kind
+             stop 1
+          endif
+          if ((node_pdg.eq.0) .neqv.&
+               (node_kind.eq.transform_flat_contact)) then
+             write (*,*) 'Flat contacts must use PDG zero exclusively',node_pdg,node_kind
+             stop 1
+          endif
+          select case (node_kind)
+          case (transform_breit_wigner)
+             if (abs(node_pdg).ne.node_parameter .or.&
+                  all(node_parameter.ne.[6,23,24,25])) then
+                write (*,*) 'Invalid Breit-Wigner transform parameter',&
+                     node_pdg,node_parameter
+                stop 1
+             endif
+          case (transform_massless_pole)
+             if (node_parameter.ne.0 .or.&
+                  .not.(node_pdg.eq.21 .or. node_pdg.eq.22 .or.&
+                  (abs(node_pdg).ge.11 .and. abs(node_pdg).le.16) .or.&
+                  (abs(node_pdg).ge.1 .and.&
+                  abs(node_pdg).le.flavour_scheme))) then
+                write (*,*) 'Invalid massless-pole transform parameter',&
+                     node_pdg,node_parameter
+                stop 1
+             endif
+          case (transform_massive_power)
+             if (abs(node_pdg).ne.node_parameter .or.&
+                  node_parameter.le.flavour_scheme .or.&
+                  node_parameter.gt.6) then
+                write (*,*) 'Invalid massive-power transform parameter',&
+                     node_pdg,node_parameter
+                stop 1
+             endif
+          case (transform_flat_contact)
+             if (node_parameter.ne.0) then
+                write (*,*) 'Flat contacts cannot have a transform parameter'
+                stop 1
+             endif
+          end select
+          if (node_mask.le.0 .or. iand(node_mask,final_mask).ne.node_mask .or.&
+               node_left.le.0 .or. node_right.le.0 .or.&
+               iand(node_left,node_right).ne.0 .or.&
+               ior(node_left,node_right).ne.node_mask) then
+             write (*,*) 'Invalid phase-map node masks',imap,inode
+             stop 1
+          endif
+          do j=1,inode-1
+             overlap=iand(node_mask,&
+                  phase_map_catalogue(imap)%topology_masks(j))
+             if (node_mask.eq.phase_map_catalogue(imap)%topology_masks(j) .or.&
+                  (overlap.ne.0 .and. overlap.ne.node_mask .and.&
+                  overlap.ne.phase_map_catalogue(imap)%topology_masks(j))) then
+                write (*,*) 'Phase-map topology must be distinct and laminar',imap
+                stop 1
+             endif
+          enddo
+          phase_map_catalogue(imap)%topology_pdgs(inode)=node_pdg
+          phase_map_catalogue(imap)%topology_kinds(inode)=node_kind
+          phase_map_catalogue(imap)%topology_parameters(inode)=node_parameter
+          phase_map_catalogue(imap)%topology_masks(inode)=node_mask
+          phase_map_catalogue(imap)%topology_left_masks(inode)=node_left
+       enddo
+    enddo
+
+    call read_next_nonblank(10,buffer,ios)
+    read(buffer,*,iostat=ios) marker,nsets
+    if (ios.ne.0 .or. trim(marker).ne.'PARTNER_SETS' .or. nsets.lt.1) then
+       write (*,*) 'Missing version-6 partner-set catalogue'
+       stop 1
+    endif
+    allocate(partner_sets(nsets))
+    do iset=1,nsets
+       call read_next_nonblank(10,buffer,ios)
+       read(buffer,*,iostat=ios) marker,partner_set_index,&
+            partner_sets(iset)%npairs
+       if (ios.ne.0 .or. trim(marker).ne.'S' .or.&
+            partner_set_index.ne.iset .or. partner_sets(iset)%npairs.lt.1) then
+          write (*,*) 'Malformed partner-set entry',iset
+          stop 1
+       endif
+       allocate(partner_sets(iset)%map_ids(partner_sets(iset)%npairs))
+       allocate(partner_sets(iset)%permutation_ids(partner_sets(iset)%npairs))
+       read(buffer,*,iostat=ios) marker,partner_set_index,&
+            partner_sets(iset)%npairs,&
+            (partner_sets(iset)%map_ids(i),&
+             partner_sets(iset)%permutation_ids(i),&
+             i=1,partner_sets(iset)%npairs)
+       if (ios.ne.0 .or. any(partner_sets(iset)%map_ids.lt.1) .or.&
+            any(partner_sets(iset)%map_ids.gt.nphase_maps) .or.&
+            any(partner_sets(iset)%permutation_ids.lt.1) .or.&
+            any(partner_sets(iset)%permutation_ids.gt.nphase_permutations)) then
+          write (*,*) 'Partner-set entry references an unknown catalogue item',iset
+          stop 1
+       endif
+       do i=2,partner_sets(iset)%npairs
+          if (partner_sets(iset)%map_ids(i).lt.&
+               partner_sets(iset)%map_ids(i-1) .or.&
+               (partner_sets(iset)%map_ids(i).eq.&
+               partner_sets(iset)%map_ids(i-1) .and.&
+               partner_sets(iset)%permutation_ids(i).le.&
+               partner_sets(iset)%permutation_ids(i-1))) then
+             write (*,*) 'Partner-set entries must be ordered and unique',iset
+             stop 1
+          endif
+       enddo
+    enddo
+
+    call read_next_nonblank(10,buffer,ios)
+    read(buffer,*,iostat=ios) marker,nfamilies
+    if (ios.ne.0 .or. trim(marker).ne.'INTEGRATION_FAMILIES' .or.&
+         nfamilies.lt.1 .or. nfamilies.ne.nsets) then
+       write (*,*) 'Malformed version-6 integration-family catalogue'
+       stop 1
+    endif
+    ngroups=nfamilies
+    allocate(pgl(ngroups))
+    allocate(process(next))
+    allocate(order(next))
+    allocate(phase_permutation(next))
+    allocate(phase_space_orders(next))
+
+    do ifamily=1,nfamilies
+       call read_next_nonblank(10,buffer,ios)
+       read(buffer,*,iostat=ios) marker,icheck,partner_set_index,nrows
+       if (ios.ne.0 .or. trim(marker).ne.'F' .or. icheck.ne.ifamily .or.&
+            partner_set_index.ne.ifamily .or. nrows.lt.1) then
+          write (*,*) 'Malformed integration-family entry',ifamily
+          stop 1
+       endif
+       max_channels=partner_sets(partner_set_index)%npairs
+       pgl(ifamily)%nsubmaps=max_channels
+       allocate(pgl(ifamily)%phase_maps(max_channels))
+       allocate(ichans(0:max_channels))
+       allocate(channel_permutations(next,max_channels))
+       ichans(0)=max_channels
+       do i=1,max_channels
+          ichans(i)=i
+          map_index=partner_sets(partner_set_index)%map_ids(i)
+          permutation_index=&
+               partner_sets(partner_set_index)%permutation_ids(i)
+          pgl(ifamily)%phase_maps(i)%recipe_id=map_index
+          pgl(ifamily)%phase_maps(i)%permutation_id=permutation_index
+          allocate(pgl(ifamily)%phase_maps(i)%permutation(next))
+          pgl(ifamily)%phase_maps(i)%permutation=&
+               phase_permutation_catalogue(:,permutation_index)
+          channel_permutations(:,i)=&
+               phase_permutation_catalogue(:,permutation_index)
+       enddo
+       phase_permutation=channel_permutations(:,1)
+       phase_space_orders=phase_map_catalogue(&
+            partner_sets(partner_set_index)%map_ids(1))%order
+
+       allocate(raw_processes(next,nrows))
+       allocate(raw_orders(next,nrows))
+       allocate(raw_factors(nrows))
+       do iproc=1,nrows
+          call read_next_nonblank(10,buffer,ios)
+          read(buffer,*,iostat=ios) marker,raw_processes(:,iproc),&
+               raw_orders(:,iproc),raw_factors(iproc)
+          if (ios.ne.0 .or. trim(marker).ne.'C') then
+             write (*,*) 'Malformed coefficient row',ifamily,iproc
+             stop 1
+          endif
+          do i=1,next
+             if (count(raw_orders(:,iproc).eq.i).ne.1) then
+                write (*,*) 'Invalid colour order in coefficient row',ifamily,iproc
+                stop 1
+             endif
+          enddo
+       enddo
+
+       nprocs=0
+       sf_nprocs=0
+       allocate(iden_iproc(nrows))
+       allocate(processes(next,nrows))
+       allocate(color_orders(next,nrows))
+       allocate(phase_space_permutations(next,nrows))
+       phase_space_permutations=0
+       allocate(iden_processes(next,nrows,nrows))
+       allocate(idenCOandMAPfactor(nrows,nrows))
+       allocate(multi_chans(0:max_channels,nrows))
+       allocate(multi_chan_permutations(next,max_channels,nrows))
+       multi_chan_permutations=0
+       do iflav=1,2
+          do iproc=1,nrows
+             process=raw_processes(:,iproc)
+             order=raw_orders(:,iproc)
+             idenCOfactor=raw_factors(iproc)
+             call add_to_process_list(process,order,phase_permutation,&
+                  channel_permutations,idenCOfactor,max_channels,ichans,&
+                  iflav.eq.1)
+          enddo
+          if (.not.decompose_same_flavour_into_two_diff_flavour) exit
+       enddo
+       if (nprocs.lt.1) then
+          write (*,*) 'Integration family has no active coefficient rows',ifamily
+          stop 1
+       endif
+
+       pgl(ifamily)%next=next
+       pgl(ifamily)%nproc=nprocs
+       pgl(ifamily)%ndim=ndim
+       pgl(ifamily)%multichan%max_channels=max_channels
+       if (keep_processes_separate) then
+          allocate(pgl(ifamily)%amps(nprocs))
+          allocate(pgl(ifamily)%nhel(nprocs))
+          allocate(pgl(ifamily)%passed(nprocs))
+       else
+          allocate(pgl(ifamily)%amps(1))
+          allocate(pgl(ifamily)%nhel(1))
+          allocate(pgl(ifamily)%passed(1))
+       endif
+       allocate(pgl(ifamily)%processes(next,nprocs))
+       allocate(pgl(ifamily)%color_orders(next,nprocs))
+       allocate(pgl(ifamily)%phase_space_permutations(next,nprocs))
+       allocate(pgl(ifamily)%phase_space_orders(next))
+       allocate(pgl(ifamily)%idenCOandMAPfactor(&
+            maxval(iden_iproc(1:nprocs)),nprocs))
+       allocate(pgl(ifamily)%iden_iproc(nprocs))
+       allocate(pgl(ifamily)%iden_processes(next,&
+            maxval(iden_iproc(1:nprocs)),nprocs))
+       allocate(pgl(ifamily)%val_procs(&
+            maxval(iden_iproc(1:nprocs)),nprocs))
+       allocate(pgl(ifamily)%multichan%channels(max_channels,nprocs))
+       allocate(pgl(ifamily)%multichan%channel_permutations(&
+            next,max_channels,nprocs))
+       allocate(pgl(ifamily)%multichan%number_of_channels(nprocs))
+       pgl(ifamily)%processes=processes(:,1:nprocs)
+       pgl(ifamily)%color_orders=color_orders(:,1:nprocs)
+       pgl(ifamily)%phase_space_permutations=&
+            phase_space_permutations(:,1:nprocs)
+       pgl(ifamily)%phase_space_orders=phase_space_orders
+       pgl(ifamily)%idenCOandMAPfactor=&
+            idenCOandMAPfactor(1:maxval(iden_iproc(1:nprocs)),1:nprocs)
+       pgl(ifamily)%iden_iproc=iden_iproc(1:nprocs)
+       pgl(ifamily)%iden_processes=&
+            iden_processes(:,1:maxval(iden_iproc(1:nprocs)),1:nprocs)
+       pgl(ifamily)%multichan%channels=&
+            multi_chans(1:max_channels,1:nprocs)
+       pgl(ifamily)%multichan%channel_permutations=&
+            multi_chan_permutations(:,:,1:nprocs)
+       pgl(ifamily)%multichan%number_of_channels=&
+            multi_chans(0,1:nprocs)
+       pgl(ifamily)%passed=0
+       pgl(ifamily)%ntopology_nodes=0
+
+       deallocate(raw_processes,raw_orders,raw_factors)
+       deallocate(iden_iproc,processes,color_orders)
+       deallocate(phase_space_permutations,iden_processes)
+       deallocate(idenCOandMAPfactor,multi_chans)
+       deallocate(multi_chan_permutations,ichans,channel_permutations)
+    enddo
+
+    call read_next_nonblank(10,buffer,ios)
+    if (ios.ne.0 .or. trim(buffer).ne.'END_PROCESSES') then
+       write (*,*) 'Missing END_PROCESSES marker in version-6 process file'
+       stop 1
+    endif
+    close(10)
+    deallocate(process,order,phase_permutation,phase_space_orders)
+    deallocate(partner_sets)
+  end subroutine read_processes_from_file
+
+  subroutine read_processes_from_file_legacy(filename)
     implicit none
     character(len=80) :: filename
     integer :: iproc,igroup,icheck,nproc_in_group,max_channels,iflav,ndim,process_file_version
     integer :: file_flavour_scheme
-    integer :: nresonances,iresonance,resonance_pdg,nlabels,label,mask,overlap
+    integer :: ntopology_nodes,itopology,topology_pdg,nlabels,nleft,label,mask,&
+         left_mask,overlap
     real(kind=8) :: idenCOfactor
     integer,dimension(:),allocatable :: process,order,ichans,phase_space_orders,phase_permutation
-    integer,dimension(:),allocatable :: resonance_labels
+    integer,dimension(:),allocatable :: topology_labels,left_labels
     integer,dimension(:,:),allocatable :: channel_permutations
     character(len=65536) :: buff
     integer :: i,j,ios
@@ -291,8 +698,9 @@ contains
        write (*,*) 'Malformed process-file header'
        stop 1
     endif
-    if (process_file_version.ne.supported_process_file_version) then
-       write (*,*) 'Only version-4 process files are supported; regenerate processes.txt'
+    if (.not.is_supported_process_file_version(process_file_version)) then
+       write (*,*) 'Unsupported process-file version; regenerate processes.txt',&
+            process_file_version
        stop 1
     endif
     if (next.lt.3 .or. nproc_unique.lt.1) then
@@ -339,9 +747,9 @@ contains
        nprocs=0
        sf_nprocs=0
        allocate(phase_space_orders(1:next))
-       read(10,*,iostat=ios) icheck,nproc_in_group,max_channels,phase_space_orders(1:next),nresonances
+       read(10,*,iostat=ios) icheck,nproc_in_group,max_channels,phase_space_orders(1:next),ntopology_nodes
        if (ios.ne.0 .or. nproc_in_group.lt.1 .or. max_channels.lt.1 .or.&
-            nresonances.lt.0) then
+            ntopology_nodes.lt.0) then
           write (*,*) 'Malformed version-4 phase-space group header',igroup
           stop 1
        endif
@@ -349,53 +757,98 @@ contains
           write (*,*) 'ERROR in processes file',icheck,igroup
           stop 1
        endif
-       pgl(igroup)%nresonances=nresonances
-       allocate(pgl(igroup)%resonance_pdgs(nresonances))
-       allocate(pgl(igroup)%resonance_masks(nresonances))
-       do iresonance=1,nresonances
+       pgl(igroup)%ntopology_nodes=ntopology_nodes
+       allocate(pgl(igroup)%topology_pdgs(ntopology_nodes))
+       allocate(pgl(igroup)%topology_masks(ntopology_nodes))
+       allocate(pgl(igroup)%topology_left_masks(ntopology_nodes))
+       pgl(igroup)%topology_left_masks=0
+       do itopology=1,ntopology_nodes
           read(10,'(a)',iostat=ios) buff
           if (ios.ne.0) then
-             write (*,*) 'Could not read resonance record',igroup,iresonance
+             write (*,*) 'Could not read topology record',igroup,itopology
              stop 1
           endif
-          read(buff,*,iostat=ios) resonance_pdg,nlabels
+          read(buff,*,iostat=ios) topology_pdg,nlabels
           if (ios.ne.0 .or. nlabels.lt.2 .or. nlabels.gt.next-2) then
-             write (*,*) 'Invalid resonance descendant count',igroup,iresonance
+             write (*,*) 'Invalid topology descendant count',igroup,itopology
              stop 1
           endif
-          if (.not.(resonance_pdg.eq.23 .or. abs(resonance_pdg).eq.24 .or.&
-               resonance_pdg.eq.25 .or. abs(resonance_pdg).eq.6)) then
-             write (*,*) 'Unsupported mapped resonance PDG',resonance_pdg
+          if (process_file_version.eq.4) then
+             if (.not.(topology_pdg.eq.23 .or. abs(topology_pdg).eq.24 .or.&
+                  topology_pdg.eq.25 .or. abs(topology_pdg).eq.6)) then
+                write (*,*) 'Unsupported mapped resonance PDG',topology_pdg
+                stop 1
+             endif
+          elseif (.not.((abs(topology_pdg).ge.1 .and. abs(topology_pdg).le.6) .or.&
+               (abs(topology_pdg).ge.11 .and. abs(topology_pdg).le.16) .or.&
+               topology_pdg.eq.21 .or. topology_pdg.eq.-21 .or.&
+               topology_pdg.eq.22 .or. topology_pdg.eq.23 .or.&
+               topology_pdg.eq.-23 .or. abs(topology_pdg).eq.24 .or.&
+               topology_pdg.eq.25 .or. abs(topology_pdg).eq.26 .or.&
+               (topology_pdg.ge.125 .and. topology_pdg.le.127))) then
+             write (*,*) 'Unsupported topology-node PDG',topology_pdg
              stop 1
           endif
-          allocate(resonance_labels(nlabels))
-          read(buff,*,iostat=ios) resonance_pdg,nlabels,resonance_labels
-          if (ios.ne.0 .or. any(resonance_labels.lt.3) .or.&
-               any(resonance_labels.gt.next)) then
-             write (*,*) 'Invalid resonance descendant labels',igroup,iresonance
+          allocate(topology_labels(nlabels))
+          if (process_file_version.eq.4) then
+             read(buff,*,iostat=ios) topology_pdg,nlabels,topology_labels
+          else
+             read(buff,*,iostat=ios) topology_pdg,nlabels,topology_labels,nleft
+             if (ios.eq.0 .and. nleft.ge.1 .and. nleft.lt.nlabels) then
+                allocate(left_labels(nleft))
+                read(buff,*,iostat=ios) topology_pdg,nlabels,topology_labels,&
+                     nleft,left_labels
+             else
+                ios=1
+             endif
+          endif
+          if (ios.ne.0 .or. any(topology_labels.lt.3) .or.&
+               any(topology_labels.gt.next)) then
+             write (*,*) 'Invalid topology descendant labels',igroup,itopology
              stop 1
           endif
           mask=0
           do i=1,nlabels
-             label=resonance_labels(i)
+             label=topology_labels(i)
              if (btest(mask,label-1)) then
-                write (*,*) 'Repeated resonance descendant label',igroup,iresonance,label
+                write (*,*) 'Repeated topology descendant label',igroup,itopology,label
                 stop 1
              endif
              mask=ibset(mask,label-1)
           enddo
-          do i=1,iresonance-1
-             overlap=iand(mask,pgl(igroup)%resonance_masks(i))
-             if (mask.eq.pgl(igroup)%resonance_masks(i) .or.&
+          left_mask=0
+          if (process_file_version.ge.5) then
+             if (any(left_labels.lt.3) .or. any(left_labels.gt.next)) then
+                write (*,*) 'Invalid topology left-child labels',igroup,itopology
+                stop 1
+             endif
+             do i=1,nleft
+                label=left_labels(i)
+                if (.not.btest(mask,label-1) .or. btest(left_mask,label-1)) then
+                   write (*,*) 'Invalid topology left-child split',igroup,itopology,label
+                   stop 1
+                endif
+                left_mask=ibset(left_mask,label-1)
+             enddo
+             if (left_mask.eq.0 .or. left_mask.eq.mask) then
+                write (*,*) 'Topology child must be a nonempty proper subset',igroup,itopology
+                stop 1
+             endif
+          endif
+          do i=1,itopology-1
+             overlap=iand(mask,pgl(igroup)%topology_masks(i))
+             if (mask.eq.pgl(igroup)%topology_masks(i) .or.&
                   (overlap.ne.0 .and. overlap.ne.mask .and.&
-                  overlap.ne.pgl(igroup)%resonance_masks(i))) then
-                write (*,*) 'Resonance descendants must be distinct and laminar',igroup,iresonance
+                  overlap.ne.pgl(igroup)%topology_masks(i))) then
+                write (*,*) 'Topology descendants must be distinct and laminar',igroup,itopology
                 stop 1
              endif
           enddo
-          pgl(igroup)%resonance_pdgs(iresonance)=resonance_pdg
-          pgl(igroup)%resonance_masks(iresonance)=mask
-          deallocate(resonance_labels)
+          pgl(igroup)%topology_pdgs(itopology)=topology_pdg
+          pgl(igroup)%topology_masks(itopology)=mask
+          pgl(igroup)%topology_left_masks(itopology)=left_mask
+          deallocate(topology_labels)
+          if (allocated(left_labels)) deallocate(left_labels)
        enddo
        allocate(iden_iproc(nproc_in_group))
        allocate(processes(1:next,nproc_in_group))
@@ -531,7 +984,7 @@ contains
        read(10,*)
     enddo
     close(10)
-  end subroutine read_processes_from_file
+  end subroutine read_processes_from_file_legacy
 
 
 
@@ -551,6 +1004,8 @@ contains
     allocate(pgl_unique%color_orders(next,nproc_unique))
     allocate(pgl_unique%phase_space_orders(next))
     allocate(pgl_unique%amps(1))
+    allocate(pgl_unique%hel(next))
+    pgl_unique%hel=1
     allocate(mass(next))
     allocate(width(next))
     pgl_unique%nproc=nproc_unique

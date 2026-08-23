@@ -41,8 +41,8 @@ def generate_scheme(
     process_lines = (workdir / "processes.txt").read_text(
         encoding="ascii"
     ).splitlines()
-    if process_lines[0].split()[2] != "4":
-        raise AssertionError("flavour-scheme process file is not version 4")
+    if process_lines[0].split()[2] != "6":
+        raise AssertionError("flavour-scheme process file is not version 6")
     if f"flavour_scheme={scheme}" not in process_lines[2]:
         raise AssertionError("process file lost flavour-scheme metadata")
 
@@ -85,7 +85,7 @@ def generate_scheme(
 
     metadata = (workdir / "Library" / "amplitudes.bin").read_bytes()[:8]
     library_version, library_scheme = struct.unpack("=ii", metadata)
-    if (library_version, library_scheme) != (6, scheme):
+    if (library_version, library_scheme) != (8, scheme):
         raise AssertionError(
             "amplitude library lost format/flavour-scheme metadata: "
             f"{library_version}, {library_scheme}"

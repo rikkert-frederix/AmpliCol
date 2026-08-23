@@ -260,17 +260,14 @@ contains
                if (iand(current_list_local(icur)%bin,current_list_local(jcur)%bin).ne.0) cycle
                proc=current_list_local(icur)%iproc.and.current_list_local(jcur)%iproc
                if (proc%count_bits().eq.0) then
-                  ! combination of icur and jcur does not contribute to any of the processes
+                  ! Combination of icur and jcur does not contribute to any
+                  ! coefficient row.
                   cycle
-               elseif (proc%count_bits().ne.1) then
-                  write (*,*) 'A given amplitude should only contribute to one process',proc%count_bits()
-                  do i=1,this%nprocs
-                     if (proc%test_bit(i)) write (*,*) i
-                  enddo
-                  write (*,*) current_list_local(icur)%ext_type(1:n-1),'   , ',current_list_local(jcur)%ext_type(1)
-                  stop 1
                elseif (.not.proc%test_bit(iproc)) then
-                  ! one process, but it is not equal to process 'iproc'
+                  ! A family may contain several colour-order targets for the
+                  ! same external PDGs. Shared final currents then contribute
+                  ! to more than one target and are intentionally referenced
+                  ! once from every matching process segment.
                   cycle
                endif
                this%n_amps=this%n_amps+1

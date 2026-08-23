@@ -356,36 +356,91 @@ class ThreeQuarkLineMultiChannelRegression(unittest.TestCase):
                 )
                 self.assert_permutation_metadata(rows)
 
-    def test_serialization_appends_current_and_partner_maps(self):
+    def test_serialization_uses_global_v6_catalogues(self):
         proc = ("d~", "u~", "d", "u", "s", "s~", "z")
         finalized_rows(proc)
+        catalogues = process_list.BuildIntegrationCatalogues()
         output = process_list.WriteAllProcsIntoList()
-        self.assertEqual(output[0], "36")
+        self.assertEqual(
+            output[0], f"PERMUTATIONS {len(catalogues.permutations)}"
+        )
+        self.assertEqual(output[-1], "END_PROCESSES")
 
-        position = 2
-        for group in range(36):
-            header = tuple(int(value) for value in output[position].split())
-            self.assertEqual(header[0], group + 1)
-            nprocesses = header[1]
-            self.assertEqual(len(header), 4 + len(proc))
-            self.assertEqual(header[-1], 0)
+        position = 1
+        for permutation_id, permutation in enumerate(
+                catalogues.permutations, 1):
+            fields = output[position].split()
+            self.assertEqual(fields[:2], ["P", str(permutation_id)])
+            self.assertEqual(
+                tuple(map(int, fields[2:])),
+                tuple(label + 1 for label in permutation),
+            )
             position += 1
-            for _ in range(nprocesses):
+
+        position += 1
+        self.assertEqual(
+            output[position], f"PHASE_MAPS {len(catalogues.maps)}"
+        )
+        position += 1
+        for map_id, recipe in enumerate(catalogues.maps, 1):
+            fields = output[position].split()
+            self.assertEqual(fields[:3], ["M", str(map_id), str(len(recipe.topology))])
+            self.assertEqual(
+                tuple(map(int, fields[3:])),
+                tuple(label + 1 for label in recipe.order),
+            )
+            position += 1
+            for _ in recipe.topology:
                 fields = output[position].split()
-                npartners = int(fields[0])
-                offset = 1 + npartners + 2 * len(proc)
-                float(fields[offset])
-                permutation = tuple(
-                    int(value) for value in
-                    fields[offset + 1:offset + 1 + len(proc)]
-                )
-                flattened_partners = tuple(
-                    int(value) for value in fields[offset + 1 + len(proc):]
-                )
-                self.assertEqual(sorted(permutation), list(range(1, len(proc) + 1)))
-                self.assertEqual(len(flattened_partners), len(proc) * npartners)
+                self.assertEqual(fields[0], "N")
+                self.assertEqual(len(fields), 7)
+                tuple(map(int, fields[1:]))
                 position += 1
-            position += 3
+
+        position += 1
+        self.assertEqual(
+            output[position],
+            f"PARTNER_SETS {len(catalogues.partner_sets)}",
+        )
+        position += 1
+        for partner_set_id, partner_set in enumerate(
+                catalogues.partner_sets, 1):
+            fields = output[position].split()
+            self.assertEqual(
+                fields[:3], ["S", str(partner_set_id), str(len(partner_set))]
+            )
+            self.assertEqual(len(fields), 3 + 2 * len(partner_set))
+            for offset in range(3, len(fields), 2):
+                self.assertIn(int(fields[offset]), range(1, len(catalogues.maps) + 1))
+                self.assertIn(
+                    int(fields[offset + 1]),
+                    range(1, len(catalogues.permutations) + 1),
+                )
+            position += 1
+
+        position += 1
+        self.assertEqual(
+            output[position],
+            f"INTEGRATION_FAMILIES {len(catalogues.families)}",
+        )
+        position += 1
+        for family_id, family in enumerate(catalogues.families, 1):
+            fields = output[position].split()
+            self.assertEqual(
+                fields,
+                ["F", str(family_id), str(family.partner_set_id + 1),
+                 str(len(family.rows))],
+            )
+            position += 1
+            for _ in family.rows:
+                fields = output[position].split()
+                self.assertEqual(fields[0], "C")
+                self.assertEqual(len(fields), 2 + 2 * len(proc))
+                float(fields[-1])
+                position += 1
+
+        position += 1
+        self.assertEqual(position, len(output) - 1)
 
     def test_process_file_header_marks_permutation_metadata(self):
         saved_options = dict(process_list.options)
@@ -400,7 +455,7 @@ class ThreeQuarkLineMultiChannelRegression(unittest.TestCase):
             header = process_list.WriteUniqueProcsIntoList(
                 [("g", "g", "g", "g")]
             )[0]
-            self.assertEqual(header, "4 1 4")
+            self.assertEqual(header, "4 1 6")
         finally:
             process_list.process_provenance = saved_provenance
             process_list.options.clear()

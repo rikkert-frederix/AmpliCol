@@ -67,14 +67,48 @@ FAMILIES = (
 def parse_process_file(path: Path, family: str) -> list[tuple]:
     lines = path.read_text().splitlines()
     n_external, n_unique, version = map(int, lines[0].split())
-    if version != 4:
-        raise ValueError(f"expected process-file version 4, found {version}")
+    if version not in (4, 5, 6):
+        raise ValueError(f"unsupported process-file version {version}")
 
     options_line = next(line for line in lines[1:] if line.startswith("# options:"))
     flavour_scheme = int(
         next(token.split("=", 1)[1] for token in options_line.split()
              if token.startswith("flavour_scheme="))
     )
+
+    if version == 6:
+        idx = next(
+            index for index, line in enumerate(lines)
+            if line.startswith("INTEGRATION_FAMILIES ")
+        )
+        n_families = int(lines[idx].split()[1])
+        idx += 1
+        cases = []
+        for _ in range(n_families):
+            while idx < len(lines) and not lines[idx].strip():
+                idx += 1
+            header = lines[idx].split()
+            if header[0] != "F":
+                raise ValueError(f"expected family header, found {lines[idx]!r}")
+            family_id = int(header[1])
+            n_rows = int(header[3])
+            idx += 1
+            for row_id in range(1, n_rows + 1):
+                parts = lines[idx].split()
+                idx += 1
+                if not parts or parts[0] != "C":
+                    raise ValueError("expected coefficient row in v6 family")
+                process = [int(x) for x in parts[1 : 1 + n_external]]
+                order = [int(x) for x in parts[
+                    1 + n_external : 1 + 2 * n_external
+                ]]
+                order = direct_amplitude_order(process, order)
+                point = point_name(n_external, process)
+                cases.append((
+                    family, flavour_scheme, n_external, family_id, row_id,
+                    point, process, order,
+                ))
+        return cases
 
     idx = 1
     while idx < len(lines) and lines[idx].startswith("#"):
@@ -92,9 +126,9 @@ def parse_process_file(path: Path, family: str) -> list[tuple]:
         header = lines[idx].split()
         group_id = int(header[0])
         n_rows = int(header[1])
-        n_resonances = int(header[3 + n_external])
+        n_topology_nodes = int(header[3 + n_external])
         idx += 1
-        idx += n_resonances
+        idx += n_topology_nodes
 
         for row_id in range(1, n_rows + 1):
             parts = lines[idx].split()
@@ -148,6 +182,32 @@ def select_cases(
     return [cases[i] for i in indices]
 
 
+def unique_amplitude_cases(cases: list[tuple]) -> list[tuple]:
+    """Drop repetitions caused solely by multiple phase-space densities.
+
+    Diagram-derived maps intentionally clone a subprocess/colour-order row
+    across several integration groups. Matrix elements do not depend on that
+    group, so retaining those clones would repeat exactly the same regression
+    point without adding amplitude coverage.
+    """
+
+    unique = []
+    seen = set()
+    for case in cases:
+        _, flavour_scheme, n_external, _, _, point, process, order = case
+        key = (
+            flavour_scheme,
+            n_external,
+            point,
+            tuple(process),
+            tuple(order),
+        )
+        if key not in seen:
+            seen.add(key)
+            unique.append(case)
+    return unique
+
+
 def generate_cases(repo_root: Path) -> list[tuple]:
     process_list = repo_root / "process_list.py"
     all_cases = []
@@ -159,6 +219,7 @@ def generate_cases(repo_root: Path) -> list[tuple]:
             command = [sys.executable, str(process_list), "--serial", *args]
             subprocess.run(command, cwd=workdir, check=True)
             family_cases = parse_process_file(workdir / "processes.txt", family)
+            family_cases = unique_amplitude_cases(family_cases)
             family_cases = select_cases(family_cases, limit)
             all_cases.extend(family_cases)
     return all_cases

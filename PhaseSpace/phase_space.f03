@@ -1,5 +1,9 @@
 module phase_space_base
   implicit none
+  integer,parameter,public :: transform_breit_wigner=1
+  integer,parameter,public :: transform_massless_pole=2
+  integer,parameter,public :: transform_massive_power=3
+  integer,parameter,public :: transform_flat_contact=4
   type :: psv
      real(kind=8),dimension(:,:),allocatable,public :: p
      real(kind=8),dimension(:),allocatable,public :: x
@@ -20,9 +24,10 @@ module phase_space_base
      real(kind=8),dimension(:,:),allocatable :: pp,sqrt_s_min
      real(kind=8),dimension(:),allocatable :: x,invm,invm_min,invm_max,ETmin
      integer(kind=4),dimension(:),allocatable :: order
-     integer(kind=4),dimension(:),allocatable :: resonance_pdgs,resonance_masks
-     real(kind=8),dimension(:),allocatable :: resonance_masses,resonance_widths
-     integer(kind=4) :: nresonances=0
+     integer(kind=4),dimension(:),allocatable :: topology_pdgs,topology_masks,&
+          topology_left_masks,topology_kinds,topology_parameters
+     real(kind=8),dimension(:),allocatable :: topology_masses,topology_widths
+     integer(kind=4) :: ntopology_nodes=0
      logical :: t_channel
      logical :: can_invert_momenta=.false.
    contains
@@ -31,6 +36,7 @@ module phase_space_base
      procedure(phase_space_interface_compute_x_from_momenta),deferred :: compute_x_from_momenta
      procedure(phase_space_interface_cleanup),deferred :: cleanup
      procedure :: configure_resonances => phase_space_configure_resonances
+     procedure :: configure_topology => phase_space_configure_topology
   end type phase_space_type
   
   ! Declare the abstract interface for the procedures
@@ -68,25 +74,76 @@ contains
     integer(kind=4),intent(in) :: nresonances
     integer(kind=4),dimension(nresonances),intent(in) :: pdgs,masks
     real(kind=8),dimension(nresonances),intent(in) :: masses,widths
-    if (allocated(this%resonance_pdgs)) deallocate(this%resonance_pdgs)
-    if (allocated(this%resonance_masks)) deallocate(this%resonance_masks)
-    if (allocated(this%resonance_masses)) deallocate(this%resonance_masses)
-    if (allocated(this%resonance_widths)) deallocate(this%resonance_widths)
-    this%nresonances=nresonances
-    if (nresonances.eq.0) return
+    integer :: i
     if (any(masses.le.0d0) .or. any(widths.le.0d0)) then
        write (*,*) 'A mapped resonance must have positive mass and width',pdgs,masses,widths
        stop 1
     endif
-    allocate(this%resonance_pdgs(nresonances))
-    allocate(this%resonance_masks(nresonances))
-    allocate(this%resonance_masses(nresonances))
-    allocate(this%resonance_widths(nresonances))
-    this%resonance_pdgs=pdgs
-    this%resonance_masks=masks
-    this%resonance_masses=masses
-    this%resonance_widths=widths
+    call this%configure_topology(nresonances,pdgs,masks,&
+         [(0, i=1,nresonances)],masses,widths)
   end subroutine phase_space_configure_resonances
+
+  subroutine phase_space_configure_topology(this,nnodes,pdgs,masks,left_masks,&
+       masses,widths,kinds,parameters)
+    class(phase_space_type),intent(inout) :: this
+    integer(kind=4),intent(in) :: nnodes
+    integer(kind=4),dimension(nnodes),intent(in) :: pdgs,masks,left_masks
+    real(kind=8),dimension(nnodes),intent(in) :: masses,widths
+    integer(kind=4),dimension(nnodes),intent(in),optional :: kinds,parameters
+    integer :: i
+    if (allocated(this%topology_pdgs)) deallocate(this%topology_pdgs)
+    if (allocated(this%topology_masks)) deallocate(this%topology_masks)
+    if (allocated(this%topology_left_masks)) deallocate(this%topology_left_masks)
+    if (allocated(this%topology_kinds)) deallocate(this%topology_kinds)
+    if (allocated(this%topology_parameters)) deallocate(this%topology_parameters)
+    if (allocated(this%topology_masses)) deallocate(this%topology_masses)
+    if (allocated(this%topology_widths)) deallocate(this%topology_widths)
+    this%ntopology_nodes=nnodes
+    if (nnodes.eq.0) return
+    if (any(masses.lt.0d0) .or. any(widths.lt.0d0)) then
+       write (*,*) 'A topology node cannot have a negative mass or width',&
+            pdgs,masses,widths
+       stop 1
+    endif
+    allocate(this%topology_pdgs(nnodes))
+    allocate(this%topology_masks(nnodes))
+    allocate(this%topology_left_masks(nnodes))
+    allocate(this%topology_kinds(nnodes))
+    allocate(this%topology_parameters(nnodes))
+    allocate(this%topology_masses(nnodes))
+    allocate(this%topology_widths(nnodes))
+    this%topology_pdgs=pdgs
+    this%topology_masks=masks
+    this%topology_left_masks=left_masks
+    if (present(kinds)) then
+       if (any(kinds.lt.transform_breit_wigner) .or.&
+            any(kinds.gt.transform_flat_contact)) then
+          write (*,*) 'Unknown topology transform kind',kinds
+          stop 1
+       endif
+       this%topology_kinds=kinds
+    else
+       do i=1,nnodes
+          if (pdgs(i).eq.0 .or. pdgs(i).eq.-21 .or. pdgs(i).eq.-23 .or.&
+               abs(pdgs(i)).eq.26 .or. (pdgs(i).ge.125 .and. pdgs(i).le.127)) then
+             this%topology_kinds(i)=transform_flat_contact
+          elseif (masses(i).gt.0d0 .and. widths(i).gt.0d0) then
+             this%topology_kinds(i)=transform_breit_wigner
+          elseif (masses(i).eq.0d0) then
+             this%topology_kinds(i)=transform_massless_pole
+          else
+             this%topology_kinds(i)=transform_massive_power
+          endif
+       enddo
+    endif
+    if (present(parameters)) then
+       this%topology_parameters=parameters
+    else
+       this%topology_parameters=abs(pdgs)
+    endif
+    this%topology_masses=masses
+    this%topology_widths=widths
+  end subroutine phase_space_configure_topology
 
   subroutine finalize_psv(this)
     type(psv),intent(inout) :: this

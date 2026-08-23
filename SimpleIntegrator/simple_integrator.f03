@@ -172,7 +172,7 @@ module simple_integrator_mod
   type :: evnt
      real(kind=8),allocatable,dimension(:) :: x,f_abs
      real(kind=8) :: wgt,rnd,overwgt
-     integer :: iter,label
+     integer :: iter,label,map_id
      logical :: unwgt
   end type evnt
   ! Public driver object.  Users call init, then alternate get_points and
@@ -469,14 +469,15 @@ contains
   
   ! Return evaluated values for the most recent batch and trigger iteration
   ! finalisation when all active channels/integrals have enough statistics.
-  subroutine fill_points(this,npoints,f_abs,f,to_write,done)
+  subroutine fill_points(this,npoints,f_abs,f,to_write,done,map_ids)
     implicit none
     class(integrator),intent(inout) :: this
     integer,intent(in) :: npoints
     real(kind=8),dimension(npoints),intent(in) :: f,f_abs
     logical,dimension(npoints),intent(out) :: to_write
     logical,intent(out) :: done
-    integer :: i
+    integer,dimension(npoints),intent(in),optional :: map_ids
+    integer :: i,map_id
     done=.false.
     if (this%npoints_gen.eq.0) then
        write (*,*) 'ERROR: fill_points called before get_points'
@@ -491,7 +492,10 @@ contains
        stop 1
     endif
     do i=1,npoints
-       call this%channels(this%current_channel)%add_point(this%x(1,i),this%wgt(i),f_abs(i),f(i),to_write(i))
+       map_id=0
+       if (present(map_ids)) map_id=map_ids(i)
+       call this%channels(this%current_channel)%add_point(this%x(1,i),&
+            this%wgt(i),f_abs(i),f(i),to_write(i),map_id)
     enddo
     this%npoints_gen=0
     if (all(this%channels%done)) then
@@ -1245,29 +1249,32 @@ contains
   end subroutine integral_update_result_iter
   
   ! Add one evaluated point to a channel grid and to its active integral.
-  subroutine channel_add_point(this,x,wgt,f_abs,f,to_write)
+  subroutine channel_add_point(this,x,wgt,f_abs,f,to_write,map_id)
     implicit none
     class(channel),intent(inout) :: this
     real(kind=8),dimension(this%ndim),intent(in) :: x
     real(kind=8),intent(in) :: f_abs,f,wgt
     logical,intent(out) :: to_write
+    integer,intent(in) :: map_id
     integer :: i
     this%npoints_iter=this%npoints_iter+1
     do i=1,this%ndim
        call this%grids(i,this%current_iter)%add_point(x(i),f_abs)
     enddo
-    call this%integrals(this%current_integral)%add_point(x,wgt,f_abs,f,to_write)
+    call this%integrals(this%current_integral)%add_point(&
+         x,wgt,f_abs,f,to_write,map_id)
     if (all(this%integrals%done)) this%done=.true.
   end subroutine channel_add_point
 
   ! Accumulate one point in an integral and optionally save it as a candidate
   ! event for later final unweighting.
-  subroutine integral_add_point(this,x,wgt,f_abs,f,to_write)
+  subroutine integral_add_point(this,x,wgt,f_abs,f,to_write,map_id)
     implicit none
     class(integral),intent(inout) :: this
     real(kind=8),intent(in) :: f_abs,f,wgt
     real(kind=8),dimension(this%ndim),intent(in) :: x
     logical,intent(out) :: to_write
+    integer,intent(in) :: map_id
     logical :: enough
     this%npoints_iter=this%npoints_iter+1
     if (f_abs.gt.0d0) this%npoints_nonzero=this%npoints_nonzero+1
@@ -1276,7 +1283,7 @@ contains
     this%accum2(1)=this%accum2(1)+f_abs**2
     this%accum2(2)=this%accum2(2)+f**2
     if (this%current_iter.le.iters_without_evnts) call this%update_max_value(f_abs)
-    call this%check_write_evnt(x,wgt,f_abs,to_write,enough)
+    call this%check_write_evnt(x,wgt,f_abs,to_write,enough,map_id)
     if (this%npoints_nonzero.ge.this%npoints_requested .or. enough) this%done=.true.
   end subroutine integral_add_point
 
@@ -1289,17 +1296,19 @@ contains
   end subroutine update_max_value
   
   ! Decide whether a point should be written as a candidate event.
-  subroutine check_write_evnt(this,x,wgt,f_abs,to_write,enough)
+  subroutine check_write_evnt(this,x,wgt,f_abs,to_write,enough,map_id)
     implicit none
     class(integral),intent(inout) :: this
     real(kind=8),intent(in) :: f_abs,wgt
     real(kind=8),dimension(this%ndim),intent(in) :: x
     logical,intent(out) :: to_write,enough
+    integer,intent(in) :: map_id
     real(kind=8) :: rnd
     to_write=.false.
     enough=.false.
     if (turn_off_evnt_generation) return
     if (this%current_iter.le.iters_without_evnts) return
+    if (f_abs.le.0d0) return
     rnd=ran2()
     if (f_abs.gt.this%f_max(this%current_iter)*rnd) then
        to_write=.true.
@@ -1316,6 +1325,7 @@ contains
        this%evnt_list(this%nevnt_in_list)%x=x
        this%evnt_list(this%nevnt_in_list)%iter=this%current_iter
        this%evnt_list(this%nevnt_in_list)%label=evnt_label
+       this%evnt_list(this%nevnt_in_list)%map_id=map_id
        this%nevts_unw_gen=this%nevts_unw_gen+1
        if (this%nevts_unw_req.gt.0 .and. &
             this%nevts_unw_gen.gt.1.5d0*this%nevts_unw_req) enough=.true.
@@ -1324,17 +1334,29 @@ contains
 
   ! Return final per-event weights for all candidate events written by the
   ! caller during the get_points/fill_points loop.
-  subroutine assign_evnt_wgts(this,wgts)
+  subroutine assign_evnt_wgts(this,wgts,map_ids)
     implicit none
     class(integrator) :: this
     real(kind=8),allocatable,dimension(:,:),intent(out) :: wgts
-    integer :: i,j
+    integer,allocatable,dimension(:),intent(out),optional :: map_ids
+    integer :: i,j,k,label
     real(kind=8) :: nominal_wgt
     allocate(wgts(3,evnt_label))
+    if (present(map_ids)) then
+       allocate(map_ids(evnt_label))
+       map_ids=0
+    endif
     nominal_wgt=this%res(1)
     do i=1,this%nchannel
        do j=1,this%channels(i)%nintegral
           call this%channels(i)%integrals(j)%compute_wgts(nominal_wgt,wgts)
+          if (present(map_ids)) then
+             do k=1,this%channels(i)%integrals(j)%nevnt_in_list
+                label=this%channels(i)%integrals(j)%evnt_list(k)%label
+                map_ids(label)=&
+                     this%channels(i)%integrals(j)%evnt_list(k)%map_id
+             enddo
+          endif
        enddo
     enddo
   end subroutine assign_evnt_wgts

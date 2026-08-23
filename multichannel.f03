@@ -1,124 +1,108 @@
 module multichannel
   use handling_processes
   use simple_integrator_mod
+  use phase_space_gen23_mod, only: phase_space_gen23,&
+       gen23_momentum_cache,build_gen23_momentum_cache
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
 !  use mint_module
 contains
-  subroutine compute_multichannel_weight(ichan,iint,ps,weight)
-    ! Computes the multichannel weight 'weight' when there are
-    ! 'chans(0)' channels (that are listed in the array 'chans(1:)') and
-    ! the current channel is 'ichan'. The momenta 'p' have been
-    ! generate with phase-space jacobian 'jac' using the random
-    ! variables 'x' within the channel 'ichan'.
-    !
-    ! weight = 1/( Jref_{ichan}*[ sum_{i=1}^{chans(0)} 1/Jref_i ] )
-    !
-    ! with Jref_i the phase-space Jacobian times the fixed reference-grid
-    ! Jacobian.  The live grid Jacobian remains in the generated integrand.
+  subroutine compute_family_multichannel_weight(ifamily,ps,weight)
+    ! Evaluate the fixed-prior hierarchical mixture owned by one family.
+    ! Every submap uses the family's frozen reference grid in the partition,
+    ! while the selected forward contribution retains the shared live-grid
+    ! Jacobian supplied by the integrator.
     implicit none
-    integer,intent(in) :: ichan,iint
+    integer,intent(in) :: ifamily
     type(psv),intent(in) :: ps
+    real(kind=8),intent(out) :: weight
     type(psv) :: ps_local
-    real(kind=8),dimension(0:3,pgl(ichan)%next) :: p_target
-    real(kind=8),dimension(pgl(ichan)%nproc),intent(out) :: weight
-    integer :: i,iproc,k,a,iproc_first,iproc_last,self_count
-    real(kind=8) :: vol_ichan,vol,denominator,density_ratio
+    type(gen23_momentum_cache),dimension(:),allocatable :: caches
+    logical,dimension(:),allocatable :: cache_ready
+    real(kind=8),dimension(0:3,pgl(ifamily)%next) :: p_target
+    real(kind=8),dimension(pgl(ifamily)%nsubmaps) :: densities
+    real(kind=8) :: reference_wgt,total_density
+    integer :: imap,a,selected,permutation_id
+
     weight=0d0
-    if (keep_processes_separate) then
-       iproc_first=iint
-       iproc_last=iint
-    else
-       iproc_first=1
-       iproc_last=pgl(ichan)%nproc
-       do iproc=2,pgl(ichan)%nproc
-          if (any(pgl(ichan)%phase_space_permutations(:,iproc).ne.&
-               pgl(ichan)%phase_space_permutations(:,1))) then
-             write (*,*) '--combine_subprocesses is incompatible with different phase-space permutations'
-             stop 1
-          endif
-       enddo
+    densities=0d0
+    selected=pgl(ifamily)%selected_map
+    if (selected.lt.1 .or. selected.gt.pgl(ifamily)%nsubmaps) then
+       write (*,*) 'No valid selected phase map in integration family',&
+            ifamily,selected
+       stop 1
     endif
-    if (.not. use_colour_singlet_multichannel) then
-       do iproc=iproc_first,iproc_last
-          weight(iproc)=1d0/dble(pgl(ichan)%multichan%number_of_channels(iproc))
-       enddo
+    if (.not.use_colour_singlet_multichannel) then
+       weight=1d0
        return
     endif
-    if (.not.pgl(ichan)%phase_space%can_invert_momenta) then
-       ! HAAG and the pT-based generator do not implement the inverse map.
-       ! Use the same uniform partition in every partner channel rather than
-       ! attempting a point-dependent multichannel weight.
-       do iproc=iproc_first,iproc_last
-          weight(iproc)=1d0/dble(pgl(ichan)%multichan%number_of_channels(iproc))
-       enddo
+    if (pgl(ifamily)%nsubmaps.eq.1) then
+       weight=1d0
        return
     endif
     p_target=ps%p
-    ! The generated point retains its live-grid Jacobian in the integrand, but
-    ! the multichannel partition is built exclusively from the fixed reference
-    ! grids.  During warm-up the reference follows the live grid.
-    call simple_integrator%compute_reference_wgt_from_x(ichan,ps%x,vol_ichan)
-    if (ps%jac.le.0d0 .or. .not.ieee_is_finite(ps%jac) .or. &
-         vol_ichan.le.0d0 .or. .not.ieee_is_finite(vol_ichan)) then
-       write (*,*) 'Unexpected failure of the current multichannel map',&
-            ichan,ps%jac,vol_ichan
-       write (99,*) 'Unexpected failure of the current multichannel map',&
-            ichan,ps%jac,vol_ichan
+    allocate(caches(nphase_permutations))
+    allocate(cache_ready(nphase_permutations))
+    cache_ready=.false.
+    do imap=1,pgl(ifamily)%nsubmaps
+       if (.not.pgl(ifamily)%phase_maps(imap)%phase_space%can_invert_momenta) then
+          weight=1d0
+          return
+       endif
+       ps_local=ps
+       do a=1,pgl(ifamily)%next
+          ps_local%p(:,a)=p_target(:,&
+               pgl(ifamily)%phase_maps(imap)%permutation(a))
+       enddo
+       if (imap.eq.selected) then
+          ps_local%jac=ps%jac
+          ps_local%x(1:pgl(ifamily)%ndim)=ps%x(1:pgl(ifamily)%ndim)
+       else
+          permutation_id=pgl(ifamily)%phase_maps(imap)%permutation_id
+          select type (phase_map=>&
+               pgl(ifamily)%phase_maps(imap)%phase_space)
+          type is (phase_space_gen23)
+             if (.not.cache_ready(permutation_id)) then
+                call build_gen23_momentum_cache(ps_local%p,&
+                     caches(permutation_id))
+                cache_ready(permutation_id)=.true.
+             endif
+             call phase_map%compute_x_from_cache(ps_local,&
+                  caches(permutation_id))
+          class default
+             write (*,*) 'A multi-map integration family requires gen23',&
+                  ifamily,imap
+             stop 1
+          end select
+       endif
+       ! Partner inversions outside their support contribute zero silently.
+       if (ps_local%jac.le.0d0 .or. .not.ieee_is_finite(ps_local%jac)) cycle
+       if (any(.not.ieee_is_finite(&
+            ps_local%x(1:pgl(ifamily)%ndim)))) cycle
+       if (any(ps_local%x(1:pgl(ifamily)%ndim).le.0d0) .or.&
+            any(ps_local%x(1:pgl(ifamily)%ndim).ge.1d0)) cycle
+       call simple_integrator%compute_reference_wgt_from_x(&
+            ifamily,ps_local%x,reference_wgt)
+       if (reference_wgt.le.0d0 .or.&
+            .not.ieee_is_finite(reference_wgt)) cycle
+       densities(imap)=1d0/(ps_local%jac*reference_wgt)
+       if (.not.ieee_is_finite(densities(imap)) .or.&
+            densities(imap).le.0d0) densities(imap)=0d0
+    enddo
+    if (densities(selected).le.0d0) then
+       write (*,*) 'Unexpected failure of selected family phase map',&
+            ifamily,selected,ps%jac
+       write (99,*) 'Unexpected failure of selected family phase map',&
+            ifamily,selected,ps%jac
        stop 1
     endif
-    do iproc=iproc_first,iproc_last
-       denominator=0d0
-       self_count=0
-       do k=1,pgl(ichan)%multichan%number_of_channels(iproc)
-          if (pgl(ichan)%multichan%channels(k,iproc).eq.ichan .and. all(&
-               pgl(ichan)%multichan%channel_permutations(:,k,iproc).eq.&
-               pgl(ichan)%phase_space_permutations(:,iproc))) &
-               self_count=self_count+1
-       enddo
-       if (self_count.ne.1) then
-          write (*,*) 'Could not identify exactly one current multichannel density',ichan,iproc,self_count
-          stop 1
-       endif
-       do k=1,pgl(ichan)%multichan%number_of_channels(iproc)
-          i=pgl(ichan)%multichan%channels(k,iproc)
-          if (i.eq.ichan .and. all(&
-               pgl(ichan)%multichan%channel_permutations(:,k,iproc).eq.&
-               pgl(ichan)%phase_space_permutations(:,iproc))) then
-             denominator=denominator+1d0
-             cycle
-          endif
-          ps_local=ps
-          do a=1,pgl(ichan)%next
-             ps_local%p(:,a)=p_target(:,&
-                  pgl(ichan)%multichan%channel_permutations(a,k,iproc))
-          enddo
-          call pgl(i)%phase_space%compute_x_from_momenta(ps_local)
-          ! A point outside a partner map's support has zero density in that
-          ! map.  It must be omitted from the MIS denominator; replacing the
-          ! whole point by a local 1/N weight would not form a partition of
-          ! unity across the partner channels.
-          if (ps_local%jac.le.0d0 .or. .not.ieee_is_finite(ps_local%jac)) cycle
-          if (any(.not.ieee_is_finite(ps_local%x(1:pgl(i)%ndim)))) cycle
-          if (any(ps_local%x(1:pgl(i)%ndim).le.0d0) .or. &
-               any(ps_local%x(1:pgl(i)%ndim).ge.1d0)) cycle
-          call simple_integrator%compute_reference_wgt_from_x(i,ps_local%x,vol)
-          if (vol.le.0d0 .or. .not.ieee_is_finite(vol)) cycle
-          density_ratio=ps%jac*vol_ichan/(ps_local%jac*vol)
-          if (density_ratio.le.0d0 .or. &
-               .not.ieee_is_finite(density_ratio)) cycle
-          denominator=denominator+density_ratio
-       enddo
-       if (denominator.gt.0d0 .and. ieee_is_finite(denominator)) then
-          weight(iproc)=1d0/denominator
-       else
-          write (*,*) 'Unexpected invalid multichannel denominator',&
-               ichan,iproc,denominator
-          write (99,*) 'Unexpected invalid multichannel denominator',&
-               ichan,iproc,denominator
-          stop 1
-       endif
-    enddo
-  end subroutine compute_multichannel_weight
+    total_density=sum(densities)
+    if (total_density.le.0d0 .or. .not.ieee_is_finite(total_density)) then
+       write (*,*) 'Invalid family phase-map density sum',ifamily,total_density
+       stop 1
+    endif
+    weight=dble(pgl(ifamily)%nsubmaps)*densities(selected)/total_density
+    deallocate(caches,cache_ready)
+  end subroutine compute_family_multichannel_weight
 
   subroutine setup_optimised_multichannel_weight_computation(pgl)
     implicit none

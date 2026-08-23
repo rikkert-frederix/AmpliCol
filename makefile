@@ -211,7 +211,8 @@ simple_integrator_multichannel_regression.o: \
 resonance_phase_space_regression.o: tests/resonance_phase_space_regression.f03 phase_space_gen23.o
 	$(FC) $(FFLAGS) -fno-finite-math-only -c -I. -IPhaseSpace $< -o $@
 
-tests/matrix_elements/cases.dat: tests/matrix_elements/generate_matrix_cases.py process_list.py
+tests/matrix_elements/cases.dat: tests/matrix_elements/generate_matrix_cases.py \
+		process_list.py diagram_channels.py
 	$(PYTHON) tests/matrix_elements/generate_matrix_cases.py --output $@
 
 tests/matrix_elements/golden.dat: matrix_element_regression tests/matrix_elements/cases.dat
@@ -241,7 +242,7 @@ test_flavour_scheme_yukawa: flavour_scheme_yukawa_regression
 	./flavour_scheme_yukawa_regression
 
 test_flavour_scheme_end_to_end: amplicol_generate \
-		tests/flavour_scheme_end_to_end_regression.py process_list.py
+		tests/flavour_scheme_end_to_end_regression.py process_list.py diagram_channels.py
 	$(PYTHON) tests/flavour_scheme_end_to_end_regression.py \
 		--generator $(CURDIR)/amplicol_generate \
 		--process-list $(CURDIR)/process_list.py \
@@ -254,11 +255,12 @@ test_three_quark_line_reweight: three_quark_line_reweight_regression \
 		--reweighter $(CURDIR)/amplicol_reweight --input-card $(CURDIR)/run_card.dat
 
 test_three_quark_line_multichannel: \
-		process_list.py tests/process_list_three_quark_multichannel_regression.py
+		process_list.py diagram_channels.py \
+		tests/process_list_three_quark_multichannel_regression.py
 	$(PYTHON) tests/process_list_three_quark_multichannel_regression.py
 
 test_process_list_resonances: \
-		process_list.py tests/process_list_resonance_regression.py
+		process_list.py diagram_channels.py tests/process_list_resonance_regression.py
 	$(PYTHON) tests/process_list_resonance_regression.py
 
 test_run_parameters: run_parameters_regression
@@ -279,6 +281,7 @@ test_simple_integrator_multichannel: simple_integrator_multichannel_regression
 
 test_resonance_multichannel_end_to_end: amplicol_generate amplicol_reweight \
 		tests/resonance_multichannel_end_to_end_regression.py process_list.py \
+		diagram_channels.py \
 		tests/input/resonance_multichannel_run_card.dat
 	$(PYTHON) tests/resonance_multichannel_end_to_end_regression.py \
 		--generator $(CURDIR)/amplicol_generate \
