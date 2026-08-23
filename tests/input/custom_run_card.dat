@@ -11,9 +11,9 @@
   w_width=2.7d0
   higgs_mass=126d0
   higgs_width=0.02d0
-  sw=0.5d0
   alphaS_MZ=0.121d0
   alphaEW=0.008d0
+  heft_kappa=1.7d0
   sqrts=13000d0
   scale_choice=5
   include_pdf=.false.

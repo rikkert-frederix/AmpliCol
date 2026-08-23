@@ -21,7 +21,7 @@ required information. Usage of the code is as follows:
 
 *****************************
 $ ./process_list.py -h
-usage: process_list.py [-h] [-FS [1-5]] [-3] [-s] [-cc] process_string
+usage: process_list.py [-h] [-FS [1-5]] [-3] [-s] [-cc] [--heft] process_string
 
 Generate the full list of processes, ordered by phase-space order
 
@@ -35,6 +35,7 @@ options:
   -3, --include_3qqbar  Include processes with up to 3 quark lines
   -s, --serial          Do not use multi-processes (parallel execution). Useful for debugging.
   -cc, --include_cc     Include flavour-changing processes
+  --heft                Enable the CP-even single-Higgs gluon effective interaction
 *****************************
 
 Note that, you should NOT use 'p p > j j j' as process_string for
@@ -69,9 +70,26 @@ single- and double-resonant four-lepton alternatives), H -> ZZ/WW ->
 leptons, and t -> b W (or the charge-conjugate decay), with an explicit
 W or a nested leptonic W decay. Competing WW and ZZ histories remain
 separate multichannel densities of the same complete matrix element;
-no diagrams or interference terms are removed. The generated version-4
+no diagrams or interference terms are removed. The generated version-7
 process file records the original request/options and, for each density,
 the resonance PDG and occurrence-tagged external descendants.
+
+For HEFT production, request exactly one explicit final-state Higgs and
+enable the model while building the process file, for example
+
+./process_list.py --heft 'p p > h 1j'
+
+HEFT is opt-in: a process file produced without '--heft' contains only
+the ordinary model vertices. The version-7 process-file header records
+the choice, and older process files must be regenerated. For every
+single colour flow, process_list.py creates cyclic Higgs placements as
+separate phase-space densities while retaining one matrix-element
+coefficient for that flow. This covers all neighbouring coloured
+antennae without duplicating the colour coefficient.
+
+Version-7 process files combine the HEFT flag with the flavour-scheme,
+phase-map, resonance-topology and integration-family metadata. Older
+process files must be regenerated.
 
 
 
@@ -103,6 +121,23 @@ process file. Active flavours remain exactly massless even when a
 non-zero value is present in the run card. The same effective mass is
 used for external kinematics, propagators and the corresponding Higgs
 Yukawa coupling.
+
+The implemented CP-even HEFT interaction is
+
+  L_HEFT = -g_H/4 h G^a_(mu nu) G^(a,mu nu),
+  g_H(mu_R) = heft_kappa alpha_s(mu_R)/(3 pi heft_vev).
+
+'heft_kappa' is set in run_card.dat. The on-shell weak-mixing sine and vev are
+dependent parameters,
+
+  sw = sqrt(1 - w_mass^2/z_mass^2),
+  heft_vev = 2 w_mass sw/sqrt(4 pi alphaEW),
+
+and cannot be set independently. Amplitudes contain at most one HEFT
+insertion. Ordinary zero-insertion SM Higgs diagrams are retained in the same
+coefficient, so their interference with HEFT is included. The Hgg, Hggg and
+Hgggg interactions all use the event's renormalisation-scale alpha_s and
+per-vertex coupling powers.
 
 By default, the effective width of every massive particle requested in
 the physical final state is set to zero globally before any subprocess
@@ -183,7 +218,8 @@ these values and rejects an incompatible input card when
 that case. An amplitude library must be created and used with the same
 '--combine_subprocesses' setting.
 Collider, cut, scale and PDF settings may be changed without recreating
-the amplitude library.
+the amplitude library. HEFT kappa and vev are also runtime coupling
+parameters and do not require recreating a HEFT amplitude library.
 
 
 3. Reweighting
@@ -238,6 +274,19 @@ execution of the amplicol_reweight code.
 Generated LHE files record the flavour scheme in their header. The
 reweighter reads this metadata before building its physics model and
 preserves it in the reweighted output.
+
+The HEFT flag, kappa and vev are stored in the AmpliCol LHE header and
+preserved in the reweighted file. A HEFT LHE must contain exactly one
+Higgs in every event, and reweighting rejects a run card whose kappa or
+vev differs from the generation metadata. The full-colour contraction
+includes every colour-flow interference term, including SM--HEFT
+interference inside each colour coefficient.
+
+The HEFT implementation, generated-amplitude path, fixed MadGraph
+matrix-element comparisons, and LHE full-colour reweighting can be
+checked with
+
+make test_heft
 
 
 

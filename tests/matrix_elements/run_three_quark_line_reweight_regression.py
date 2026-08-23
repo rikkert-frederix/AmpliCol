@@ -14,7 +14,7 @@ from pathlib import Path
 EVENT = """<LesHouchesEvents version="3.0">
 <header>
 <flavour_scheme> 4 </flavour_scheme>
-6 0
+6 0 2 0 1.0 0.0
 <nevents> 1 </nevents>
 </header>
 <init>

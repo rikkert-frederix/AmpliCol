@@ -2,7 +2,7 @@ module read_process_file
   use handling_processes
   use run_parameters, only: ignore_final_state_width_fix,flavour_scheme,set_flavour_scheme
   implicit none
-  integer,parameter :: supported_process_file_version=6
+  integer,parameter :: supported_process_file_version=7
   integer :: sf_nprocs
   integer,dimension(:,:),allocatable :: unique_procs,processes,color_orders,multi_chans
   integer,dimension(:,:),allocatable :: phase_space_permutations
@@ -16,6 +16,7 @@ module read_process_file
      integer :: npairs=0
      integer,dimension(:),allocatable :: map_ids,permutation_ids
   end type partner_set_file
+  logical :: process_heft_enabled=.false.
 contains
   logical function is_supported_process_file_version(version)
     implicit none
@@ -30,7 +31,7 @@ contains
     integer :: key_position,value_start,value_length,value_end,ios
 
     if (index(adjustl(options_line),'# options:').ne.1) then
-       write (*,*) 'Missing process options in version-6 process file'
+       write (*,*) 'Missing process options in version-7 process file'
        stop 1
     endif
     key_position=index(options_line,'flavour_scheme=')
@@ -58,7 +59,7 @@ contains
     character(len=*),intent(in) :: filename
     character(len=65536) :: buffer
     integer :: iunit,ios,n_external,n_unique,process_file_version
-    integer :: file_flavour_scheme
+    integer :: file_flavour_scheme,heft_flag
 
     open(newunit=iunit,file=trim(filename),status='old',action='read',iostat=ios)
     if (ios.ne.0) then
@@ -70,7 +71,7 @@ contains
        write (*,*) 'Could not read process-file header while reading model metadata'
        stop 1
     endif
-    read(buffer,*,iostat=ios) n_external,n_unique,process_file_version
+    read(buffer,*,iostat=ios) n_external,n_unique,process_file_version,heft_flag
     if (ios.ne.0 .or. n_external.lt.3 .or. n_unique.lt.1) then
        write (*,*) 'Malformed process-file header while reading model metadata'
        stop 1
@@ -80,33 +81,46 @@ contains
             process_file_version
        stop 1
     endif
+    if (heft_flag.ne.0 .and. heft_flag.ne.1) then
+       write (*,*) 'HEFT process flag must be zero or one',heft_flag
+       stop 1
+    endif
     read(iunit,'(a)',iostat=ios) buffer
     if (ios.ne.0 .or. index(adjustl(buffer),'# process:').ne.1) then
-       write (*,*) 'Missing process provenance in version-6 process file'
+       write (*,*) 'Missing process provenance in version-7 process file'
        stop 1
     endif
     read(iunit,'(a)',iostat=ios) buffer
     close(iunit)
     if (ios.ne.0) then
-       write (*,*) 'Missing process options in version-6 process file'
+       write (*,*) 'Missing process options in version-7 process file'
        stop 1
     endif
     call parse_process_options(buffer,file_flavour_scheme)
     call set_flavour_scheme(file_flavour_scheme)
+    process_heft_enabled=heft_flag.eq.1
+    call phys_model%set_heft_enabled(process_heft_enabled)
   end subroutine configure_flavour_scheme_from_process_file
+
+  subroutine configure_model_from_process_file(filename)
+    implicit none
+    character(len=*),intent(in) :: filename
+    call configure_flavour_scheme_from_process_file(filename)
+  end subroutine configure_model_from_process_file
 
   subroutine apply_final_state_widths_from_process_file(filename)
     implicit none
     character(len=*),intent(in) :: filename
     character(len=65536) :: buffer
     character(len=1) :: record_kind
-    integer :: iunit,ios,n_external,n_unique,version,iproc
+    integer :: iunit,ios,n_external,n_unique,version,heft_flag,iproc
     integer :: topology_pdg,itopology_species,file_flavour_scheme
     integer,dimension(4),parameter :: topology_species=[6,23,24,25]
     logical,dimension(4) :: mapped_species
     real(kind=8),dimension(4) :: nominal_widths
     integer,dimension(:,:),allocatable :: physical_process
 
+    call configure_model_from_process_file(filename)
     if (ignore_final_state_width_fix) return
     mapped_species=.false.
     do itopology_species=1,size(topology_species)
@@ -123,7 +137,7 @@ contains
        write (*,*) 'Could not read process-file header while applying final-state widths'
        stop 1
     endif
-    read(buffer,*,iostat=ios) n_external,n_unique,version
+    read(buffer,*,iostat=ios) n_external,n_unique,version,heft_flag
     if (ios.ne.0 .or. n_external.lt.3 .or. n_unique.lt.1) then
        write (*,*) 'Malformed process-file header while applying final-state widths'
        stop 1
@@ -134,12 +148,12 @@ contains
     endif
     read(iunit,'(a)',iostat=ios) buffer
     if (ios.ne.0 .or. index(adjustl(buffer),'# process:').ne.1) then
-       write (*,*) 'Missing process provenance in version-6 process file'
+       write (*,*) 'Missing process provenance in version-7 process file'
        stop 1
     endif
     read(iunit,'(a)',iostat=ios) buffer
     if (ios.ne.0) then
-       write (*,*) 'Missing process options in version-6 process file'
+       write (*,*) 'Missing process options in version-7 process file'
        stop 1
     endif
     call parse_process_options(buffer,file_flavour_scheme)
@@ -265,7 +279,7 @@ contains
     character(len=80),intent(in) :: filename
     character(len=65536) :: buffer
     character(len=32) :: marker
-    integer :: ios,process_file_version,file_flavour_scheme,ndim
+    integer :: ios,process_file_version,file_flavour_scheme,heft_flag,ndim
     integer :: iproc,imap,inode,ipermutation,iset,ifamily,iflav
     integer :: map_index,node_pdg,node_kind,node_parameter,node_mask
     integer :: node_left,node_right,permutation_index,partner_set_index
@@ -289,23 +303,31 @@ contains
        write (*,*) 'Could not read process-file header'
        stop 1
     endif
-    read(buffer,*,iostat=ios) next,nproc_unique,process_file_version
+    read(buffer,*,iostat=ios) next,nproc_unique,process_file_version,heft_flag
     if (ios.ne.0 .or. next.lt.3 .or. nproc_unique.lt.1) then
        write (*,*) 'Malformed process-file header'
        stop 1
     endif
     if (.not.is_supported_process_file_version(process_file_version)) then
-       write (*,*) 'Only version-6 process files are supported; regenerate processes.txt'
+       write (*,*) 'Only version-7 process files are supported; regenerate processes.txt'
+       stop 1
+    endif
+    if (heft_flag.ne.0 .and. heft_flag.ne.1) then
+       write (*,*) 'HEFT process flag must be zero or one',heft_flag
+       stop 1
+    endif
+    if ((heft_flag.eq.1).neqv.phys_model%heft_enabled) then
+       write (*,*) 'Process-file HEFT mode does not match initialized model'
        stop 1
     endif
     read(10,'(a)',iostat=ios) buffer
     if (ios.ne.0 .or. index(adjustl(buffer),'# process:').ne.1) then
-       write (*,*) 'Missing process provenance in version-6 process file'
+       write (*,*) 'Missing process provenance in version-7 process file'
        stop 1
     endif
     read(10,'(a)',iostat=ios) buffer
     if (ios.ne.0) then
-       write (*,*) 'Missing process options in version-6 process file'
+       write (*,*) 'Missing process options in version-7 process file'
        stop 1
     endif
     call parse_process_options(buffer,file_flavour_scheme)
@@ -315,8 +337,16 @@ contains
        stop 1
     endif
 
-    ndim=3*(next-2)-4
-    if (include_pdf) ndim=ndim+2
+    if (next.eq.3) then
+       if (.not.include_pdf) then
+          write (*,*) 'One-body cross sections require include_pdf=.true.'
+          stop 1
+       endif
+       ndim=1
+    else
+       ndim=3*(next-2)-4
+       if (include_pdf) ndim=ndim+2
+    endif
     allocate(unique_procs(next,nproc_unique))
     do iproc=1,nproc_unique
        read(10,*,iostat=ios) unique_procs(:,iproc)
@@ -334,7 +364,7 @@ contains
     read(buffer,*,iostat=ios) marker,nphase_permutations
     if (ios.ne.0 .or. trim(marker).ne.'PERMUTATIONS' .or.&
          nphase_permutations.lt.1) then
-       write (*,*) 'Missing version-6 permutation catalogue'
+       write (*,*) 'Missing version-7 permutation catalogue'
        stop 1
     endif
     allocate(phase_permutation_catalogue(next,nphase_permutations))
@@ -364,7 +394,7 @@ contains
     read(buffer,*,iostat=ios) marker,nphase_maps
     if (ios.ne.0 .or. trim(marker).ne.'PHASE_MAPS' .or.&
          nphase_maps.lt.1) then
-       write (*,*) 'Missing version-6 phase-map catalogue'
+       write (*,*) 'Missing version-7 phase-map catalogue'
        stop 1
     endif
     allocate(phase_map_catalogue(nphase_maps))
@@ -478,7 +508,7 @@ contains
     call read_next_nonblank(10,buffer,ios)
     read(buffer,*,iostat=ios) marker,nsets
     if (ios.ne.0 .or. trim(marker).ne.'PARTNER_SETS' .or. nsets.lt.1) then
-       write (*,*) 'Missing version-6 partner-set catalogue'
+       write (*,*) 'Missing version-7 partner-set catalogue'
        stop 1
     endif
     allocate(partner_sets(nsets))
@@ -522,7 +552,7 @@ contains
     read(buffer,*,iostat=ios) marker,nfamilies
     if (ios.ne.0 .or. trim(marker).ne.'INTEGRATION_FAMILIES' .or.&
          nfamilies.lt.1 .or. nfamilies.ne.nsets) then
-       write (*,*) 'Malformed version-6 integration-family catalogue'
+       write (*,*) 'Malformed version-7 integration-family catalogue'
        stop 1
     endif
     ngroups=nfamilies
@@ -666,7 +696,7 @@ contains
 
     call read_next_nonblank(10,buffer,ios)
     if (ios.ne.0 .or. trim(buffer).ne.'END_PROCESSES') then
-       write (*,*) 'Missing END_PROCESSES marker in version-6 process file'
+       write (*,*) 'Missing END_PROCESSES marker in version-7 process file'
        stop 1
     endif
     close(10)
@@ -677,7 +707,8 @@ contains
   subroutine read_processes_from_file_legacy(filename)
     implicit none
     character(len=80) :: filename
-    integer :: iproc,igroup,icheck,nproc_in_group,max_channels,iflav,ndim,process_file_version
+    integer :: iproc,igroup,icheck,nproc_in_group,max_channels,iflav,ndim,&
+         process_file_version,heft_flag
     integer :: file_flavour_scheme
     integer :: ntopology_nodes,itopology,topology_pdg,nlabels,nleft,label,mask,&
          left_mask,overlap
@@ -693,7 +724,7 @@ contains
        write (*,*) 'Could not read the process-file header'
        stop 1
     endif
-    read(buff,*,iostat=ios) next,nproc_unique,process_file_version
+    read(buff,*,iostat=ios) next,nproc_unique,process_file_version,heft_flag
     if (ios.ne.0) then
        write (*,*) 'Malformed process-file header'
        stop 1
@@ -709,12 +740,12 @@ contains
     endif
     read(10,'(a)',iostat=ios) buff
     if (ios.ne.0 .or. index(adjustl(buff),'# process:').ne.1) then
-       write (*,*) 'Missing process provenance in version-4 process file'
+       write (*,*) 'Missing process provenance in version-7 process file'
        stop 1
     endif
     read(10,'(a)',iostat=ios) buff
     if (ios.ne.0) then
-       write (*,*) 'Missing process options in version-4 process file'
+       write (*,*) 'Missing process options in version-7 process file'
        stop 1
     endif
     call parse_process_options(buff,file_flavour_scheme)
@@ -723,8 +754,24 @@ contains
             file_flavour_scheme,flavour_scheme
        stop 1
     endif
-    ndim=3*(next-2)-4
-    if (include_pdf) ndim=ndim+2
+    if (heft_flag.ne.0 .and. heft_flag.ne.1) then
+       write (*,*) 'HEFT process flag must be zero or one',heft_flag
+       stop 1
+    endif
+    process_heft_enabled=heft_flag.eq.1
+    call phys_model%set_heft_enabled(process_heft_enabled)
+    if (next.eq.3) then
+       if (.not.include_pdf) then
+          write (*,*) 'One-body cross sections require include_pdf=.true.'
+          stop 1
+       endif
+       ! The partonic invariant mass is fixed by the final-state mass.  Only
+       ! the boost rapidity remains to be integrated.
+       ndim=1
+    else
+       ndim=3*(next-2)-4
+       if (include_pdf) ndim=ndim+2
+    endif
     allocate(unique_procs(1:next,1:nproc_unique))
     do iproc=1,nproc_unique
        read(10,*) unique_procs(1:next,iproc)
@@ -878,7 +925,7 @@ contains
                   idenCOfactor,phase_permutation(1:next),&
                   channel_permutations(1:next,1:ichans(0))
              if (ios.ne.0) then
-                write (*,*) 'Malformed version-4 subprocess row; phase-space maps are required'
+                write (*,*) 'Malformed version-7 subprocess row; phase-space maps are required'
                 stop 1
              endif
              if (any(ichans(1:ichans(0)).lt.1) .or. any(ichans(1:ichans(0)).gt.ngroups)) then
@@ -990,6 +1037,7 @@ contains
 
   subroutine check_unique_processes()
     use phase_space_gen23_mod
+    use phase_space_onebody_mod
     use cuts
     implicit none
     integer :: i,j,iproc,ih
@@ -999,7 +1047,11 @@ contains
     real(kind=8),dimension(pgl_unique%ndim) :: x
     real(kind=8),external :: ran2
     type(psv) :: ps
-    allocate(phase_space_gen23 :: pgl_unique%phase_space)
+    if (pgl_unique%next.eq.3) then
+       allocate(phase_space_onebody :: pgl_unique%phase_space)
+    else
+       allocate(phase_space_gen23 :: pgl_unique%phase_space)
+    endif
     allocate(pgl_unique%processes(next,nproc_unique))
     allocate(pgl_unique%color_orders(next,nproc_unique))
     allocate(pgl_unique%phase_space_orders(next))
@@ -1013,8 +1065,10 @@ contains
     do i=1,pgl_unique%next
        mass(i)=phys_model%get_mass(pgl_unique%processes(i,1))
        width(i)=phys_model%get_width(pgl_unique%processes(i,1))
-       ! For this unique_prcess checks, use only massless particles
-       if (mass(i).ne.0d0) mass(i)=0d0
+       ! For the general unique-process check, use only massless particles.
+       ! A 2->1 map instead needs the physical final mass to resolve its
+       ! partonic delta function.
+       if (pgl_unique%next.gt.3 .and. mass(i).ne.0d0) mass(i)=0d0
        if (width(i).ne.0d0) width(i)=0d0
     enddo
     call setup_spin(pgl_unique)
@@ -1373,7 +1427,28 @@ contains
     implicit none
     integer,dimension(next),intent(in) :: process
     integer,dimension(next),intent(inout) :: order
-    integer :: i,iord,aq,iaq,ipart
+    integer :: i,iord,aq,iaq,ipart,is,ic
+    integer,dimension(next) :: reordered
+
+    ! A pure-gluon HEFT trace has no antiquark endpoint.  Canonicalise its
+    ! colourless Higgs before the cyclic coloured trace, matching the current
+    ! recursion while leaving the phase-space density order untouched.
+    if (.not.any(abs(process).ge.1 .and. abs(process).le.6)) then
+       is=1
+       ic=count([(phys_model%is_singlet(process(order(i))),i=1,next)])+1
+       do i=1,next
+          iord=order(i)
+          if (phys_model%is_singlet(process(iord))) then
+             reordered(is)=iord
+             is=is+1
+          else
+             reordered(ic)=iord
+             ic=ic+1
+          endif
+       enddo
+       order=reordered
+       return
+    endif
     ! find the final anti-quark
     do i=next,1,-1
        iord=order(i)

@@ -1,11 +1,12 @@
 module amp_lib
   implicit none
 contains
-  subroutine evaluate_amp(ichan,iint,p,amps)
+  subroutine evaluate_amp(ichan,iint,p,amps,gs,gew,gheft)
     implicit none
     integer :: ichan,iint
     real(kind=8),dimension(*) :: p
     complex(kind=8),dimension(*) :: amps
+    real(kind=8),intent(in) :: gs,gew,gheft
     write (*,*) 'This subroutine should not be used'
     write (*,*) 'evaluate_amp() from the dummy.f file'
     stop 1

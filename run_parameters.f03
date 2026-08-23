@@ -2,6 +2,15 @@ module run_parameters
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
 
+  real(kind=8),parameter,private :: pi=3.1415926535897932384626433832795d0
+  real(kind=8),parameter,private :: default_z_mass=91.188d0
+  real(kind=8),parameter,private :: default_w_mass=80.419002445756163d0
+  real(kind=8),parameter,private :: default_alphaEW=0.007546771114d0
+  real(kind=8),parameter,private :: default_sw=&
+       sqrt(1d0-(default_w_mass/default_z_mass)**2)
+  real(kind=8),parameter,private :: default_heft_vev=&
+       2d0*default_w_mass*default_sw/sqrt(4d0*pi*default_alphaEW)
+
   ! Particle properties used by the built-in Standard Model.
   ! The process metadata selects which of the first five quarks are active
   ! and exactly massless.  The masses below are used when a flavour is outside
@@ -13,18 +22,23 @@ module run_parameters
   real(kind=8) :: bottom_mass=4.7d0
   real(kind=8) :: top_mass=173d0
   real(kind=8) :: top_width=1.4915d0
-  real(kind=8) :: z_mass=91.188d0
+  real(kind=8) :: z_mass=default_z_mass
   real(kind=8) :: z_width=2.441404d0
-  real(kind=8) :: w_mass=80.419002445756163d0
+  real(kind=8) :: w_mass=default_w_mass
   real(kind=8) :: w_width=2.0476d0
   real(kind=8) :: higgs_mass=125d0
   real(kind=8) :: higgs_width=0.0063823389999999999d0
 
-  ! Couplings.  The weak vertices are expressed in units of the electric
-  ! coupling and therefore depend on sin(theta_W).
-  real(kind=8) :: sw=0.47143025548407230d0
+  ! Couplings.  The on-shell weak-mixing sine and electroweak vev are derived
+  ! from mW, mZ and alphaEW whenever an input card is read.  PROTECTED keeps
+  ! callers from making these dependent quantities inconsistent with them.
+  real(kind=8),protected :: sw=default_sw
   real(kind=8) :: alphaS_MZ=0.119d0
-  real(kind=8) :: alphaEW=0.007546771114d0
+  real(kind=8) :: alphaEW=default_alphaEW
+  real(kind=8) :: heft_kappa=1d0
+  real(kind=8),protected :: heft_vev=default_heft_vev
+
+  private :: update_derived_electroweak_parameters
 
   ! Collider, scale and PDF setup.
   real(kind=8) :: sqrts=14000d0
@@ -68,7 +82,8 @@ module run_parameters
 
   namelist /amplicol/ up_mass,strange_mass,charm_mass,bottom_mass,&
        top_mass,top_width,z_mass,z_width,w_mass,w_width,&
-       higgs_mass,higgs_width,sw,alphaS_MZ,alphaEW,sqrts,scale_choice,&
+       higgs_mass,higgs_width,alphaS_MZ,alphaEW,heft_kappa,&
+       sqrts,scale_choice,&
        include_pdf,use_lhapdf,lhapdfset,lhapdf_member,pdf_lhaid,&
        internal_pdf_grid,ignore_final_state_width_fix,&
        pTj_min,DRjj_min,etaj_max,sqrt_sjj_min,&
@@ -77,6 +92,18 @@ module run_parameters
        DRja_min,sqrt_sja_min,DRjl_min,sqrt_sjl_min,DRla_min,sqrt_sla_min
 
 contains
+
+  real(kind=8) function heft_coupling(alpha_s)
+    implicit none
+    real(kind=8),intent(in) :: alpha_s
+    heft_coupling=heft_kappa*alpha_s/(3d0*pi*heft_vev)
+  end function heft_coupling
+
+  subroutine update_derived_electroweak_parameters()
+    implicit none
+    sw=sqrt(1d0-(w_mass/z_mass)**2)
+    heft_vev=2d0*w_mass*sw/sqrt(4d0*pi*alphaEW)
+  end subroutine update_derived_electroweak_parameters
 
   subroutine reset_run_parameters()
     implicit none
@@ -87,15 +114,15 @@ contains
     bottom_mass=4.7d0
     top_mass=173d0
     top_width=1.4915d0
-    z_mass=91.188d0
+    z_mass=default_z_mass
     z_width=2.441404d0
-    w_mass=80.419002445756163d0
+    w_mass=default_w_mass
     w_width=2.0476d0
     higgs_mass=125d0
     higgs_width=0.0063823389999999999d0
-    sw=0.47143025548407230d0
     alphaS_MZ=0.119d0
-    alphaEW=0.007546771114d0
+    alphaEW=default_alphaEW
+    heft_kappa=1d0
     sqrts=14000d0
     scale_choice=2
     include_pdf=.true.
@@ -124,6 +151,7 @@ contains
     DRla_min=0.4d0
     sqrt_sla_min=-1d0
     active_run_card=''
+    call update_derived_electroweak_parameters()
   end subroutine reset_run_parameters
 
   subroutine set_flavour_scheme(new_flavour_scheme)
@@ -165,7 +193,8 @@ contains
     implicit none
     if (any(.not.ieee_is_finite([up_mass,strange_mass,charm_mass,bottom_mass,&
          top_mass,top_width,z_mass,z_width,&
-         w_mass,w_width,higgs_mass,higgs_width,sw,alphaS_MZ,alphaEW,sqrts,&
+         w_mass,w_width,higgs_mass,higgs_width,alphaS_MZ,alphaEW,&
+         heft_kappa,sqrts,&
          pTj_min,DRjj_min,etaj_max,sqrt_sjj_min,pTa_min,DRaa_min,etaa_max,&
          sqrt_saa_min,pTl_min,DRll_min,etal_max,sqrt_sll_min,DRja_min,&
          sqrt_sja_min,DRjl_min,sqrt_sjl_min,DRla_min,sqrt_sla_min]))) then
@@ -184,12 +213,20 @@ contains
        write (*,*) 'Particle widths in the input file must be non-negative'
        stop 1
     endif
-    if (sw.le.0d0 .or. sw.ge.1d0) then
-       write (*,*) 'sw must lie strictly between zero and one',sw
+    if (w_mass.ge.z_mass) then
+       write (*,*) 'w_mass must be smaller than z_mass to derive sin(theta_W)',&
+            w_mass,z_mass
        stop 1
     endif
     if (alphaS_MZ.le.0d0 .or. alphaEW.le.0d0) then
        write (*,*) 'alphaS_MZ and alphaEW must be positive',alphaS_MZ,alphaEW
+       stop 1
+    endif
+    call update_derived_electroweak_parameters()
+    if (.not.ieee_is_finite(sw) .or. .not.ieee_is_finite(heft_vev) .or.&
+         sw.le.0d0 .or. sw.ge.1d0 .or. heft_vev.le.0d0) then
+       write (*,*) 'Could not derive finite positive electroweak parameters',&
+            sw,heft_vev
        stop 1
     endif
     if (sqrts.le.0d0) then

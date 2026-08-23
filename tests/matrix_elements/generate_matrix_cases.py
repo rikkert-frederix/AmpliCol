@@ -66,8 +66,9 @@ FAMILIES = (
 
 def parse_process_file(path: Path, family: str) -> list[tuple]:
     lines = path.read_text().splitlines()
-    n_external, n_unique, version = map(int, lines[0].split())
-    if version not in (4, 5, 6):
+    header = [int(value) for value in lines[0].split()]
+    n_external, n_unique, version = header[:3]
+    if version not in (4, 5, 6, 7):
         raise ValueError(f"unsupported process-file version {version}")
 
     options_line = next(line for line in lines[1:] if line.startswith("# options:"))
@@ -76,7 +77,7 @@ def parse_process_file(path: Path, family: str) -> list[tuple]:
              if token.startswith("flavour_scheme="))
     )
 
-    if version == 6:
+    if version in (6, 7):
         idx = next(
             index for index, line in enumerate(lines)
             if line.startswith("INTEGRATION_FAMILIES ")
@@ -97,7 +98,7 @@ def parse_process_file(path: Path, family: str) -> list[tuple]:
                 parts = lines[idx].split()
                 idx += 1
                 if not parts or parts[0] != "C":
-                    raise ValueError("expected coefficient row in v6 family")
+                    raise ValueError("expected coefficient row in compact family")
                 process = [int(x) for x in parts[1 : 1 + n_external]]
                 order = [int(x) for x in parts[
                     1 + n_external : 1 + 2 * n_external

@@ -54,7 +54,7 @@ def section_header(lines: list[str], name: str) -> tuple[int, int]:
     raise AssertionError(f"missing {name} catalogue")
 
 
-def parse_v6(path: Path) -> dict[str, object]:
+def parse_v7(path: Path) -> dict[str, object]:
     raw = path.read_bytes()
     if len(raw) >= MAX_PROCESS_FILE_BYTES:
         raise AssertionError(
@@ -63,8 +63,8 @@ def parse_v6(path: Path) -> dict[str, object]:
         )
     lines = raw.decode("ascii").splitlines()
     header = [int(value) for value in lines[0].split()]
-    if len(header) != 3 or header[2] != 6:
-        raise AssertionError(f"expected process-file version 6, found {header}")
+    if len(header) != 4 or header[2:] != [7, 0]:
+        raise AssertionError(f"expected non-HEFT process-file version 7, found {header}")
     if "flavour_scheme=4" not in lines[2]:
         raise AssertionError("target process file is not in the four-flavour scheme")
 
@@ -542,7 +542,7 @@ def main() -> None:
     if "compute_x_from_cache" not in family_routine:
         raise AssertionError("family density loop does not use the batch cache")
 
-    with tempfile.TemporaryDirectory(prefix="amplicol_v6_family_") as tmp:
+    with tempfile.TemporaryDirectory(prefix="amplicol_v7_family_") as tmp:
         root = Path(tmp)
         four_lepton = root / "four_lepton"
         four_lepton.mkdir()
@@ -567,10 +567,10 @@ def main() -> None:
         process_file, construction_seconds = generate_process_file(
             process_list, first
         )
-        catalogues = parse_v6(process_file)
+        catalogues = parse_v7(process_file)
         second_file, _ = generate_process_file(process_list, second)
         if process_file.read_bytes() != second_file.read_bytes():
-            raise AssertionError("version-6 process construction is not deterministic")
+            raise AssertionError("version-7 process construction is not deterministic")
         (second / "Outputs").mkdir()
 
         startup_seconds = check_startup(
@@ -616,7 +616,7 @@ def main() -> None:
         )
 
     print(
-        "v6 family end-to-end regression passed: "
+        "v7 family end-to-end regression passed: "
         f"{len(catalogues['families'])} families, "
         f"{len(catalogues['maps'])} maps, "
         f"{catalogues['bytes']} bytes, "

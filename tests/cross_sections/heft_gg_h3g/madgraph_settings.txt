@@ -1,0 +1,37 @@
+# Applied by configure_madgraph.py.  These commands are also valid inside
+# MadGraph's launch card-editing prompt, but not as top-level madevent commands.
+set run_card nevents 10000
+set run_card lpp1 1
+set run_card lpp2 1
+set run_card ebeam1 7000
+set run_card ebeam2 7000
+set run_card pdlabel lhapdf
+set run_card lhaid 244800
+set run_card fixed_ren_scale False
+set run_card fixed_fac_scale False
+set run_card dynamical_scale_choice 3
+set run_card scalefact 1
+set run_card dsqrt_shat 0
+set run_card ptj 30
+set run_card ptjmax -1
+set run_card etaj 6
+set run_card drjj 0.4
+set run_card drjjmax -1
+set run_card mmjj 0
+set run_card mmjjmax -1
+set run_card xptj 0
+set run_card ptj1min 0
+set run_card ptj2min 0
+set run_card ptj3min 0
+set run_card htjmin 0
+set run_card ihtmin 0
+set run_card nhel 0
+set run_card sde_strategy 2
+set run_card iseed -260830
+set run_card use_syst False
+set param_card mass 25 125
+set param_card mass 6 1e9
+set param_card mass 23 91.188
+set param_card sminputs 1 132.506999999629
+set param_card sminputs 2 1.16639000000326e-5
+set param_card decay 25 0

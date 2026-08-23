@@ -17,12 +17,14 @@
   higgs_mass = 125d0
   higgs_width= 0.0063823389999999999d0
 
-  ! Couplings
-  sw         = 0.47143025548407230d0
+  ! Couplings.  The on-shell sin(theta_W) and electroweak vev are derived as
+  ! sqrt(1-mW^2/mZ^2) and 2*mW*sin(theta_W)/sqrt(4*pi*alphaEW).
   ! alphaS_MZ is used by the internal running coupling.  When use_lhapdf is
   ! true, alpha_s is supplied by the selected LHAPDF member instead.
   alphaS_MZ  = 0.119d0
   alphaEW    = 0.007546771114d0
+  ! HEFT uses g_H = heft_kappa*alpha_s(mu_R)/(3*pi*heft_vev).
+  heft_kappa = 1d0
 
   ! Collider and scale choice:
   ! 0=MZ, 1=HT, 2=HT/2, 3=sqrt(shat), 4=min(jet pT), 5=m(non-jet system)

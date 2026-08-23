@@ -668,7 +668,7 @@ class ProcessListResonanceRegression(unittest.TestCase):
             (23, (2, 3)), (23, (4, 5)), (23, (6, 7))
         ), histories)
 
-    def test_version_six_serializes_four_compact_catalogues(self):
+    def test_version_seven_serializes_four_compact_catalogues(self):
         saved_options = dict(process_list.options)
         saved_provenance = process_list.process_provenance
         try:
@@ -676,12 +676,13 @@ class ProcessListResonanceRegression(unittest.TestCase):
                 "flavour_scheme": 5,
                 "include_3qqbar_processes": False,
                 "include_cc_processes": False,
+                "heft": False,
             })
             process_list.process_provenance = "p p > e+ e-"
             unique = process_list.WriteUniqueProcsIntoList([
                 ("u", "u~", "e+", "e-")
             ])
-            self.assertEqual(unique[0], "4 1 6")
+            self.assertEqual(unique[0], "4 1 7 0")
             self.assertEqual(unique[1], "# process: p p > e+ e-")
             self.assertIn("channel_discovery=diagrams", unique[2])
 

@@ -40,6 +40,7 @@ def finalized_request(process_string, flavour_scheme, include_three_lines):
             "include_cc_processes": False,
             "serial": True,
             "flavour_scheme": flavour_scheme,
+            "heft": False,
         })
         request = process_list.ParseCollision(process_string)
         unique = process_list.GenerateAllUniqueProcs(request)
@@ -356,7 +357,7 @@ class ThreeQuarkLineMultiChannelRegression(unittest.TestCase):
                 )
                 self.assert_permutation_metadata(rows)
 
-    def test_serialization_uses_global_v6_catalogues(self):
+    def test_serialization_uses_global_v7_catalogues(self):
         proc = ("d~", "u~", "d", "u", "s", "s~", "z")
         finalized_rows(proc)
         catalogues = process_list.BuildIntegrationCatalogues()
@@ -450,12 +451,108 @@ class ThreeQuarkLineMultiChannelRegression(unittest.TestCase):
                 "flavour_scheme": 5,
                 "include_3qqbar_processes": False,
                 "include_cc_processes": False,
+                "heft": False,
             })
             process_list.process_provenance = "p p > 2j"
             header = process_list.WriteUniqueProcsIntoList(
                 [("g", "g", "g", "g")]
             )[0]
-            self.assertEqual(header, "4 1 6")
+            self.assertEqual(header, "4 1 7 0")
+        finally:
+            process_list.process_provenance = saved_provenance
+            process_list.options.clear()
+            process_list.options.update(saved_options)
+
+    def test_heft_uses_one_coefficient_per_cyclic_density_family(self):
+        saved_options = dict(process_list.options)
+        try:
+            process_list.options.update({
+                "include_3qqbar_processes": False,
+                "include_cc_processes": False,
+                "heft": True,
+            })
+            rows = finalized_rows(("g", "g", "g", "h"))
+            self.assertEqual(
+                {
+                    process_list.PhaseSpaceOrderFromKey(key)
+                    for key in process_list.all_keys_sorted
+                },
+                {
+                    (0, 1, 2, 3), (0, 1, 3, 2), (0, 2, 1, 3),
+                    (0, 2, 3, 1), (0, 3, 1, 2), (0, 3, 2, 1),
+                },
+            )
+
+            coefficient_channels = defaultdict(set)
+            for channel, row in rows:
+                process, order = row[:2]
+                self.assertEqual(process, ("g", "g", "g", "h"))
+                self.assertEqual(order[-1], 3)
+                coefficient_channels[(process, order)].add(channel)
+            self.assertEqual(len(coefficient_channels), 2)
+            self.assertEqual(
+                {len(channels) for channels in coefficient_channels.values()},
+                {3},
+            )
+
+            header = process_list.WriteUniqueProcsIntoList(
+                [("g", "g", "g", "h")]
+            )[0]
+            self.assertEqual(header, "4 1 7 1")
+        finally:
+            process_list.options.clear()
+            process_list.options.update(saved_options)
+
+    def test_heft_open_string_densities_cover_each_coloured_gap(self):
+        saved_options = dict(process_list.options)
+        try:
+            process_list.options["heft"] = True
+            self.assertEqual(
+                set(process_list.HiggsDensityOrders(
+                    ("d", "d~", "g", "h"), (0, 2, 1, 3)
+                )),
+                {(0, 3, 2, 1), (0, 2, 3, 1)},
+            )
+        finally:
+            process_list.options.clear()
+            process_list.options.update(saved_options)
+
+    def test_heft_onebody_has_one_density(self):
+        saved_options = dict(process_list.options)
+        try:
+            process_list.options["heft"] = True
+            self.assertEqual(
+                process_list.HiggsDensityOrders(
+                    ("g", "g", "h"), (0, 1, 2)
+                ),
+                ((0, 1, 2),),
+            )
+        finally:
+            process_list.options.clear()
+            process_list.options.update(saved_options)
+
+    def test_heft_cli_requires_exactly_one_explicit_higgs(self):
+        saved_options = dict(process_list.options)
+        saved_provenance = process_list.process_provenance
+        try:
+            for process_string in ("g g > 1j", "g g > h h"):
+                with self.subTest(process_string=process_string), \
+                        mock.patch.object(
+                            sys,
+                            "argv",
+                            ["process_list.py", "--heft", process_string],
+                        ), mock.patch("sys.stderr"):
+                    with self.assertRaises(SystemExit):
+                        process_list.ParseArgument()
+
+            with mock.patch.object(
+                sys,
+                "argv",
+                ["process_list.py", "--heft", "g g > h 1j"],
+            ):
+                parsed = process_list.ParseArgument()
+            self.assertEqual(parsed["rest"].count("h"), 1)
+            self.assertTrue(process_list.options["heft"])
         finally:
             process_list.process_provenance = saved_provenance
             process_list.options.clear()

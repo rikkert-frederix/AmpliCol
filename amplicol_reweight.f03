@@ -19,7 +19,9 @@ module rw_events
   integer :: IDBMUP(2),PDFGUP(2),PDFSUP(2),IDWTUP,NPRUP,LPRUP
   real(kind=8) :: EBMUP(2),XSECUP,XERRUP,XMAXUP
   character(len=1024) :: generator_string
-  logical :: unwgt,keep_comments
+  integer :: event_metadata_version=0
+  logical :: unwgt,keep_comments,event_heft_enabled=.false.
+  real(kind=8) :: event_heft_kappa=1d0,event_heft_vev=0d0
 end module rw_events
 module timings
   implicit none
@@ -36,6 +38,7 @@ module arguments
 end module arguments
 
 program amplicol_reweight
+  use,intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use rw_events
   use math_functions
   use amplitude_QCD_mod
@@ -54,6 +57,7 @@ program amplicol_reweight
   integer,dimension(:),allocatable :: hel,unique_map
   integer,dimension(:,:),allocatable :: spin,o,part,processes,unique_processes
   real(kind=8) :: process_map_value
+  real(kind=8),parameter :: pi=3.1415926535897932384626433832795d0
   real(kind=8),dimension(:,:),allocatable :: p
   real(kind=8),dimension(:),allocatable :: unique_map_value
   complex(kind=8) :: amp2_c,amp_col_c
@@ -102,7 +106,15 @@ program amplicol_reweight
 
      call cpu_time(tBefore)
     
-     call amps(iproc)%evaluate(next,p,hel,read_proc_from_file,phys_model)
+     if (.not.ieee_is_finite(events(nevt)%AQCDUP) .or. events(nevt)%AQCDUP.le.0d0 .or. &
+          .not.ieee_is_finite(events(nevt)%AQEDUP) .or. events(nevt)%AQEDUP.le.0d0) then
+        write (*,*) 'Invalid LHE event coupling values',events(nevt)%AQCDUP,events(nevt)%AQEDUP
+        stop 1
+     endif
+     call amps(iproc)%evaluate(next,p,hel,read_proc_from_file,phys_model,&
+          gs=sqrt(4d0*pi*events(nevt)%AQCDUP),&
+          gew=sqrt(8d0*pi*events(nevt)%AQEDUP),&
+          gheft=heft_coupling(events(nevt)%AQCDUP))
 
      call cpu_time(tAfter)
      t_amp=t_amp+tAfter-tBefore
@@ -265,7 +277,7 @@ contains
   
   subroutine read_unique_in_file()
     implicit none
-    integer :: iproc,event_flavour_scheme,ios,value_start
+    integer :: iproc,event_flavour_scheme,heft_flag,ios,value_start
     character(len=1024) :: line
     read(11,'(a)',iostat=ios) line ! <LesHouchesEvents>-tag
     if (ios.ne.0 .or. index(line,'<LesHouchesEvents').eq.0) then
@@ -289,7 +301,27 @@ contains
        stop 1
     endif
     call set_flavour_scheme(event_flavour_scheme)
-    read(11,*) next,unique_nproc
+    read(11,*,iostat=ios) next,unique_nproc,event_metadata_version,heft_flag,&
+         event_heft_kappa,event_heft_vev
+    if (ios.ne.0 .or. event_metadata_version.ne.2) then
+       write (*,*) 'Unsupported AmpliCol event metadata; regenerate the LHE file'
+       stop 1
+    endif
+    if (heft_flag.ne.0 .and. heft_flag.ne.1) then
+       write (*,*) 'Invalid HEFT flag in the LHE header',heft_flag
+       stop 1
+    endif
+    event_heft_enabled=heft_flag.eq.1
+    if (event_heft_enabled) then
+       if (abs(event_heft_kappa-heft_kappa).gt.1d-12*max(1d0,abs(heft_kappa)) .or. &
+            abs(event_heft_vev-heft_vev).gt.1d-12*max(1d0,abs(heft_vev))) then
+          write (*,*) 'HEFT run-card parameters do not match the LHE metadata'
+          write (*,*) 'LHE kappa, vev:',event_heft_kappa,event_heft_vev
+          write (*,*) 'card kappa, vev:',heft_kappa,heft_vev
+          stop 1
+       endif
+    endif
+    call phys_model%set_heft_enabled(event_heft_enabled)
     allocate(unique_map(unique_nproc))
     allocate(unique_map_value(unique_nproc))
     allocate(unique_processes(next,unique_nproc))
@@ -324,6 +356,10 @@ contains
             event%PUP(1,I),event%PUP(2,I),event%PUP(3,I),event%PUP(4,I),event%PUP(5,I),&
             event%VTIMUP(I),event%SPINUP(I)
     enddo
+    if (event_heft_enabled .and. count(event%IDUP.eq.25).ne.1) then
+       write (*,*) 'A HEFT event must contain exactly one explicit Higgs boson'
+       stop 1
+    endif
     read(iunit,'(a)') string
     read(string(7:),*) event%col_order(1:event%NUP)
     read(iunit,'(a)') string
@@ -501,13 +537,14 @@ contains
     integer,intent(in) :: ounit
     integer :: iproc
     integer(kind=8) :: iseed
-    common /to_seed/iseed
     real(kind=8) :: rwgt_LCtoFC
+    common /to_seed/iseed
     rwgt_LCtoFC=xsec/XSECUP
     write(ounit,'(a)') '<LesHouchesEvents version="3.0">'
     write(ounit,'(a)') '<header>'
     write(ounit,'(a,1x,i2,1x,a)') '<flavour_scheme>',flavour_scheme,'</flavour_scheme>'
-    write(ounit,*) next,unique_nproc
+    write(ounit,*) next,unique_nproc,event_metadata_version,&
+         merge(1,0,event_heft_enabled),event_heft_kappa,event_heft_vev
     do iproc=1,unique_nproc
        write(ounit,*) unique_map(iproc),unique_map_value(iproc),&
             unique_processes(1:next,iproc)

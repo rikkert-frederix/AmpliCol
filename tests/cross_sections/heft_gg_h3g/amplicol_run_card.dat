@@ -1,0 +1,49 @@
+! Matched card for the gg > h g g g full-colour cross-section comparison.
+&amplicol
+  top_mass   = 173d0
+  top_width  = 1.4915d0
+  z_mass     = 91.188d0
+  z_width    = 2.441404d0
+  w_mass     = 80.419002445756163d0
+  w_width    = 2.0476d0
+  higgs_mass = 125d0
+  higgs_width= 0.0063823389999999999d0
+
+  alphaS_MZ  = 0.119d0
+  alphaEW    = 0.007546771114d0
+  heft_kappa = 1d0
+
+  sqrts       = 14000d0
+  scale_choice= 2
+
+  include_pdf      = .true.
+  use_lhapdf       = .true.
+  lhapdfset        = 'NNPDF23_nlo_as_0119_qed'
+  lhapdf_member    = 0
+  pdf_lhaid        = 244800
+  internal_pdf_grid= 'NNPDF23nlo_as_0119_qed_mem0.grid'
+
+  ignore_final_state_width_fix = .false.
+
+  pTj_min      = 30d0
+  DRjj_min     = 0.4d0
+  etaj_max     = 6d0
+  sqrt_sjj_min = -1d0
+
+  pTa_min      = 30d0
+  DRaa_min     = 0.4d0
+  etaa_max     = 6d0
+  sqrt_saa_min = -1d0
+
+  pTl_min      = 20d0
+  DRll_min     = 0.4d0
+  etal_max     = 2.5d0
+  sqrt_sll_min = -1d0
+
+  DRja_min     = 0.4d0
+  sqrt_sja_min = -1d0
+  DRjl_min     = 0.4d0
+  sqrt_sjl_min = -1d0
+  DRla_min     = 0.4d0
+  sqrt_sla_min = -1d0
+/

@@ -11,7 +11,7 @@ program mixed_spinor_library_regression
   read(14) p
   read(14) expected
   close(14)
-  call evaluate_amp1_1(p,actual)
+  call evaluate_amp1_1(p,actual,1d0,1d0,1d0)
   call compare_amplitudes('b g > t W-',expected(1),actual(1))
 
   open(unit=14,file='Library/amp2_1_lib.data',form='unformatted',&
@@ -19,7 +19,7 @@ program mixed_spinor_library_regression
   read(14) p
   read(14) expected
   close(14)
-  call evaluate_amp2_1(p,actual)
+  call evaluate_amp2_1(p,actual,1d0,1d0,1d0)
   call compare_amplitudes('b~ g > t~ W+',expected(1),actual(1))
   write (*,'(a)') 'Mixed-spinor generated-library regression passed'
 

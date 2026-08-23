@@ -5,7 +5,7 @@ module amplitude_library
   use particles, only: model_signature_size
   use run_parameters, only: flavour_scheme,set_flavour_scheme
   implicit none
-  integer,parameter :: amplitude_library_version=8
+  integer,parameter :: amplitude_library_version=9
 contains
   subroutine configure_flavour_scheme_from_amplitude_lib()
     implicit none
@@ -53,23 +53,24 @@ contains
     write(14,*) 'private'
     write(14,*) 'public :: evaluate_amp'
     write(14,*) 'contains'
-    write(14,*) 'subroutine evaluate_amp(ichan,iint,p,amps)'
+    write(14,*) 'subroutine evaluate_amp(ichan,iint,p,amps,gs,gew,gheft)'
     write(14,*) 'implicit none'
     write(14,*) 'integer,intent(in) :: ichan,iint'
     write(tmp,*) maxval(pgl(:)%next)
     write(14,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//'),intent(in) :: p'
     write(14,*) 'complex(kind=8),intent(out) :: amps(*)'
+    write(14,*) 'real(kind=8),intent(in) :: gs,gew,gheft'
     do igroup=1,ngroups
        if (igroup.eq.1) then
           write(14,*) 'if (ichan.eq.1) then'
           do j=1,size(pgl(igroup)%amps)
              if (j.eq.1) then
                 write(14,*) 'if (iint.eq.1) then'
-                write(14,*) 'call evaluate_amp1_1(p,amps)'
+                write(14,*) 'call evaluate_amp1_1(p,amps,gs,gew,gheft)'
              else
                 write(tmp,*) j
                 write(14,*) 'elseif (iint.eq.'//trim(adjustl(tmp))//') then'
-                write(14,*) 'call evaluate_amp1_'//trim(adjustl(tmp))//'(p,amps)'
+                write(14,*) 'call evaluate_amp1_'//trim(adjustl(tmp))//'(p,amps,gs,gew,gheft)'
              endif
           enddo
           write(14,*) 'endif'
@@ -79,11 +80,12 @@ contains
           do j=1,size(pgl(igroup)%amps)
              if (j.eq.1) then
                 write(14,*) 'if (iint.eq.1) then'
-                write(14,*) 'call evaluate_amp'//trim(adjustl(tmp))//'_1(p,amps)'
+                write(14,*) 'call evaluate_amp'//trim(adjustl(tmp))//'_1(p,amps,gs,gew,gheft)'
              else
                 write(line,*) j
                 write(14,*) 'elseif (iint.eq.'//trim(adjustl(line))//') then'
-                write(14,*) 'call evaluate_amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'(p,amps)'
+                write(14,*) 'call evaluate_amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//&
+                     '(p,amps,gs,gew,gheft)'
              endif
           enddo
           write(14,*) 'endif'
@@ -97,6 +99,7 @@ contains
     open(unit=14,file=filename,form='unformatted',access='stream',status='unknown')
     write(14) amplitude_library_version
     write(14) flavour_scheme
+    write(14) phys_model%heft_enabled
     stored_model_signature=phys_model%model_signature()
     write(14) stored_model_signature
     write(14) pgl_unique%next,pgl_unique%nproc
@@ -174,11 +177,35 @@ contains
     close(14)
   end subroutine create_amplitude_lib
 
+  subroutine configure_model_from_amplitude_lib()
+    implicit none
+    character(len=170) :: filename
+    integer :: library_version,stored_flavour_scheme
+    logical :: library_heft_enabled
+    filename='Library/amplitudes.bin'
+    open(unit=14,file=filename,form='unformatted',access='stream',status='old')
+    read(14) library_version
+    if (library_version.ne.amplitude_library_version) then
+       write (*,*) 'Amplitude library has an incompatible binary format; recreate it'
+       stop 1
+    endif
+    read(14) stored_flavour_scheme
+    if (stored_flavour_scheme.ne.flavour_scheme) then
+       write (*,*) 'Amplitude library flavour scheme does not match initialized model',&
+            stored_flavour_scheme,flavour_scheme
+       stop 1
+    endif
+    read(14) library_heft_enabled
+    close(14)
+    call phys_model%set_heft_enabled(library_heft_enabled)
+  end subroutine configure_model_from_amplitude_lib
+
   subroutine read_amplitude_lib()
     implicit none
     character(len=170) :: filename
     integer :: dim1,dim2,dim3,iamp,igroup,imap,library_version,&
          stored_flavour_scheme
+    logical :: library_heft_enabled
     real(kind=8),dimension(model_signature_size) :: stored_model_signature,current_model_signature
     real(kind=8),dimension(model_signature_size) :: tolerance
     filename='Library/amplitudes.bin'
@@ -192,6 +219,11 @@ contains
     if (stored_flavour_scheme.ne.flavour_scheme) then
        write (*,*) 'Amplitude library flavour scheme does not match initialized model',&
             stored_flavour_scheme,flavour_scheme
+       stop 1
+    endif
+    read(14) library_heft_enabled
+    if (library_heft_enabled.neqv.phys_model%heft_enabled) then
+       write (*,*) 'Amplitude-library HEFT mode was not configured before model initialisation'
        stop 1
     endif
     read(14) stored_model_signature
@@ -369,12 +401,26 @@ contains
     ! Phase-space dimensionality and PDF flavour masks are run settings, not
     ! properties of the compiled matrix elements.  Reconstruct them so that a
     ! library can be reused when include_pdf changes.
-    pgl_unique%ndim=3*(pgl_unique%next-2)-4
-    if (include_pdf) pgl_unique%ndim=pgl_unique%ndim+2
+    if (pgl_unique%next.eq.3) then
+       if (.not.include_pdf) then
+          write (*,*) 'One-body cross sections require include_pdf=.true.'
+          stop 1
+       endif
+       pgl_unique%ndim=1
+    else
+       pgl_unique%ndim=3*(pgl_unique%next-2)-4
+       if (include_pdf) pgl_unique%ndim=pgl_unique%ndim+2
+    endif
     do igroup=1,ngroups
-       pgl(igroup)%ndim=3*(pgl(igroup)%next-2)-4
-       if (include_pdf) then
+       if (pgl(igroup)%next.eq.3) then
+          pgl(igroup)%ndim=1
+       else
+          pgl(igroup)%ndim=3*(pgl(igroup)%next-2)-4
+       endif
+       if (include_pdf .and. pgl(igroup)%next.gt.3) then
           pgl(igroup)%ndim=pgl(igroup)%ndim+2
+       endif
+       if (include_pdf) then
           call set_ipdgs_for_PDF(pgl(igroup))
        else
           pgl(igroup)%ipdgs=.false.
@@ -397,6 +443,7 @@ contains
     implicit none
     integer :: igroup,iint,i
     real(kind=8),dimension(:,:),allocatable :: p
+    real(kind=8) :: gs,gew,gheft
     complex(kind=8),dimension(:),allocatable :: amps_save,amps
     character(len=170) :: line,tmp
     do igroup=1,ngroups
@@ -410,8 +457,9 @@ contains
           open(file=line,unit=14,form='unformatted',access='stream',status='old')
           read(14) p
           read(14) amps_save
+          read(14) gs,gew,gheft
           close(14)
-          call evaluate_amp(igroup,iint,p,amps)
+          call evaluate_amp(igroup,iint,p,amps,gs,gew,gheft)
           if (any(abs(amps_save-amps)/(abs(amps_save)+abs(amps)).gt.1d-8)) then
              write (*,*) 'Process library not compatible with saved amplitudes',igroup,iint
              do i=1,size(pgl(igroup)%amps(iint)%amps)

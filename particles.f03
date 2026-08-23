@@ -31,14 +31,16 @@ module particles
      real(kind=8),dimension(2) :: weak_isospin,weak_hypercharge
   end type particle
   type vertex
-     integer :: type
-     integer,dimension(3) :: particles
+     integer :: type,n_inputs
+     integer,dimension(4) :: particles
+     integer :: qcd_power,ew_power,heft_power
      real(kind=8),dimension(2) :: coupl
   end type vertex
   type physics_model
      type(particle),dimension(:),allocatable :: particle_list
      type(vertex),dimension(:),allocatable :: vertex_list
      integer :: npart,nint,flavour_scheme=5
+     logical :: heft_enabled=.false.
    contains
      procedure,public :: init_part,get_mass,get_width,get_spin&
           &,get_antipart,init_vert,get_dim,get_inter_dim,is_quark&
@@ -49,7 +51,7 @@ module particles
           &,is_w_aux_tensor,is_auxiliary_tensor,is_singlet,is_photon&
           &,is_massive_vector,is_higgs,is_jet,is_auxiliary_scalar,is_fermion,is_massless_fermion&
           &,is_chiral_eligible,set_width,apply_final_state_widths&
-          &,model_signature
+          &,model_signature,set_heft_enabled
      procedure,public :: get_colour_rep => get_color_rep
      procedure,public :: get_colour_dim => get_color_dim
   end type physics_model
@@ -79,22 +81,47 @@ contains
     this%particle_list(l)%color_rep=color_rep
   end subroutine append_particle
 
-  subroutine append_vertex(this,l,itype,ipdgs,coupl)
+  subroutine append_vertex(this,l,itype,ipdgs,coupl,qcd_power,ew_power,heft_power)
     implicit none
     class(physics_model),intent(inout) :: this
     integer,intent(inout) :: l
     integer,intent(in) :: itype
-    integer,dimension(3),intent(in) :: ipdgs
+    integer,dimension(:),intent(in) :: ipdgs
     real(kind=8),dimension(2),intent(in) :: coupl
+    integer,intent(in),optional :: qcd_power,ew_power,heft_power
     l=l+1
     if (l.gt.this%nint) then
        write (*,*) 'ERROR: more vertices than allocated',l,this%nint
        stop 1
     endif
     this%vertex_list(l)%type=itype
-    this%vertex_list(l)%particles=ipdgs
+    this%vertex_list(l)%n_inputs=size(ipdgs)-1
+    if (this%vertex_list(l)%n_inputs.lt.2 .or. this%vertex_list(l)%n_inputs.gt.3) then
+       write (*,*) 'ERROR: unsupported vertex arity',this%vertex_list(l)%n_inputs
+       stop 1
+    endif
+    this%vertex_list(l)%particles=0
+    this%vertex_list(l)%particles(1:size(ipdgs))=ipdgs
     this%vertex_list(l)%coupl=coupl
+    this%vertex_list(l)%qcd_power=0
+    this%vertex_list(l)%ew_power=0
+    this%vertex_list(l)%heft_power=0
+    if (itype.ge.0 .and. itype.le.9) then
+       this%vertex_list(l)%qcd_power=1
+    elseif (itype.ge.10 .and. itype.le.24) then
+       this%vertex_list(l)%ew_power=1
+    endif
+    if (present(qcd_power)) this%vertex_list(l)%qcd_power=qcd_power
+    if (present(ew_power)) this%vertex_list(l)%ew_power=ew_power
+    if (present(heft_power)) this%vertex_list(l)%heft_power=heft_power
   end subroutine append_vertex
+
+  subroutine set_heft_enabled(this,enabled)
+    implicit none
+    class(physics_model),intent(inout) :: this
+    logical,intent(in) :: enabled
+    this%heft_enabled=enabled
+  end subroutine set_heft_enabled
 
   integer function find_particle_index(this,ipdg)
     implicit none
@@ -497,34 +524,38 @@ contains
     call append_vertex(this,l,20,[25,25,25],higgs_self_coupling(this)) !!
 
     ! W-boson-W-boson to auxiliary scalar C
-    call append_vertex(this,l,17,[24,-24,127],[1d0/2d0*weak_coupling_squared(),0d0]) !!
-    call append_vertex(this,l,17,[-24,24,127],[1d0/2d0*weak_coupling_squared(),0d0]) !!
+    call append_vertex(this,l,17,[24,-24,127],[1d0/2d0*weak_coupling_squared(),0d0],ew_power=2) !!
+    call append_vertex(this,l,17,[-24,24,127],[1d0/2d0*weak_coupling_squared(),0d0],ew_power=2) !!
     ! Z-boson-Z-boson to auxiliary scalar C
-    call append_vertex(this,l,17,[23,23,127],[1d0/2d0*weak_coupling_squared()/weak_cosine_squared(),0d0]) !!
+    call append_vertex(this,l,17,[23,23,127],[1d0/2d0*weak_coupling_squared()/weak_cosine_squared(),0d0],&
+         ew_power=2) !!
     ! Auxiliary scalar A-Higgs to Higgs
-    call append_vertex(this,l,20,[125,25,25],[1d0,0d0]) !!
+    call append_vertex(this,l,20,[125,25,25],[1d0,0d0],ew_power=0) !!
     ! Higgs-auxiliary scalar A to Higgs
-    call append_vertex(this,l,20,[25,125,25],[1d0,0d0]) !!
+    call append_vertex(this,l,20,[25,125,25],[1d0,0d0],ew_power=0) !!
     ! Higgs-Higgs to auxiliary scalar A
-    call append_vertex(this,l,20,[25,25,125],[(-3d0/4d0)*weak_coupling_squared()*this%get_mass(25)**2/this%get_mass(24)**2,0d0]) !!
+    call append_vertex(this,l,20,[25,25,125],[(-3d0/4d0)*weak_coupling_squared()*&
+         this%get_mass(25)**2/this%get_mass(24)**2,0d0],ew_power=2) !!
     ! Auxiliary scalar C-Higgs to Higgs
-    call append_vertex(this,l,20,[127,25,25],[1d0,0d0]) !!
+    call append_vertex(this,l,20,[127,25,25],[1d0,0d0],ew_power=0) !!
     ! Higgs-auxiliary scalar C to Higgs
-    call append_vertex(this,l,20,[25,127,25],[1d0,0d0]) !!
+    call append_vertex(this,l,20,[25,127,25],[1d0,0d0],ew_power=0) !!
     ! Higgs-Higgs to auxiliary scalar B
-    call append_vertex(this,l,20,[25,25,126],[1d0,-10d0]) !!
+    call append_vertex(this,l,20,[25,25,126],[1d0,-10d0],ew_power=0) !!
 
     ! Auxiliary scalar B-Z-boson to Z-boson
-    call append_vertex(this,l,18,[126,23,23],[-1d0/2d0*weak_coupling_squared()/weak_cosine_squared(),0d0]) !!
+    call append_vertex(this,l,18,[126,23,23],[-1d0/2d0*weak_coupling_squared()/&
+         weak_cosine_squared(),0d0],ew_power=2) !!
     ! Z-boson-auxiliary scalar B to Z-boson
-    call append_vertex(this,l,19,[23,126,23],[-1d0/2d0*weak_coupling_squared()/weak_cosine_squared(),0d0]) !!
+    call append_vertex(this,l,19,[23,126,23],[-1d0/2d0*weak_coupling_squared()/&
+         weak_cosine_squared(),0d0],ew_power=2) !!
 
     ! Auxiliary scalar B-W-boson to W-boson
-    call append_vertex(this,l,18,[126,24,24],[-1d0/2d0*weak_coupling_squared(),0d0]) !!
-    call append_vertex(this,l,18,[126,-24,-24],[-1d0/2d0*weak_coupling_squared(),0d0]) !!
+    call append_vertex(this,l,18,[126,24,24],[-1d0/2d0*weak_coupling_squared(),0d0],ew_power=2) !!
+    call append_vertex(this,l,18,[126,-24,-24],[-1d0/2d0*weak_coupling_squared(),0d0],ew_power=2) !!
     ! W-boson-auxiliary scalar B to W-boson
-    call append_vertex(this,l,19,[24,126,24],[-1d0/2d0*weak_coupling_squared(),0d0]) !!
-    call append_vertex(this,l,19,[-24,126,-24],[-1d0/2d0*weak_coupling_squared(),0d0]) !!
+    call append_vertex(this,l,19,[24,126,24],[-1d0/2d0*weak_coupling_squared(),0d0],ew_power=2) !!
+    call append_vertex(this,l,19,[-24,126,-24],[-1d0/2d0*weak_coupling_squared(),0d0],ew_power=2) !!
 
     ! Lepton-antilepton to photon
     do i=1,3
@@ -600,6 +631,35 @@ contains
        call append_vertex(this,l,24,[23,-(12+(2*i-2)),-(12+(2*i-2))],&
             z_fermion_coupling(this,-(12+(2*i-2))))
     enddo
+
+    if (this%heft_enabled) then
+       ! CP-even HEFT: -g_H/4 h G^a_{mu nu} G^{a,mu nu}.
+       ! Coupling powers are applied to each recursive interaction at runtime.
+       call append_vertex(this,l,25,[21,21,25],[1d0,0d0],&
+            qcd_power=0,ew_power=0,heft_power=1)
+       call append_vertex(this,l,26,[25,21,21],[1d0,0d0],&
+            qcd_power=0,ew_power=0,heft_power=1)
+       call append_vertex(this,l,27,[21,25,21],[1d0,0d0],&
+            qcd_power=0,ew_power=0,heft_power=1)
+
+       ! Ordered h-g-g-g contact interaction.  Singlets are canonicalised
+       ! after the coloured children, so only the [g,g,h]->g crossing is
+       ! needed for an off-shell gluon; adding the other scalar placements
+       ! would count the same contact diagram three times.
+       call append_vertex(this,l,28,[21,21,21,25],[1d0,0d0],&
+            qcd_power=1,ew_power=0,heft_power=1)
+       call append_vertex(this,l,31,[21,21,25,21],[1d0,0d0],&
+            qcd_power=1,ew_power=0,heft_power=1)
+
+       ! The h-g-g-g-g contact is represented with the existing compact
+       ! antisymmetric auxiliary gluon tensor.
+       call append_vertex(this,l,32,[-21,-21,25],[1d0,0d0],&
+            qcd_power=0,ew_power=0,heft_power=1)
+       call append_vertex(this,l,33,[25,-21,-21],[1d0,0d0],&
+            qcd_power=0,ew_power=0,heft_power=1)
+       call append_vertex(this,l,34,[-21,25,-21],[1d0,0d0],&
+            qcd_power=0,ew_power=0,heft_power=1)
+    endif
 
     this%nint=l
     write (99,*) l,'interactions loaded'
@@ -813,7 +873,8 @@ contains
     integer :: i,itype
     do i=1,this%nint
        if (this%vertex_list(i)%type.eq.itype) then
-          get_inter_dim=this%get_dim(this%vertex_list(i)%particles(3))
+          get_inter_dim=this%get_dim(this%vertex_list(i)%particles(&
+               this%vertex_list(i)%n_inputs+1))
           return
        endif
     enddo

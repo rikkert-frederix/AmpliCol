@@ -465,6 +465,122 @@ contains
     TMP3 = (wf2(1)*wf3(1)-wf2(2)*wf3(2)-wf2(3)*wf3(3)-wf2(4)*wf3(4))
     wf(1:4) = prefact*(2d0*wf2(1:4)*TMP2-wf1(1:4)*TMP3-wf3(1:4)*TMP1)
   end subroutine FourGluon
+
+  complex(kind=8) function MinkowskiDotCC(a,b)
+    implicit none
+    complex(kind=8),dimension(4),intent(in) :: a,b
+    MinkowskiDotCC=a(1)*b(1)-a(2)*b(2)-a(3)*b(3)-a(4)*b(4)
+  end function MinkowskiDotCC
+
+  complex(kind=8) function MinkowskiDotCR(a,b)
+    implicit none
+    complex(kind=8),dimension(4),intent(in) :: a
+    real(kind=8),dimension(0:3),intent(in) :: b
+    MinkowskiDotCR=a(1)*b(0)-a(2)*b(1)-a(3)*b(2)-a(4)*b(3)
+  end function MinkowskiDotCR
+
+  real(kind=8) function MinkowskiDotRR(a,b)
+    implicit none
+    real(kind=8),dimension(0:3),intent(in) :: a,b
+    MinkowskiDotRR=a(0)*b(0)-a(1)*b(1)-a(2)*b(2)-a(3)*b(3)
+  end function MinkowskiDotRR
+
+  subroutine HeftTwoGluonToScalar(wfg1,p1,wfg2,p2,wfs)
+    ! CP-even hGG current for L = -g_H/4 h G^a_{mu nu}G^{a,mu nu}.
+    ! The runtime g_H factor is applied by amplitude_QCD.
+    implicit none
+    complex(kind=8),dimension(4),intent(in) :: wfg1,wfg2
+    real(kind=8),dimension(0:3),intent(in) :: p1,p2
+    complex(kind=8),dimension(1),intent(out) :: wfs
+    complex(kind=8),parameter :: cImag=(0d0,1d0)
+    ! Scalar terminal currents are contracted without a Lorentz metric.  The
+    ! sign therefore matches the crossed gluon-output rule after its terminal
+    ! vector contraction.
+    wfs(1)=cImag*(MinkowskiDotCC(wfg1,wfg2)*MinkowskiDotRR(p1,p2)-&
+         MinkowskiDotCR(wfg1,p2)*MinkowskiDotCR(wfg2,p1))
+  end subroutine HeftTwoGluonToScalar
+
+  subroutine HeftScalarGluonToGluon(wfs,ps,wfg,pg,wfout)
+    ! Crossed hGG current.  All momenta follow the all-outgoing convention.
+    implicit none
+    complex(kind=8),dimension(1),intent(in) :: wfs
+    real(kind=8),dimension(0:3),intent(in) :: ps,pg
+    complex(kind=8),dimension(4),intent(in) :: wfg
+    complex(kind=8),dimension(4),intent(out) :: wfout
+    complex(kind=8),parameter :: cImag=(0d0,1d0)
+    real(kind=8),dimension(0:3) :: pout
+    complex(kind=8) :: epout
+    pout=-(ps+pg)
+    epout=MinkowskiDotCR(wfg,pout)
+    wfout(1:4)=-cImag*wfs(1)*(wfg(1:4)*MinkowskiDotRR(pout,pg)-pg(0:3)*epout)
+  end subroutine HeftScalarGluonToGluon
+
+  subroutine HeftThreeGluonToScalar(wfg1,p1,wfg2,p2,wfg3,p3,wfs)
+    ! Ordered hGGG contact.  Unlike a pure three-gluon vertex, the third
+    ! gluon momentum is not -(p1+p2): the Higgs also carries momentum.
+    implicit none
+    complex(kind=8),dimension(4),intent(in) :: wfg1,wfg2,wfg3
+    real(kind=8),dimension(0:3),intent(in) :: p1,p2,p3
+    complex(kind=8),dimension(1),intent(out) :: wfs
+    complex(kind=8),dimension(4) :: tmp
+    call HeftThreeGluonCurrent(wfg1,p1,wfg2,p2,p3,tmp)
+    wfs(1)=sum(tmp*wfg3)
+  end subroutine HeftThreeGluonToScalar
+
+  subroutine HeftScalarTwoGluonToGluon(wfs,ps,wfg1,p1,wfg2,p2,wfout)
+    implicit none
+    complex(kind=8),dimension(1),intent(in) :: wfs
+    real(kind=8),dimension(0:3),intent(in) :: ps,p1,p2
+    complex(kind=8),dimension(4),intent(in) :: wfg1,wfg2
+    complex(kind=8),dimension(4),intent(out) :: wfout
+    real(kind=8),dimension(0:3) :: pout
+    pout=-(ps+p1+p2)
+    call HeftThreeGluonCurrent(wfg1,p1,wfg2,p2,pout,wfout)
+    wfout=wfs(1)*wfout
+  end subroutine HeftScalarTwoGluonToGluon
+
+  subroutine HeftThreeGluonCurrent(wfg1,p1,wfg2,p2,p3,wfout)
+    ! The VVVS2 Lorentz tensor in the colour-ordered AmpliCol
+    ! normalisation.  The -i/sqrt(2) prefactor includes the relative colour
+    ! normalisation between the HEFT Hggg and QCD ggg vertices.
+    implicit none
+    complex(kind=8),dimension(4),intent(in) :: wfg1,wfg2
+    real(kind=8),dimension(0:3),intent(in) :: p1,p2,p3
+    complex(kind=8),dimension(4),intent(out) :: wfout
+    complex(kind=8),parameter :: prefact=(0d0,-1d0)/sqrt(2d0)
+    complex(kind=8) :: e1e2,e1p2,e1p3,e2p1,e2p3
+    e1e2=MinkowskiDotCC(wfg1,wfg2)
+    e1p2=MinkowskiDotCR(wfg1,p2)
+    e1p3=MinkowskiDotCR(wfg1,p3)
+    e2p1=MinkowskiDotCR(wfg2,p1)
+    e2p3=MinkowskiDotCR(wfg2,p3)
+    wfout(1:4)=prefact*(e1e2*(p1(0:3)-p2(0:3))+&
+         (e1p2-e1p3)*wfg2(1:4)+(e2p3-e2p1)*wfg1(1:4))
+  end subroutine HeftThreeGluonCurrent
+
+  complex(kind=8) function CompactTensorInner(wfT1,wfT2)
+    implicit none
+    complex(kind=8),dimension(6),intent(in) :: wfT1,wfT2
+    CompactTensorInner=-wfT1(1)*wfT2(1)-wfT1(2)*wfT2(2)-wfT1(3)*wfT2(3)+&
+         wfT1(4)*wfT2(4)+wfT1(5)*wfT2(5)+wfT1(6)*wfT2(6)
+  end function CompactTensorInner
+
+  subroutine HeftTwoAuxTensorToScalar(wfT1,wfT2,wfs)
+    implicit none
+    complex(kind=8),dimension(6),intent(in) :: wfT1,wfT2
+    complex(kind=8),dimension(1),intent(out) :: wfs
+    complex(kind=8),parameter :: prefact=(0d0,-0.5d0)
+    wfs(1)=prefact*CompactTensorInner(wfT1,wfT2)
+  end subroutine HeftTwoAuxTensorToScalar
+
+  subroutine HeftScalarAuxTensorToAuxTensor(wfs,wfTin,wfTout)
+    implicit none
+    complex(kind=8),dimension(1),intent(in) :: wfs
+    complex(kind=8),dimension(6),intent(in) :: wfTin
+    complex(kind=8),dimension(6),intent(out) :: wfTout
+    wfTout=-wfs(1)*wfTin
+  end subroutine HeftScalarAuxTensorToAuxTensor
+
   subroutine TwoGluonToAuxTensor(wfg1,wfg2,wfT)
     ! This vertex includes the all factors such that the tensor "propagator"
     ! is simply the identity
