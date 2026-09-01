@@ -1,6 +1,7 @@
 
       function ran2()
 !     Wrapper for the random numbers; needed for the NLO stuff
+      use random_number_interface, only: ntuple
       implicit none
       double precision ran2,x,a,b
       integer jconfig
@@ -19,17 +20,23 @@ c-------------------------------------------------------
 c     Front to ranmar which allows user to easily
 c     choose the seed.
 c------------------------------------------------------
+      use random_number_interface, only: get_offset,get_base,
+     &     get_moffset,rmarin,ranmar
+      use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
       implicit none
 c
 c     Arguments
 c
-      double precision x,a,b
-      integer jconfig
+      double precision,intent(out) :: x
+      double precision,intent(in) :: a,b
+      integer,intent(in) :: jconfig
 c
 c     Local
 c
       integer init, ioffset, joffset
       integer ij, kl
+      integer*8 ij_work, kl_work, joffset_work, seed_work
+      double precision span
 
 c
 c     Global
@@ -38,6 +45,8 @@ c-------
 c     18/6/2012 tjs promoted to integer*8 to avoid overflow for iseed > 60K
 c------
       integer*8       iseed
+      integer*8       max_seed
+      parameter      (max_seed=904866561)
       common /to_seed/iseed
 c
 c     Data
@@ -55,6 +64,11 @@ c by amcatnlo_run_interface every time a run starts). This makes sure
 c that the code does not need any remcompilation when only the seed is
 c changed (useful for NLO gridpack mode).
          if (iseed .eq. 0) call get_base(iseed)
+         if (iseed .lt. 0 .or. iseed .gt. max_seed) then
+            write(*,*) 'Random seed must be between 0 and',max_seed,
+     &           ':',iseed
+            stop 1
+         endif
 c$$$         call get_base(iseed)
 c
 c     TJS 3/13/2008
@@ -72,29 +86,51 @@ c     Note it may still be possible to get identical ij,kl for
 c     different iseed, if have exactly compensating joffset, ioffset, jconfig
 c
          call get_moffset(joffset)
-         joffset = joffset * 3157
-         iseed = iseed * 31300       
-         ij=1802+jconfig + mod(iseed,30081)
-         kl=9373+(iseed/30081)+ioffset + joffset     !Switched to 30081
+         joffset_work = int(joffset,8) * 3157_8
+         seed_work = iseed * 31300_8
+         ij_work=1802_8+int(jconfig,8) + mod(seed_work,30081_8)
+         kl_work=9373_8+(seed_work/30081_8)+int(ioffset,8)
+     &        +joffset_work                          !Switched to 30081
                                                      !20/6/12 to avoid
                                                      !dupes in range
                                                      !30082-31328
-         write(99,'(a,i6,a3,i6,a3,i6)') 'Using random seed offsets:'
-     &        ,jconfig," , ",ioffset," , ",joffset
-         write(99,*) ' with seed', iseed/31300
-         do while (ij .gt. 31328)
-            ij = ij - 31328
-         enddo
-         do while (kl .gt. 30081)
-            kl = kl - 30081
-         enddo
+         write(99,'(a,i0,a3,i0,a3,i0)') 'Using random seed offsets:'
+     &        ,jconfig," , ",ioffset," , ",joffset_work
+         write(99,*) ' with seed', iseed
+         if (ij_work .gt. 31328_8)
+     &        ij_work=1_8+modulo(ij_work-1_8,31328_8)
+         if (kl_work .gt. 30081_8)
+     &        kl_work=1_8+modulo(kl_work-1_8,30081_8)
+         if (ij_work .lt. 0_8 .or. kl_work .lt. 0_8) then
+            write(*,*) 'Random seed offsets produce negative seeds:',
+     &           ij_work,kl_work
+            stop 1
+         endif
+         ij=int(ij_work,kind(ij))
+         kl=int(kl_work,kind(kl))
         call rmarin(ij,kl)         
       endif
+      if (.not.ieee_is_finite(a) .or. .not.ieee_is_finite(b)
+     &     .or. b .lt. a) then
+         write(*,*) 'Invalid random-number interval:',a,b
+         stop 1
+      endif
+      if (a .lt. 0d0) then
+         if (b .gt. huge(b)+a) then
+            write(*,*) 'Random-number interval is too wide:',a,b
+            stop 1
+         endif
+      endif
+      span=b-a
       call ranmar(x)
       do while (x .lt. 1d-16)
          call ranmar(x)
       enddo
-      x = a+x*(b-a)
+      x = a+x*span
+      if (.not.ieee_is_finite(x)) then
+         write(*,*) 'Random-number interval mapping overflowed:',a,b
+         stop 1
+      endif
       end
 
       subroutine get_base(iseed)
@@ -105,44 +141,35 @@ c------------------------------------------------------
 c
 c     Constants
 c
-      integer    lun
-      parameter (lun=22)
-c
-c     Arguments
-c
-      integer*8 iseed
+      integer*8,intent(out) :: iseed
 c
 c     Local
 c
-      character*60 fname
-      logical done
-      integer i,level
+      character*256 fname,line
+      integer lun,level,ios,close_status
 c-----
 c  Begin Code
 c-----
 
-      fname = 'randinit'
-      done = .false.
-      level = 1
-      do while(.not. done .and. level .lt. 5)
-         open(unit=lun,file=fname,status='old',err=15)
-         done = .true.
- 15      level = level+1
-         fname = '../' // fname(1:57)
-         i=index(fname,' ')
-         if (i .gt. 0) fname=fname(1:i-1)
-      enddo
-      if (done) then
-         read(lun,'(a)',end=24,err=24) fname
-         i = index(fname,'=')
-         if (i .gt. 0) fname=fname(i+1:)
-         read(fname,*,err=26,end=26) iseed
- 24      close(lun)
-c         write(*,*) 'Read iseed from randinit ',iseed
-         return
- 26      close(lun)
-      endif
       iseed = 0
+      fname = 'randinit'
+      do level=1,4
+         open(newunit=lun,file=trim(fname),status='old',action='read',
+     &        iostat=ios)
+         if (ios .eq. 0) then
+            read(lun,'(a)',iostat=ios) line
+            close(lun,iostat=close_status)
+            if (ios .eq. 0 .and. close_status .eq. 0) then
+               ios=index(line,'=')
+               if (ios .gt. 0) line=line(ios+1:)
+               read(line,*,iostat=ios) iseed
+               if (ios .eq. 0) return
+               iseed=0
+            endif
+         endif
+         if (len_trim(fname) .gt. len(fname)-3) return
+         fname='../'//trim(fname)
+      enddo
 c      write(*,*) 'No base found using iseed=0'
       end
 
@@ -154,30 +181,33 @@ c------------------------------------------------------
 c
 c     Constants
 c
-      integer    lun
-      parameter (lun=22)
-c
-c     Arguments
-c
-      integer iseed
+      integer,intent(out) :: iseed
 c
 c     Local
 c
+      integer lun,ios,close_status,value
 c-----
 c  Begin Code
 c-----
 
-      open(unit=lun,file='./iproc.dat',status='old',err=15)
-         read(lun,*,err=14) iseed
-         close(lun)
-         return
- 14   close(lun)
- 15   open(unit=lun,file='../iproc.dat',status='old',err=25)
-         read(lun,*,err=24) iseed
-         close(lun)
-         return
- 24   close(lun)
- 25   iseed = 0
+      iseed=0
+      open(newunit=lun,file='./iproc.dat',status='old',action='read',
+     &     iostat=ios)
+      if (ios .eq. 0) then
+         read(lun,*,iostat=ios) value
+         close(lun,iostat=close_status)
+         if (ios .eq. 0 .and. close_status .eq. 0) then
+            iseed=value
+            return
+         endif
+      endif
+      open(newunit=lun,file='../iproc.dat',status='old',action='read',
+     &     iostat=ios)
+      if (ios .eq. 0) then
+         read(lun,*,iostat=ios) value
+         close(lun,iostat=close_status)
+         if (ios .eq. 0 .and. close_status .eq. 0) iseed=value
+      endif
       end
 
       subroutine get_moffset(iseed)
@@ -188,28 +218,26 @@ c------------------------------------------------------
 c
 c     Constants
 c
-      integer    lun
-      parameter (lun=22)
-c
-c     Arguments
-c
-      integer iseed
-      integer random_offset_split
-      common /c_random_offset_split/ random_offset_split
+      integer,intent(out) :: iseed
 c
 c     Local
 c
+      integer lun,ios,close_status,value
 c-----
 c  Begin Code
 c-----
 
-      open(unit=lun,file='./moffset.dat',status='old',err=25)
-         read(lun,*,err=14) iseed
-         write(99,*) "Got moffset",iseed
-         close(lun)
-         return
- 14   close(lun)
- 25   iseed = random_offset_split
+      iseed=0
+      open(newunit=lun,file='./moffset.dat',status='old',action='read',
+     &     iostat=ios)
+      if (ios .eq. 0) then
+         read(lun,*,iostat=ios) value
+         close(lun,iostat=close_status)
+         if (ios .eq. 0 .and. close_status .eq. 0) then
+            iseed=value
+            write(99,*) "Got moffset",iseed
+         endif
+      endif
       end
 
       subroutine ranmar(rvec)
@@ -217,10 +245,24 @@ c-----
 * universal random number generator proposed by marsaglia and zaman
 * in report fsu-scri-87-50
 * in this version rvec is a double precision variable.
+      use random_number_state, only: ranmar_initialized
+      use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
       implicit real*8(a-h,o-z)
+      double precision,intent(out) :: rvec
       common/ raset1 / ranu(97),ranc,rancd,rancm
       common/ raset2 / iranmr,jranmr
       save /raset1/,/raset2/
+      rvec=0d0
+      if (.not.ranmar_initialized) then
+         write(*,*) 'RANMAR used before initialization'
+         stop 1
+      endif
+      if (iranmr .lt. 1 .or. iranmr .gt. 97 .or.
+     &     jranmr .lt. 1 .or. jranmr .gt. 97) then
+         write(*,*) 'RANMAR state contains invalid indices:',
+     &        iranmr,jranmr
+         stop 1
+      endif
       uni = ranu(iranmr) - ranu(jranmr)
       if(uni .lt. 0d0) uni = uni + 1d0
       ranu(iranmr) = uni
@@ -233,6 +275,14 @@ c-----
       uni = uni - ranc
       if(uni .lt. 0d0) uni = uni + 1d0
       rvec = uni
+      if (.not.ieee_is_finite(rvec)) then
+         write(*,*) 'RANMAR produced an invalid value:',rvec
+         stop 1
+      endif
+      if (rvec .lt. 0d0 .or. rvec .ge. 1d0) then
+         write(*,*) 'RANMAR produced an invalid value:',rvec
+         stop 1
+      endif
       end
  
       subroutine rmarin(ij,kl)
@@ -240,12 +290,13 @@ c-----
 * initializing routine for ranmar, must be called before generating
 * any pseudorandom numbers with ranmar. the input values should be in
 * the ranges 0<=ij<=31328 ; 0<=kl<=30081
+      use random_number_state, only: ranmar_initialized
       implicit real*8(a-h,o-z)
-      character*30 filename
-      logical file_exists
+      integer,intent(in) :: ij,kl
       common/ raset1 / ranu(97),ranc,rancd,rancm
       common/ raset2 / iranmr,jranmr
       save /raset1/,/raset2/
+      ranmar_initialized=.false.
 * this shows correspondence between the simplified input seeds ij, kl
 * and the original marsaglia-zaman seeds i,j,k,l.
 * to get the standard values in the marsaglia-zaman paper (i=12,j=34
@@ -256,18 +307,12 @@ c    18/6/2012 TJS  Added check to ensure ij and kl are in range
 c      
       if (ij .lt. 0 .or. ij .gt. 31328 .or.
      $     kl .lt. 0 .or. kl .gt. 30081) then
-         filename='../../error'
-         INQUIRE(FILE="../../RunWeb", EXIST=file_exists)
-         if(.not.file_exists) filename = '../' // filename(1:27)
-         open(unit=26,file=filename,status='unknown')
          if (ij .lt. 0 .or. ij .gt. 31328) then
-            write(26,*) 'Bad initialization value of ij in rmarin ', ij
             write(*,*) 'Bad initialization value of ij in rmarin ', ij
          elseif (kl .lt. 0 .or. kl .gt. 30081) then
-            write(26,*) 'Bad initialization value of kl in rmarin ', kl
             write(*,*) 'Bad initialization value of kl in rmarin ', kl
          endif
-         stop
+         stop 1
       endif
 
       i = mod( ij/177 , 177 ) + 2
@@ -293,5 +338,5 @@ c
       rancm = 16777213d0 / 16777216d0
       iranmr = 97
       jranmr = 33
+      ranmar_initialized=.true.
       end
-

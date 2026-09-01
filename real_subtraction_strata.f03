@@ -1,4 +1,5 @@
 module real_subtraction_strata
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
 
@@ -45,11 +46,13 @@ contains
     distance=-1d0
     if (size(mapped_margins).ne.size(alpha_active) .or. &
          size(mapped_pass).ne.size(alpha_active)) return
+    if (.not.ieee_is_finite(real_margin)) return
     if (abs(real_margin).gt.0.25d0*huge(1d0)) return
     real_pt_pass=real_margin.gt.0d0
     do idip=1,size(alpha_active)
        if (.not.alpha_active(idip)) cycle
        if (mapped_pass(idip) .eqv. real_pass) cycle
+       if (.not.ieee_is_finite(mapped_margins(idip))) cycle
        if (abs(mapped_margins(idip)).gt.0.25d0*huge(1d0)) cycle
        mapped_pt_pass=mapped_margins(idip).gt.0d0
        if (mapped_pt_pass .eqv. real_pt_pass) cycle

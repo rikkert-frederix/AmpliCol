@@ -11,12 +11,15 @@ module cs_massive_integrated_kernels
   use cs_integrated_kernels, only: cs_pi,cs_ca,cs_cf_lc,cs_cf_initial_qg,&
        cs_tr_initial_lc,cs_gamma,&
        cs_parton_q,cs_parton_g,cs_scheme_hv,cs_scheme_fdh
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
 
   integer, parameter, public :: cs_massive_split_qg=1
   integer, parameter, public :: cs_massive_split_gg=2
   integer, parameter, public :: cs_massive_split_qqbar=3
+  real(dp), parameter :: kernel_input_limit=0.125_dp*sqrt(huge(1.0_dp))
+  real(dp), parameter :: convolution_value_limit=0.25_dp*huge(1.0_dp)**0.25_dp
 
   type, public :: cs_convolution_kernel
      real(dp) :: regular=0.0_dp
@@ -32,10 +35,27 @@ module cs_massive_integrated_kernels
 
 contains
 
-  pure real(dp) function cs_apply_convolution(kernel,gz,g1) result(value)
+  real(dp) function cs_apply_convolution(kernel,gz,g1,info) result(value)
     type(cs_convolution_kernel), intent(in) :: kernel
     real(dp), intent(in) :: gz,g1
-    value=(kernel%regular+kernel%plus_z)*gz-kernel%plus_one*g1+kernel%delta*g1
+    integer, intent(out), optional :: info
+    real(dp) :: coefficient,term,updated
+    logical :: valid
+
+    value=0.0_dp
+    if (present(info)) info=0
+    call convolution_safe_sum(kernel%regular,kernel%plus_z,coefficient,valid)
+    if (valid) call convolution_safe_product(coefficient,gz,value,valid)
+    if (valid) call convolution_safe_product(kernel%plus_one,g1,term,valid)
+    if (valid) call convolution_safe_sum(value,-term,updated,valid)
+    if (valid) value=updated
+    if (valid) call convolution_safe_product(kernel%delta,g1,term,valid)
+    if (valid) call convolution_safe_sum(value,term,updated,valid)
+    if (valid) value=updated
+    if (.not.valid) then
+       value=0.0_dp
+       if (present(info)) info=-20
+    endif
   end function cs_apply_convolution
 
   pure real(dp) function cs_kallen(x,y,z) result(value)
@@ -61,6 +81,10 @@ contains
     real(dp) :: t,y,s,a,h,alfa,b0,b1,b2
     integer :: i
 
+    if (.not.ieee_is_finite(x)) then
+       value=x
+       return
+    endif
     if (x == 1.0_dp) then
        value=cs_pi*cs_pi/6.0_dp
        return
@@ -126,10 +150,20 @@ contains
     real(dp), intent(in) :: mi,mk,q2,ell,alpha
     real(dp), intent(out) :: coeff(-2:0)
     integer, intent(out) :: info
-    real(dp) :: f0,f1,f2,fa,norm
+    real(dp) :: f0,f1,f2,fa,norm,ratio_check,ratio_check2
+    logical :: ratio_ok,second_ratio_ok
 
     coeff=0.0_dp
     info=0
+    if (.not.all(ieee_is_finite([mi,mk,q2,ell,alpha]))) then
+       info=-20
+       return
+    endif
+    if (max(abs(mi),abs(mk),abs(ell)).gt.kernel_input_limit .or. &
+         q2.gt.0.125_dp*huge(1.0_dp)) then
+       info=-20
+       return
+    endif
     if (mi < 0.0_dp .or. mk < 0.0_dp .or. q2 <= 0.0_dp) then
        info=-1
        return
@@ -138,8 +172,18 @@ contains
        info=-3
        return
     endif
-    if (q2 <= (mi+mk)**2) then
+    if (scheme /= cs_scheme_hv .and. scheme /= cs_scheme_fdh) then
+       info=-2
+       return
+    endif
+    if (sqrt(q2) <= mi+mk) then
        info=-4
+       return
+    endif
+    call compute_mass_ratio_squared(mi,q2,ratio_check,ratio_ok)
+    call compute_mass_ratio_squared(mk,q2,ratio_check2,second_ratio_ok)
+    if (.not.ratio_ok .or. .not.second_ratio_ok) then
+       info=-20
        return
     endif
 
@@ -160,14 +204,30 @@ contains
     endif
 
     call ff_finite_base(parton,split,mi,mk,q2,0.0_dp,alpha,scheme,f0,info)
-    if (info /= 0) return
+    if (info /= 0 .or. .not.ieee_is_finite(f0)) then
+       if (info.eq.0) info=-20
+       return
+    endif
     call ff_finite_base(parton,split,mi,mk,q2,1.0_dp,alpha,scheme,f1,info)
-    if (info /= 0) return
+    if (info /= 0 .or. .not.ieee_is_finite(f1)) then
+       if (info.eq.0) info=-20
+       return
+    endif
     call ff_finite_base(parton,split,mi,mk,q2,2.0_dp,alpha,scheme,f2,info)
-    if (info /= 0) return
+    if (info /= 0 .or. .not.ieee_is_finite(f2)) then
+       if (info.eq.0) info=-20
+       return
+    endif
     call ff_finite_base(parton,split,mi,mk,q2,ell,alpha,scheme,fa,info)
-    if (info /= 0) return
+    if (info /= 0 .or. .not.ieee_is_finite(fa)) then
+       if (info.eq.0) info=-20
+       return
+    endif
     call laurent_from_finite(f0,f1,f2,fa,norm,coeff)
+    if (.not.all(ieee_is_finite(coeff))) then
+       coeff=0.0_dp
+       info=-20
+    endif
   end subroutine cs_massive_ff_endpoint
 
   pure subroutine ff_finite_base(parton,split,mi,mk,q2,ell,alpha,scheme,value,info)
@@ -175,22 +235,22 @@ contains
     real(dp), intent(in) :: mi,mk,q2,ell,alpha
     real(dp), intent(out) :: value
     integer, intent(out) :: info
-    real(dp) :: mui,muk,mui2,muk2,sq,qik2,lam,v,rhoi,rhok,rho,rs
-    real(dp) :: yp,xp,xm,x,a,b,c,d,yl,e,term
+    real(dp) :: mui,muk,mui2,muk2,sq,qik_fraction,lam,v,rhoi,rhok,rho,rs
+    real(dp) :: yp,xp,xm,x,a,b,c,d,yl,e,term,term_core,term_factor,term_scale
 
     value=0.0_dp
     info=0
     sq=sqrt(q2)
-    mui2=mi*mi/q2
-    muk2=mk*mk/q2
     mui=mi/sq
     muk=mk/sq
-    qik2=q2-mi*mi-mk*mk
+    mui2=mui*mui
+    muk2=muk*muk
+    qik_fraction=1.0_dp-mui2-muk2
 
     if (parton == cs_parton_q) then
        if (mi > 0.0_dp .and. mk > 0.0_dp) then
           lam=cs_kallen(1.0_dp,mui2,muk2)
-          if (lam <= 0.0_dp .or. qik2 <= 0.0_dp) then
+          if (lam <= 0.0_dp .or. qik_fraction <= 0.0_dp) then
              info=-4
              return
           endif
@@ -201,14 +261,14 @@ contains
                (1.0_dp+v+2.0_dp*muk2/(1.0_dp-mui2-muk2)))
           rho=sqrt((1.0_dp-v)/(1.0_dp+v))
           value=0.5_dp*(6.0_dp+2.0_dp*ell+&
-               2.0_dp*mk*((4.0_dp*mk-2.0_dp*sq)/qik2+1.0_dp/(mk-sq))-&
+               2.0_dp*muk*((4.0_dp*muk-2.0_dp)/qik_fraction+1.0_dp/(muk-1.0_dp))-&
                2.0_dp*cs_pi**2/(3.0_dp*v)-&
-               4.0_dp*log(((sq-mk)**2-mi*mi)/q2)+&
-               2.0_dp*log(mi*(1.0_dp-mk/sq)/sq)-&
-               4.0_dp*mi*mi*log(mi/(sq-mk))/qik2-&
+               4.0_dp*log((1.0_dp-muk)**2-mui2)+&
+               2.0_dp*log(mui*(1.0_dp-muk))-&
+               4.0_dp*mui2*log(mui/(1.0_dp-muk))/qik_fraction-&
                (-4.0_dp*log(rho*rho)*log(1.0_dp+rho*rho)+&
                log(rhoi*rhoi)**2+log(rhok*rhok)**2-&
-               4.0_dp*log(rho)*(ell+2.0_dp*log(q2/qik2)))/(2.0_dp*v)-&
+               4.0_dp*log(rho)*(ell-2.0_dp*log(qik_fraction)))/(2.0_dp*v)-&
                2.0_dp*(-2.0_dp*cs_dilog(rho*rho)+cs_dilog(1.0_dp-rhoi*rhoi)+&
                cs_dilog(1.0_dp-rhok*rhok))/v)
 
@@ -220,14 +280,16 @@ contains
              xp=(-mui2+(1.0_dp-muk)**2+sqrt(lam))/(1.0_dp-mui2-muk2)
              xm=(-mui2+(1.0_dp-muk)**2-sqrt(lam))/(1.0_dp-mui2-muk2)
              yp=1.0_dp-2.0_dp*(1.0_dp-muk)*muk/(1.0_dp-mui2-muk2)
-             term=((4.0_dp*mui2*muk2)/&
-                  ((mui2-(1.0_dp-muk)**2)*(1.0_dp-mui2-muk2))+1.0_dp/yp-alpha*yp)*&
-                  (yp-alpha*yp)
-             if (term < 0.0_dp) then
+             term_core=(4.0_dp*mui2*muk2)/&
+                  ((mui2-(1.0_dp-muk)**2)*(1.0_dp-mui2-muk2))
+             term_factor=yp-alpha*yp
+             term=(term_core+1.0_dp/yp-alpha*yp)*term_factor
+             term_scale=max(1.0_dp,abs(term_core),abs(1.0_dp/yp),abs(alpha*yp))*abs(term_factor)
+             if (term < -128.0_dp*epsilon(1.0_dp)*term_scale) then
                 info=-5
                 return
              endif
-             x=yp-alpha*yp+sqrt(term)
+             x=yp-alpha*yp+sqrt(max(0.0_dp,term))
              term=1.0_dp/(1.0_dp-muk)-2.0_dp*(2.0_dp-2.0_dp*mui2-muk)/&
                   (1.0_dp-mui2-muk2)+1.5_dp*(1.0_dp+alpha*yp)+&
                   mui2*(1.0_dp-alpha*yp)/(2.0_dp*(mui2+alpha*(1.0_dp-mui2-muk2)*yp))-&
@@ -285,11 +347,12 @@ contains
           if (alpha < 1.0_dp) then
              yp=(1.0_dp-muk2)/(1.0_dp+muk2)
              term=(1.0_dp-alpha)*(1.0_dp-alpha*yp*yp)
-             if (term < 0.0_dp) then
+             term_scale=max(1.0_dp,abs(1.0_dp-alpha),abs(1.0_dp-alpha*yp*yp))
+             if (term < -128.0_dp*epsilon(1.0_dp)*term_scale) then
                 info=-5
                 return
              endif
-             xp=yp*(1.0_dp-alpha)+sqrt(term)
+             xp=yp*(1.0_dp-alpha)+sqrt(max(0.0_dp,term))
              value=value-1.5_dp*((1.0_dp-alpha)*yp+log(alpha))-&
                   2.0_dp*log((1.0_dp-xp+yp)/(1.0_dp+yp))**2+&
                   log((1.0_dp+2.0_dp*xp*yp-yp*yp)/&
@@ -332,7 +395,9 @@ contains
           if (alpha < 1.0_dp) then
              term=(-1.0_dp+muk)**2*(alpha**2*(-1.0_dp+muk)**2+&
                   (1.0_dp+muk)**2-2.0_dp*alpha*(1.0_dp+muk2))
-             if (term < 0.0_dp .and. abs(term) > 100.0_dp*epsilon(1.0_dp)) then
+             term_scale=max(1.0_dp,abs(alpha**2*(-1.0_dp+muk)**2),&
+                  abs((1.0_dp+muk)**2),abs(2.0_dp*alpha*(1.0_dp+muk2)))*(-1.0_dp+muk)**2
+             if (term < -128.0_dp*epsilon(1.0_dp)*term_scale) then
                 info=-5
                 return
              endif
@@ -370,9 +435,19 @@ contains
     real(dp), intent(in) :: mi,szone,ell,alpha
     real(dp), intent(out) :: coeff(-2:0)
     integer, intent(out) :: info
-    real(dp) :: f0,f1,f2,fa
+    real(dp) :: f0,f1,f2,fa,ratio_check
+    logical :: ratio_ok
     coeff=0.0_dp
     info=0
+    if (.not.all(ieee_is_finite([mi,szone,ell,alpha]))) then
+       info=-20
+       return
+    endif
+    if (max(abs(mi),abs(ell)).gt.kernel_input_limit .or. &
+         szone.gt.0.125_dp*huge(1.0_dp)) then
+       info=-20
+       return
+    endif
     if (mi <= 0.0_dp .or. szone <= 0.0_dp) then
        info=-1
        return
@@ -381,24 +456,33 @@ contains
        info=-3
        return
     endif
+    call compute_mass_ratio_squared(mi,szone,ratio_check,ratio_ok)
+    if (.not.ratio_ok) then
+       info=-20
+       return
+    endif
     call fi_endpoint_base(mi,szone,0.0_dp,alpha,f0)
     call fi_endpoint_base(mi,szone,1.0_dp,alpha,f1)
     call fi_endpoint_base(mi,szone,2.0_dp,alpha,f2)
     call fi_endpoint_base(mi,szone,ell,alpha,fa)
     call laurent_from_finite(f0,f1,f2,fa,cs_cf_lc,coeff)
+    if (.not.all(ieee_is_finite(coeff))) then
+       coeff=0.0_dp
+       info=-20
+    endif
   end subroutine cs_massive_fi_endpoint
 
   pure subroutine fi_endpoint_base(mi,szone,ell,alpha,value)
     real(dp), intent(in) :: mi,szone,ell,alpha
     real(dp), intent(out) :: value
     real(dp) :: mu2
-    mu2=mi*mi/szone
-    value=(1.0_dp+log(mu2/(1.0_dp+mu2)))*ell-&
+    mu2=exp(2.0_dp*log(mi)-log(szone))
+    value=(1.0_dp+log(mu2)-log(1.0_dp+mu2))*ell-&
          2.0_dp*cs_dilog(-mu2)-cs_pi**2/3.0_dp+2.0_dp+&
          0.5_dp*log(mu2)**2+0.5_dp*log(1.0_dp+mu2)**2-&
          2.0_dp*log(mu2)*log(1.0_dp+mu2)+log(mu2)
     if (alpha < 1.0_dp) value=value+2.0_dp*log(alpha)*&
-         (log((1.0_dp+mu2)/mu2)-1.0_dp)
+         (log(1.0_dp+mu2)-log(mu2)-1.0_dp)
   end subroutine fi_endpoint_base
 
   pure subroutine cs_massive_fi_convolution(mi,s,szone,x,alpha,kernel,info)
@@ -406,8 +490,18 @@ contains
     type(cs_convolution_kernel), intent(out) :: kernel
     integer, intent(out) :: info
     real(dp) :: mu2,mu2one
+    logical :: ratio_ok,second_ratio_ok
     kernel=cs_convolution_kernel()
     info=0
+    if (.not.all(ieee_is_finite([mi,s,szone,x,alpha]))) then
+       info=-20
+       return
+    endif
+    if (abs(mi).gt.kernel_input_limit .or. &
+         max(s,szone).gt.0.125_dp*huge(1.0_dp)) then
+       info=-20
+       return
+    endif
     if (mi <= 0.0_dp .or. s <= 0.0_dp .or. szone <= 0.0_dp) then
        info=-1
        return
@@ -421,13 +515,22 @@ contains
        return
     endif
     if (x <= 1.0_dp-alpha) return
-    mu2=mi*mi/s
-    mu2one=mi*mi/szone
+    call compute_mass_ratio_squared(mi,s,mu2,ratio_ok)
+    call compute_mass_ratio_squared(mi,szone,mu2one,second_ratio_ok)
+    if (.not.ratio_ok .or. .not.second_ratio_ok) then
+       info=-20
+       return
+    endif
     kernel%regular=cs_cf_lc*((1.0_dp-x)/(2.0_dp*(1.0_dp-x+mu2)**2)+&
-         2.0_dp*log((2.0_dp-x+mu2)*mu2one/&
-         ((1.0_dp+mu2one)*(1.0_dp-x+mu2)))/(1.0_dp-x))
-    kernel%plus_z=cs_cf_lc*2.0_dp*(log((1.0_dp+mu2one)/mu2one)-1.0_dp)/(1.0_dp-x)
+         2.0_dp*(log(2.0_dp-x+mu2)+log(mu2one)-&
+         log(1.0_dp+mu2one)-log(1.0_dp-x+mu2))/(1.0_dp-x))
+    kernel%plus_z=cs_cf_lc*2.0_dp*&
+         (log(1.0_dp+mu2one)-log(mu2one)-1.0_dp)/(1.0_dp-x)
     kernel%plus_one=kernel%plus_z
+    if (.not.convolution_kernel_is_finite(kernel)) then
+       kernel=cs_convolution_kernel()
+       info=-20
+    endif
   end subroutine cs_massive_fi_convolution
 
   pure subroutine cs_massive_if_endpoint(a,b,mk,szone,ell,scheme,nf,coeff,info)
@@ -435,15 +538,34 @@ contains
     real(dp), intent(in) :: mk,szone,ell
     real(dp), intent(out) :: coeff(-2:0)
     integer, intent(out) :: info
-    real(dp) :: f0,f1,f2,fa,norm
+    real(dp) :: f0,f1,f2,fa,norm,ratio_check
+    logical :: ratio_ok
     coeff=0.0_dp
     info=0
+    if (.not.all(ieee_is_finite([mk,szone,ell]))) then
+       info=-20
+       return
+    endif
+    if (max(abs(mk),abs(ell)).gt.kernel_input_limit .or. &
+         szone.gt.0.125_dp*huge(1.0_dp)) then
+       info=-20
+       return
+    endif
     if (mk <= 0.0_dp .or. szone <= 0.0_dp) then
        info=-1
        return
     endif
+    call compute_mass_ratio_squared(mk,szone,ratio_check,ratio_ok)
+    if (.not.ratio_ok) then
+       info=-20
+       return
+    endif
     if (nf < 0) then
        info=-1
+       return
+    endif
+    if (nf.gt.6 .or. (scheme /= cs_scheme_hv .and. scheme /= cs_scheme_fdh)) then
+       info=-2
        return
     endif
     if (a == cs_parton_q .and. b == cs_parton_q) then
@@ -462,6 +584,10 @@ contains
     call if_endpoint_base(a,b,mk,szone,2.0_dp,scheme,f2)
     call if_endpoint_base(a,b,mk,szone,ell,scheme,fa)
     call laurent_from_finite(f0,f1,f2,fa,norm,coeff)
+    if (.not.all(ieee_is_finite(coeff))) then
+       coeff=0.0_dp
+       info=-20
+    endif
   end subroutine cs_massive_if_endpoint
 
   pure subroutine if_endpoint_base(a,b,mk,szone,ell,scheme,value)
@@ -469,7 +595,7 @@ contains
     real(dp), intent(in) :: mk,szone,ell
     real(dp), intent(out) :: value
     real(dp) :: mu2,rs
-    mu2=mk*mk/szone
+    mu2=exp(2.0_dp*log(mk)-log(szone))
     rs=0.0_dp
     if (scheme == cs_scheme_fdh) then
        if (a == cs_parton_q) rs=-0.5_dp
@@ -494,10 +620,20 @@ contains
     real(dp), intent(in) :: mk,s,szone,x,mu_ren,mu_fac,alpha
     type(cs_convolution_kernel), intent(out) :: kernel
     integer, intent(out) :: info
-    real(dp) :: m2,m2one,zp,l,lone,log_ren_over_fac,omx,core
+    real(dp) :: m2,m2one,zp,one_minus_zp,l,lone,log_ren_over_fac,omx,core
+    logical :: ratio_ok,second_ratio_ok
 
     kernel=cs_convolution_kernel()
     info=0
+    if (.not.all(ieee_is_finite([mk,s,szone,x,mu_ren,mu_fac,alpha]))) then
+       info=-20
+       return
+    endif
+    if (max(abs(mk),abs(mu_ren),abs(mu_fac)).gt.kernel_input_limit .or. &
+         max(s,szone).gt.0.125_dp*huge(1.0_dp)) then
+       info=-20
+       return
+    endif
     if (mk <= 0.0_dp .or. s <= 0.0_dp .or. szone <= 0.0_dp) then
        info=-1
        return
@@ -506,7 +642,7 @@ contains
        info=-1
        return
     endif
-    if (nf < 0) then
+    if (nf < 0 .or. nf > 6) then
        info=-1
        return
     endif
@@ -518,16 +654,21 @@ contains
        info=-3
        return
     endif
-    m2=mk*mk/s
-    m2one=mk*mk/szone
+    call compute_mass_ratio_squared(mk,s,m2,ratio_ok)
+    call compute_mass_ratio_squared(mk,szone,m2one,second_ratio_ok)
+    if (.not.ratio_ok .or. .not.second_ratio_ok) then
+       info=-20
+       return
+    endif
     omx=1.0_dp-x
     zp=omx/(omx+m2)
+    one_minus_zp=m2/(omx+m2)
     ! The finite initial-state convolution is factorised at mu_F.  The
     ! reference formulae write L_R-log(mu_R^2/mu_F^2), which is exactly
     ! log(mu_F^2/s) for the regular and plus-distribution terms.
-    l=log(mu_fac*mu_fac/s)
-    lone=log(mu_fac*mu_fac/szone)
-    log_ren_over_fac=log(mu_ren*mu_ren/(mu_fac*mu_fac))
+    l=2.0_dp*log(mu_fac)-log(s)
+    lone=2.0_dp*log(mu_fac)-log(szone)
+    log_ren_over_fac=2.0_dp*(log(mu_ren)-log(mu_fac))
 
     if (a == cs_parton_q .and. b == cs_parton_q) then
        kernel%regular=-cs_cf_lc*(-((-1.0_dp+x*x)*l)+&
@@ -536,9 +677,9 @@ contains
        kernel%plus_z=cs_cf_lc*2.0_dp*(l-2.0_dp*log(omx))/(-omx)
        kernel%plus_one=cs_cf_lc*2.0_dp*(lone-2.0_dp*log(omx))/(-omx)
        kernel%plus_z=kernel%plus_z+cs_cf_lc*2.0_dp*&
-            log((2.0_dp-x)/(2.0_dp-x+m2))/omx
+            (log(2.0_dp-x)-log(2.0_dp-x+m2))/omx
        kernel%plus_one=kernel%plus_one+cs_cf_lc*2.0_dp*&
-            log(1.0_dp/(1.0_dp+m2one))/omx
+            (-log(1.0_dp+m2one))/omx
        if (zp > alpha) then
           kernel%regular=kernel%regular-cs_cf_lc*(-(1.0_dp+x)*log(zp/alpha)+&
                2.0_dp*log((1.0_dp+alpha-x)*zp/&
@@ -552,7 +693,7 @@ contains
        kernel%regular=cs_cf_initial_qg*core/x
        if (zp > alpha) then
           kernel%regular=kernel%regular-cs_cf_initial_qg*&
-               (2.0_dp*m2*log((1.0_dp-zp)/(1.0_dp-alpha))/x+&
+               (2.0_dp*m2*(log(one_minus_zp)-log(1.0_dp-alpha))/x+&
                (1.0_dp+omx*omx)*log(zp/alpha)/x)
        endif
     elseif (a == cs_parton_g .and. b == cs_parton_q) then
@@ -565,20 +706,20 @@ contains
     elseif (a == cs_parton_g .and. b == cs_parton_g) then
        core=l-3.0_dp*l*x+3.0_dp*l*x*x-2.0_dp*l*x**3+l*x**4-&
             (-1.0_dp+x)*(-1.0_dp+x*(2.0_dp+(-1.0_dp+x)*x))*log(omx)+&
-            x*log(2.0_dp-x)-m2*log(m2/(1.0_dp+m2-x))+&
-            m2*x*log(m2/(1.0_dp+m2-x))-&
+            x*log(2.0_dp-x)-m2*(log(m2)-log(1.0_dp+m2-x))+&
+            m2*x*(log(m2)-log(1.0_dp+m2-x))-&
             (-1.0_dp+x)*(-1.0_dp+x*(2.0_dp+(-1.0_dp+x)*x))*&
             log(omx/(omx+m2))
        kernel%regular=2.0_dp*cs_ca*core/((-1.0_dp+x)*x)
        kernel%plus_z=2.0_dp*cs_ca*(l-2.0_dp*log(omx))/(-omx)
        kernel%plus_one=2.0_dp*cs_ca*(lone-2.0_dp*log(omx))/(-omx)
        kernel%plus_z=kernel%plus_z+2.0_dp*cs_ca*&
-            log((2.0_dp-x)/(2.0_dp-x+m2))/omx
+            (log(2.0_dp-x)-log(2.0_dp-x+m2))/omx
        kernel%plus_one=kernel%plus_one+2.0_dp*cs_ca*&
-            log(1.0_dp/(1.0_dp+m2one))/omx
+            (-log(1.0_dp+m2one))/omx
        if (zp > alpha) then
           kernel%regular=kernel%regular+cs_ca*(-2.0_dp*m2*&
-               log((1.0_dp-zp)/(1.0_dp-alpha))/x-&
+               (log(one_minus_zp)-log(1.0_dp-alpha))/x-&
                2.0_dp*(-1.0_dp+omx/x+omx*x)*log(zp/alpha)+&
                2.0_dp*log(alpha*(1.0_dp-x+zp)/&
                ((1.0_dp+alpha-x)*zp))/omx)
@@ -587,6 +728,86 @@ contains
     else
        info=-2
     endif
+    if (info.eq.0 .and. .not.convolution_kernel_is_finite(kernel)) then
+       kernel=cs_convolution_kernel()
+       info=-20
+    endif
   end subroutine cs_massive_if_convolution
+
+  pure logical function convolution_kernel_is_finite(kernel)
+    type(cs_convolution_kernel),intent(in) :: kernel
+    convolution_kernel_is_finite=all(ieee_is_finite(&
+         [kernel%regular,kernel%plus_z,kernel%plus_one,kernel%delta]))
+  end function convolution_kernel_is_finite
+
+  pure subroutine convolution_safe_product(first,second,result,valid)
+    real(dp),intent(in) :: first,second
+    real(dp),intent(out) :: result
+    logical,intent(out) :: valid
+    result=0.0_dp
+    valid=.false.
+    if (.not.ieee_is_finite(first) .or. .not.ieee_is_finite(second)) return
+    if (abs(first).gt.convolution_value_limit .or. &
+         abs(second).gt.convolution_value_limit) return
+    if ((first.ne.0.0_dp .and. abs(first).lt.tiny(1.0_dp)) .or. &
+         (second.ne.0.0_dp .and. abs(second).lt.tiny(1.0_dp))) return
+    if (first.eq.0.0_dp .or. second.eq.0.0_dp) then
+       valid=.true.
+       return
+    endif
+    if (abs(first).gt.convolution_value_limit/abs(second)) return
+    if (abs(second).lt.1.0_dp) then
+       if (abs(first).lt.tiny(1.0_dp)/abs(second)) return
+    elseif (abs(first).lt.1.0_dp) then
+       if (abs(second).lt.tiny(1.0_dp)/abs(first)) return
+    endif
+    result=first*second
+    valid=ieee_is_finite(result)
+    if (valid) valid=abs(result).le.convolution_value_limit
+    if (.not.valid) result=0.0_dp
+  end subroutine convolution_safe_product
+
+  pure subroutine convolution_safe_sum(first,second,result,valid)
+    real(dp),intent(in) :: first,second
+    real(dp),intent(out) :: result
+    logical,intent(out) :: valid
+    result=0.0_dp
+    valid=.false.
+    if (.not.ieee_is_finite(first) .or. .not.ieee_is_finite(second)) return
+    if (abs(first).gt.convolution_value_limit .or. &
+         abs(second).gt.convolution_value_limit) return
+    if ((first.ne.0.0_dp .and. abs(first).lt.tiny(1.0_dp)) .or. &
+         (second.ne.0.0_dp .and. abs(second).lt.tiny(1.0_dp))) return
+    if ((first.ge.0.0_dp .and. second.ge.0.0_dp) .or. &
+         (first.lt.0.0_dp .and. second.lt.0.0_dp)) then
+       if (abs(first).gt.convolution_value_limit-abs(second)) return
+    endif
+    result=first+second
+    valid=ieee_is_finite(result)
+    if (valid) valid=abs(result).le.convolution_value_limit
+    if (.not.valid) result=0.0_dp
+  end subroutine convolution_safe_sum
+
+  pure subroutine compute_mass_ratio_squared(mass,invariant,ratio,valid)
+    real(dp),intent(in) :: mass,invariant
+    real(dp),intent(out) :: ratio
+    logical,intent(out) :: valid
+    real(dp) :: logarithm
+    ratio=0.0_dp
+    valid=.false.
+    if (.not.ieee_is_finite(mass) .or. .not.ieee_is_finite(invariant)) return
+    if (mass.lt.0.0_dp .or. invariant.le.0.0_dp) return
+    if (mass.eq.0.0_dp) then
+       valid=.true.
+       return
+    endif
+    logarithm=2.0_dp*log(mass)-log(invariant)
+    if (.not.ieee_is_finite(logarithm)) return
+    if (logarithm.lt.log(tiny(1.0_dp)) .or. &
+         logarithm.gt.log(0.125_dp*huge(1.0_dp))) return
+    ratio=exp(logarithm)
+    valid=ieee_is_finite(ratio)
+    if (valid) valid=ratio.gt.0.0_dp
+  end subroutine compute_mass_ratio_squared
 
 end module cs_massive_integrated_kernels

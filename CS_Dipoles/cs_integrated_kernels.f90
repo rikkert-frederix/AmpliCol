@@ -12,6 +12,7 @@ module cs_integrated_kernels
   ! that the same ordered histories and normalisations as the local dipoles
   ! are used.
   use cs_dipole_mappings, only: dp
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
 
@@ -46,6 +47,7 @@ module cs_integrated_kernels
   integer, parameter, public :: cs_parton_g = 2
   integer, parameter, public :: cs_scheme_hv = 1
   integer, parameter, public :: cs_scheme_fdh = 2
+  real(dp), parameter :: kernel_coordinate_floor=sqrt(tiny(1.0_dp))
 
   type, public :: cs_distribution
      real(dp) :: regular = 0.0_dp
@@ -139,7 +141,15 @@ contains
 
     kernel=cs_distribution()
     info=0
-    if (x <= 0.0_dp .or. x >= 1.0_dp) then
+    if (.not.ieee_is_finite(x)) then
+       info=-20
+       return
+    endif
+    if (nf.lt.0 .or. nf.gt.6) then
+       info=-1
+       return
+    endif
+    if (x < kernel_coordinate_floor .or. x >= 1.0_dp) then
        info=-1
        return
     endif
@@ -159,6 +169,10 @@ contains
     else
        info=-2
     endif
+    if (info.eq.0 .and. .not.distribution_is_finite(kernel)) then
+       kernel=cs_distribution()
+       info=-20
+    endif
   end subroutine cs_ap_distribution
 
   pure subroutine cs_kbar_distribution(a,b,x,nf,kernel,info)
@@ -174,11 +188,19 @@ contains
 
     kernel=cs_distribution()
     info=0
-    if (x <= 0.0_dp .or. x >= 1.0_dp) then
+    if (.not.ieee_is_finite(x)) then
+       info=-20
+       return
+    endif
+    if (nf.lt.0 .or. nf.gt.6) then
        info=-1
        return
     endif
-    logarithm=log((1.0_dp-x)/x)
+    if (x < kernel_coordinate_floor .or. x >= 1.0_dp) then
+       info=-1
+       return
+    endif
+    logarithm=log(1.0_dp-x)-log(x)
 
     if (a == cs_parton_q .and. b == cs_parton_g) then
        call cs_ap_distribution(a,b,x,nf,ap,info)
@@ -200,6 +222,10 @@ contains
     else
        info=-2
     endif
+    if (info.eq.0 .and. .not.distribution_is_finite(kernel)) then
+       kernel=cs_distribution()
+       info=-20
+    endif
   end subroutine cs_kbar_distribution
 
   pure subroutine cs_ff_alpha_endpoint(alpha,primitive,correction,info)
@@ -213,6 +239,10 @@ contains
 
     correction=0.0_dp
     info=0
+    if (.not.ieee_is_finite(alpha) .or. .not.all(ieee_is_finite(primitive))) then
+       info=-20
+       return
+    endif
     if (alpha <= 0.0_dp .or. alpha > 1.0_dp) then
        info=-3
        return
@@ -222,6 +252,10 @@ contains
     logarithm=log(alpha)
     correction=primitive(-1)*(alpha-1.0_dp-logarithm) &
          -primitive(-2)*logarithm*logarithm
+    if (.not.ieee_is_finite(correction)) then
+       correction=0.0_dp
+       info=-20
+    endif
   end subroutine cs_ff_alpha_endpoint
 
   pure subroutine cs_fi_alpha_endpoint(alpha,primitive,correction,info)
@@ -235,6 +269,10 @@ contains
 
     correction=0.0_dp
     info=0
+    if (.not.ieee_is_finite(alpha) .or. .not.all(ieee_is_finite(primitive))) then
+       info=-20
+       return
+    endif
     if (alpha <= 0.0_dp .or. alpha > 1.0_dp) then
        info=-3
        return
@@ -244,6 +282,10 @@ contains
     logarithm=log(alpha)
     correction=-primitive(-1)*logarithm &
          -primitive(-2)*logarithm*logarithm
+    if (.not.ieee_is_finite(correction)) then
+       correction=0.0_dp
+       info=-20
+    endif
   end subroutine cs_fi_alpha_endpoint
 
   pure subroutine cs_fi_distribution(primitive,x,alpha,regular_gz,subtracted,info)
@@ -262,7 +304,12 @@ contains
     regular_gz=0.0_dp
     subtracted=0.0_dp
     info=0
-    if (x <= 0.0_dp .or. x >= 1.0_dp) then
+    if (.not.all(ieee_is_finite(primitive)) .or. .not.ieee_is_finite(x) .or. &
+         .not.ieee_is_finite(alpha)) then
+       info=-20
+       return
+    endif
+    if (x < kernel_coordinate_floor .or. x >= 1.0_dp) then
        info=-1
        return
     endif
@@ -276,6 +323,11 @@ contains
     regular_gz=2.0_dp*primitive(-2)*log(2.0_dp-x)/one_minus_x
     subtracted=-(2.0_dp*primitive(-2)*log(one_minus_x)+primitive(-1)) &
          /one_minus_x
+    if (.not.ieee_is_finite(regular_gz) .or. .not.ieee_is_finite(subtracted)) then
+       regular_gz=0.0_dp
+       subtracted=0.0_dp
+       info=-20
+    endif
   end subroutine cs_fi_distribution
 
   pure subroutine cs_fi_alpha_terms(primitive,x,alpha,regular_gz,subtracted,info)
@@ -295,7 +347,12 @@ contains
     regular_gz=0.0_dp
     subtracted=0.0_dp
     info=0
-    if (x <= 0.0_dp .or. x >= 1.0_dp) then
+    if (.not.all(ieee_is_finite(primitive)) .or. .not.ieee_is_finite(x) .or. &
+         .not.ieee_is_finite(alpha)) then
+       info=-20
+       return
+    endif
+    if (x < kernel_coordinate_floor .or. x >= 1.0_dp) then
        info=-1
        return
     endif
@@ -309,6 +366,11 @@ contains
     regular_gz=-2.0_dp*primitive(-2)*log(2.0_dp-x)/one_minus_x
     subtracted=(2.0_dp*primitive(-2)*log(one_minus_x)+primitive(-1)) &
          /one_minus_x
+    if (.not.ieee_is_finite(regular_gz) .or. .not.ieee_is_finite(subtracted)) then
+       regular_gz=0.0_dp
+       subtracted=0.0_dp
+       info=-20
+    endif
   end subroutine cs_fi_alpha_terms
 
   pure subroutine cs_if_tilde_distribution(a,b,x,nf,kernel,info)
@@ -333,6 +395,10 @@ contains
     kernel%regular=-ap%plus_one*log(2.0_dp-x)/one_minus_x
     kernel%plus_log_one=ap%plus_one
     kernel%delta=-(cs_pi**2/6.0_dp)*ap%plus_one
+    if (.not.distribution_is_finite(kernel)) then
+       kernel=cs_distribution()
+       info=-20
+    endif
   end subroutine cs_if_tilde_distribution
 
   pure subroutine cs_ii_tilde_distribution(a,b,x,nf,kernel,info)
@@ -356,6 +422,10 @@ contains
     if (a == b) then
        kernel%delta=-(cs_pi**2/3.0_dp)*ap%plus_one
     endif
+    if (.not.distribution_is_finite(kernel)) then
+       kernel=cs_distribution()
+       info=-20
+    endif
   end subroutine cs_ii_tilde_distribution
 
   pure subroutine cs_if_alpha_distribution(a,b,x,nf,alpha,kernel,info)
@@ -371,7 +441,11 @@ contains
 
     kernel=cs_distribution()
     info=0
-    if (x <= 0.0_dp .or. x >= 1.0_dp) then
+    if (.not.ieee_is_finite(x) .or. .not.ieee_is_finite(alpha)) then
+       info=-20
+       return
+    endif
+    if (x < kernel_coordinate_floor .or. x >= 1.0_dp) then
        info=-1
        return
     endif
@@ -388,6 +462,10 @@ contains
     if (ap%plus_one /= 0.0_dp) then
        kernel%regular=kernel%regular-ap%plus_one/one_minus_x*&
             log((one_minus_x+alpha)/(one_minus_x+1.0_dp))
+    endif
+    if (.not.distribution_is_finite(kernel)) then
+       kernel=cs_distribution()
+       info=-20
     endif
   end subroutine cs_if_alpha_distribution
 
@@ -410,7 +488,11 @@ contains
 
     kernel=cs_distribution()
     info=0
-    if (x <= 0.0_dp .or. x >= 1.0_dp) then
+    if (.not.ieee_is_finite(x) .or. .not.ieee_is_finite(alpha)) then
+       info=-20
+       return
+    endif
+    if (x < kernel_coordinate_floor .or. x >= 1.0_dp) then
        info=-1
        return
     endif
@@ -424,7 +506,11 @@ contains
     if (alpha >= 1.0_dp .or. x >= 1.0_dp-alpha) return
 
     kernel%regular=(ap%regular+ap%plus_one/(1.0_dp-x))*&
-         log(alpha/(1.0_dp-x))
+         (log(alpha)-log(1.0_dp-x))
+    if (.not.distribution_is_finite(kernel)) then
+       kernel=cs_distribution()
+       info=-20
+    endif
   end subroutine cs_ii_alpha_distribution
 
   pure real(dp) function cs_fdh_endpoint_shift(parton) result(value)
@@ -450,5 +536,11 @@ contains
     kernel%plus_log_one=factor*kernel%plus_log_one
     kernel%delta=factor*kernel%delta
   end subroutine cs_scale_distribution
+
+  pure logical function distribution_is_finite(kernel)
+    type(cs_distribution),intent(in) :: kernel
+    distribution_is_finite=all(ieee_is_finite([kernel%regular,kernel%plus_one,&
+         kernel%plus_log,kernel%plus_log_one,kernel%delta]))
+  end function distribution_is_finite
 
 end module cs_integrated_kernels

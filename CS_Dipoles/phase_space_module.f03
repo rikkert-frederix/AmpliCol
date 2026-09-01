@@ -1,4 +1,5 @@
 module phase_space_module
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
 
   integer, parameter, public :: dp = selected_real_kind(15, 307)
@@ -21,7 +22,9 @@ module phase_space_module
   integer, parameter, public :: COL_FIRST_OUT = 3
 
   real(dp), parameter,private :: pi = 3.141592653589793238462643383279502884197_dp
-  real(dp), parameter :: tiny_rel = 100.0_dp * epsilon(1.0_dp)
+  real(dp), parameter, private :: ps_quartic_input_limit = &
+       0.125_dp*sqrt(sqrt(huge(1.0_dp)))
+  real(dp), parameter, private :: validation_rel = 1.0e-8_dp
 
   public :: generate_phase_space
   public :: generate_scattering_phase_space
@@ -38,6 +41,56 @@ module phase_space_module
 
 contains
 
+  logical function finite_bounded_scalar(x)
+    real(dp), intent(in) :: x
+    finite_bounded_scalar = .false.
+    if (.not.ieee_is_finite(x)) return
+    finite_bounded_scalar = abs(x) <= ps_quartic_input_limit
+  end function finite_bounded_scalar
+
+  logical function finite_bounded_vector(x)
+    real(dp), intent(in) :: x(:)
+    finite_bounded_vector = all(ieee_is_finite(x))
+    if (.not.finite_bounded_vector) return
+    if (size(x) > 0) finite_bounded_vector = maxval(abs(x)) <= ps_quartic_input_limit
+  end function finite_bounded_vector
+
+  function norm3(v) result(r)
+    real(dp), intent(in) :: v(3)
+    real(dp) :: r, scale
+
+    if (.not.all(ieee_is_finite(v))) then
+       r = huge(1.0_dp)
+       return
+    end if
+    scale = maxval(abs(v))
+    if (scale == 0.0_dp) then
+       r = 0.0_dp
+    else if (.not.ieee_is_finite(scale)) then
+       r = huge(1.0_dp)
+    else
+       r = scale*sqrt(sum((v/scale)**2))
+    end if
+  end function norm3
+
+  function hypot2(a, b) result(r)
+    real(dp), intent(in) :: a, b
+    real(dp) :: r, scale
+
+    if (.not.ieee_is_finite(a) .or. .not.ieee_is_finite(b)) then
+       r = huge(1.0_dp)
+       return
+    end if
+    scale = max(abs(a), abs(b))
+    if (scale == 0.0_dp) then
+       r = 0.0_dp
+    else if (.not.ieee_is_finite(scale)) then
+       r = huge(1.0_dp)
+    else
+       r = scale*sqrt((a/scale)**2 + (b/scale)**2)
+    end if
+  end function hypot2
+
   function dot3(a, b) result(d)
     real(dp), intent(in) :: a(3), b(3)
     real(dp) :: d
@@ -52,15 +105,61 @@ contains
 
   function msq4(p) result(m2)
     real(dp), intent(in) :: p(0:3)
-    real(dp) :: m2
-    m2 = dot4(p, p)
+    real(dp) :: m2, scale, pn(0:3)
+
+    if (.not.all(ieee_is_finite(p))) then
+       m2 = huge(1.0_dp)
+       return
+    end if
+    scale = maxval(abs(p))
+    if (scale == 0.0_dp) then
+       m2 = 0.0_dp
+    else if (scale > sqrt(huge(1.0_dp))) then
+       m2 = huge(1.0_dp)
+    else
+       pn = p/scale
+       m2 = scale*scale*(pn(0)*pn(0) - sum(pn(1:3)*pn(1:3)))
+    end if
   end function msq4
 
   function invariant_mass(p) result(m)
     real(dp), intent(in) :: p(0:3)
-    real(dp) :: m
-    m = safe_sqrt(msq4(p))
+    real(dp) :: m, scale, pn(0:3), m2n
+
+    if (.not.all(ieee_is_finite(p))) then
+       m = huge(1.0_dp)
+       return
+    end if
+    scale = maxval(abs(p))
+    if (scale == 0.0_dp) then
+       m = 0.0_dp
+    else if (.not.ieee_is_finite(scale)) then
+       m = huge(1.0_dp)
+    else
+       pn = p/scale
+       m2n = pn(0)*pn(0) - sum(pn(1:3)*pn(1:3))
+       m = scale*sqrt(max(0.0_dp, m2n))
+    end if
   end function invariant_mass
+
+  function normalized_msq4(p) result(m2n)
+    real(dp), intent(in) :: p(0:3)
+    real(dp) :: m2n, scale, pn(0:3)
+
+    if (.not.all(ieee_is_finite(p))) then
+       m2n = -huge(1.0_dp)
+       return
+    end if
+    scale = maxval(abs(p))
+    if (scale == 0.0_dp) then
+       m2n = 0.0_dp
+    else if (.not.ieee_is_finite(scale)) then
+       m2n = -huge(1.0_dp)
+    else
+       pn = p/scale
+       m2n = pn(0)*pn(0) - sum(pn(1:3)*pn(1:3))
+    end if
+  end function normalized_msq4
 
   function sij(p, i, j) result(sout)
     real(dp), intent(in) :: p(0:,:)
@@ -83,8 +182,18 @@ contains
 
   function kallen(a, b, c) result(lam)
     real(dp), intent(in) :: a, b, c
-    real(dp) :: lam
-    lam = a*a + b*b + c*c - 2.0_dp*(a*b + a*c + b*c)
+    real(dp) :: lam, scale, an, bn, cn
+
+    scale = max(abs(a), abs(b), abs(c))
+    if (scale == 0.0_dp) then
+       lam = 0.0_dp
+       return
+    end if
+    an = a/scale
+    bn = b/scale
+    cn = c/scale
+    lam = scale*scale*(an*an + bn*bn + cn*cn - &
+         2.0_dp*(an*bn + an*cn + bn*cn))
   end function kallen
 
   subroutine set_status(status, value)
@@ -116,6 +225,64 @@ contains
     r = maxval(abs(p))
   end function max_abs4
 
+  logical function masses_are_valid(n, mass)
+    integer, intent(in) :: n
+    real(dp), intent(in) :: mass(n)
+
+    masses_are_valid = n >= 1
+    if (.not.masses_are_valid) return
+    masses_are_valid = all(ieee_is_finite(mass))
+    if (.not.masses_are_valid) return
+    masses_are_valid = all(mass >= 0.0_dp) .and. maxval(mass) <= ps_quartic_input_limit
+  end function masses_are_valid
+
+  logical function final_state_is_valid(n, mass, p, total)
+    integer, intent(in) :: n
+    real(dp), intent(in) :: mass(n), p(0:3,n), total(0:3)
+    integer :: i
+    real(dp) :: scale, shell_scale, shell_tol, momentum_tol, psum(0:3)
+
+    final_state_is_valid = .false.
+    if (.not.masses_are_valid(n, mass) .or. .not.all(ieee_is_finite(p)) .or. &
+         .not.finite_bounded_vector(total)) return
+    if (maxval(abs(p)) > ps_quartic_input_limit) return
+
+    scale = max(maxval(abs(p)), maxval(mass), maxval(abs(total)), tiny(1.0_dp))
+    momentum_tol = validation_rel*scale*real(max(1, n), dp)
+    psum = 0.0_dp
+    do i = 1, n
+       if (p(0,i) < 0.0_dp .or. (mass(i) > 0.0_dp .and. p(0,i) <= 0.0_dp)) return
+       shell_scale = max(max_abs4(p(:,i)), mass(i), tiny(1.0_dp))
+       shell_tol = validation_rel*shell_scale*shell_scale
+       if (abs(msq4(p(:,i)) - mass(i)*mass(i)) > shell_tol) return
+       psum = psum + p(:,i)
+       if (.not.finite_bounded_vector(psum)) return
+    end do
+    if (maxval(abs(psum - total)) > momentum_tol) return
+    final_state_is_valid = .true.
+  end function final_state_is_valid
+
+  logical function scattering_event_is_valid(nout, mass, p)
+    integer, intent(in) :: nout
+    real(dp), intent(in) :: mass(nout), p(0:3,nout+2)
+    integer :: i
+    real(dp) :: incoming(0:3), beam_scale, shell_tol
+
+    scattering_event_is_valid = .false.
+    if (nout < 1) return
+    if (.not.all(ieee_is_finite(p))) return
+    if (maxval(abs(p)) > ps_quartic_input_limit) return
+    if (p(0,1) <= 0.0_dp .or. p(0,2) <= 0.0_dp) return
+    do i = 1, 2
+       beam_scale = max(max_abs4(p(:,i)), tiny(1.0_dp))
+       shell_tol = validation_rel*beam_scale*beam_scale
+       if (abs(msq4(p(:,i))) > shell_tol) return
+    end do
+    incoming = p(:,1) + p(:,2)
+    if (incoming(0) <= 0.0_dp .or. normalized_msq4(incoming) <= 0.0_dp) return
+    scattering_event_is_valid = final_state_is_valid(nout, mass, p(:,3:nout+2), incoming)
+  end function scattering_event_is_valid
+
   subroutine boost_one(p, beta, pb, istat)
     real(dp), intent(in) :: p(0:3)
     real(dp), intent(in) :: beta(3)
@@ -123,13 +290,36 @@ contains
     integer, intent(out) :: istat
     real(dp) :: b2, gamma, bp, fac
 
+    pb = 0.0_dp
+    if (.not.finite_bounded_vector(p) .or. .not.all(ieee_is_finite(beta))) then
+       istat = PS_BAD_INPUT
+       return
+    end if
+    if (maxval(abs(beta)) > 1.0_dp) then
+       istat = PS_BAD_INPUT
+       return
+    end if
+
     b2 = dot3(beta, beta)
     bp = beta(1)*p(1) + beta(2)*p(2) + beta(3)*p(3)
-    if (b2 <= 1.0e-30_dp) then
+    if (.not.ieee_is_finite(b2)) then
+       istat = PS_BAD_INPUT
+       return
+    end if
+    if (b2 < 0.0_dp) then
+       istat = PS_BAD_INPUT
+       return
+    end if
+    if (b2 <= epsilon(1.0_dp)**2) then
        pb(0) = p(0) + bp
        pb(1) = p(1) + p(0)*beta(1)
        pb(2) = p(2) + p(0)*beta(2)
        pb(3) = p(3) + p(0)*beta(3)
+       if (.not.finite_bounded_vector(pb)) then
+          pb = 0.0_dp
+          istat = PS_NUMERIC_FAIL
+          return
+       end if
        istat = PS_OK
        return
     end if
@@ -147,6 +337,11 @@ contains
     pb(1) = p(1) + fac*beta(1)
     pb(2) = p(2) + fac*beta(2)
     pb(3) = p(3) + fac*beta(3)
+    if (.not.finite_bounded_vector(pb)) then
+       pb = 0.0_dp
+       istat = PS_NUMERIC_FAIL
+       return
+    end if
     istat = PS_OK
   end subroutine boost_one
 
@@ -158,10 +353,12 @@ contains
     integer, intent(out) :: istat
     integer :: i, st
 
+    pb = 0.0_dp
     istat = PS_OK
     do i = 1, n
        call boost_one(p(:, i), beta, pb(:, i), st)
        if (st /= PS_OK) then
+          pb = 0.0_dp
           istat = st
           return
        end if
@@ -173,12 +370,29 @@ contains
     real(dp), intent(in) :: mass(n)
     real(dp), intent(in) :: kvec(3,n)
     real(dp), intent(in) :: scale
-    real(dp) :: e
+    real(dp) :: e, kmag, scaled_k, term
     integer :: i
 
     e = 0.0_dp
     do i = 1, n
-       e = e + sqrt(mass(i)*mass(i) + scale*scale*dot3(kvec(:, i), kvec(:, i)))
+       kmag = norm3(kvec(:, i))
+       if (abs(scale) > 1.0_dp) then
+          if (kmag > ps_quartic_input_limit/abs(scale)) then
+             e = huge(1.0_dp)
+             return
+          end if
+       end if
+       scaled_k = scale*kmag
+       term = hypot2(mass(i), scaled_k)
+       if (.not.ieee_is_finite(term)) then
+          e = huge(1.0_dp)
+          return
+       end if
+       if (term > huge(1.0_dp) - e) then
+          e = huge(1.0_dp)
+          return
+       end if
+       e = e + term
     end do
   end function scaled_energy
 
@@ -191,23 +405,38 @@ contains
     integer, intent(out) :: istat
 
     integer :: iter, i
-    real(dp) :: sum_mass, norm_sum, lo, hi, mid, fmid, fhi, tol
+    real(dp) :: sum_mass, max_knorm, lo, hi, mid, fmid, fhi, tol
 
     scale = 0.0_dp
     istat = PS_OK
 
+    if (n < 1 .or. .not.finite_bounded_scalar(target_energy) .or. &
+         .not.all(ieee_is_finite(mass)) .or. .not.all(ieee_is_finite(kvec))) then
+       istat = PS_BAD_INPUT
+       return
+    end if
+    if (target_energy < 0.0_dp .or. maxval(abs(mass)) > ps_quartic_input_limit .or. &
+         maxval(abs(kvec)) > ps_quartic_input_limit) then
+       istat = PS_BAD_INPUT
+       return
+    end if
+
     sum_mass = 0.0_dp
-    norm_sum = 0.0_dp
+    max_knorm = 0.0_dp
     do i = 1, n
-       if (mass(i) < -tiny_rel) then
+       if (mass(i) < 0.0_dp) then
           istat = PS_BAD_INPUT
           return
        end if
-       sum_mass = sum_mass + max(0.0_dp, mass(i))
-       norm_sum = norm_sum + dot3(kvec(:, i), kvec(:, i))
+       if (mass(i) > ps_quartic_input_limit - sum_mass) then
+          istat = PS_BAD_INPUT
+          return
+       end if
+       sum_mass = sum_mass + mass(i)
+       max_knorm = max(max_knorm, norm3(kvec(:, i)))
     end do
 
-    tol = 1.0e-12_dp * max(1.0_dp, abs(target_energy))
+    tol = 1.0e-12_dp * max(abs(target_energy), sum_mass, tiny(1.0_dp))
     if (target_energy < sum_mass - tol) then
        istat = PS_NO_PHASE_SPACE
        return
@@ -219,7 +448,7 @@ contains
        return
     end if
 
-    if (norm_sum <= tiny(1.0_dp)) then
+    if (max_knorm == 0.0_dp) then
        istat = PS_NO_PHASE_SPACE
        return
     end if
@@ -227,12 +456,16 @@ contains
     lo = 0.0_dp
     hi = 1.0_dp
     fhi = scaled_energy(n, mass, kvec, hi) - target_energy
-    do while (fhi < 0.0_dp .and. hi < 1.0e100_dp)
+    do while (fhi < 0.0_dp)
+       if (hi > 0.5_dp*huge(1.0_dp)) then
+          istat = PS_NUMERIC_FAIL
+          return
+       end if
        hi = 2.0_dp * hi
        fhi = scaled_energy(n, mass, kvec, hi) - target_energy
     end do
 
-    if (fhi < 0.0_dp) then
+    if (.not.ieee_is_finite(fhi)) then
        istat = PS_NUMERIC_FAIL
        return
     end if
@@ -240,6 +473,10 @@ contains
     do iter = 1, 200
        mid = 0.5_dp*(lo + hi)
        fmid = scaled_energy(n, mass, kvec, mid) - target_energy
+       if (.not.ieee_is_finite(fmid)) then
+          istat = PS_NUMERIC_FAIL
+          return
+       end if
        if (abs(fmid) <= tol) exit
        if (fmid > 0.0_dp) then
           hi = mid
@@ -257,18 +494,22 @@ contains
     real(dp), intent(out) :: u(3)
     real(dp) :: nrm
 
-    nrm = sqrt(dot3(vec, vec))
-    if (nrm > 1.0e-30_dp) then
-       u = vec / nrm
-       return
+    nrm = norm3(vec)
+    if (ieee_is_finite(nrm)) then
+       if (nrm > 0.0_dp) then
+          u = vec / nrm
+          return
+       end if
     end if
 
-    nrm = sqrt(dot3(fallback, fallback))
-    if (nrm > 1.0e-30_dp) then
-       u = fallback / nrm
-    else
-       u = (/ 1.0_dp, 0.0_dp, 0.0_dp /)
+    nrm = norm3(fallback)
+    if (ieee_is_finite(nrm)) then
+       if (nrm > 0.0_dp) then
+          u = fallback / nrm
+          return
+       end if
     end if
+    u = (/ 1.0_dp, 0.0_dp, 0.0_dp /)
   end subroutine unit_vector
 
   subroutine perpendicular_unit(nhat, u)
@@ -284,8 +525,10 @@ contains
 
     proj = dot3(trial, nhat)
     u = trial - proj*nhat
-    nrm = sqrt(dot3(u, u))
-    if (nrm <= 1.0e-30_dp) then
+    nrm = norm3(u)
+    if (.not.ieee_is_finite(nrm)) then
+       u = (/ 0.0_dp, 0.0_dp, 1.0_dp /)
+    else if (nrm <= 32.0_dp*epsilon(1.0_dp)) then
        u = (/ 0.0_dp, 0.0_dp, 1.0_dp /)
     else
        u = u / nrm
@@ -295,19 +538,30 @@ contains
   function two_body_q(mparent, m1, m2, istat) result(q)
     real(dp), intent(in) :: mparent, m1, m2
     integer, intent(out) :: istat
-    real(dp) :: q, lam, mp2, m12, m22, tol
+    real(dp) :: q, scale, ap, a1, a2, f1, f2, f3, f4, tol
 
     q = 0.0_dp
     istat = PS_OK
-    tol = 1.0e-12_dp * max(1.0_dp, mparent*mparent)
+    if (.not.finite_bounded_scalar(mparent) .or. .not.finite_bounded_scalar(m1) .or. &
+         .not.finite_bounded_scalar(m2)) then
+       istat = PS_BAD_INPUT
+       return
+    end if
+    if (min(mparent, m1, m2) < 0.0_dp) then
+       istat = PS_BAD_INPUT
+       return
+    end if
 
-    if (mparent < m1 + m2 - sqrt(tol)) then
+    scale = max(mparent, m1, m2)
+    tol = 1.0e-12_dp*max(scale, tiny(1.0_dp))
+
+    if (mparent < m1 + m2 - tol) then
        istat = PS_NO_PHASE_SPACE
        return
     end if
 
-    if (mparent <= 1.0e-30_dp) then
-       if (abs(m1) <= 1.0e-30_dp .and. abs(m2) <= 1.0e-30_dp) then
+    if (mparent == 0.0_dp) then
+       if (m1 == 0.0_dp .and. m2 == 0.0_dp) then
           q = 0.0_dp
           istat = PS_OK
        else
@@ -316,15 +570,23 @@ contains
        return
     end if
 
-    mp2 = mparent*mparent
-    m12 = m1*m1
-    m22 = m2*m2
-    lam = kallen(mp2, m12, m22)
-    if (lam < -tol) then
+    scale = max(mparent, m1, m2, tiny(1.0_dp))
+    ap = mparent/scale
+    a1 = m1/scale
+    a2 = m2/scale
+    f1 = ap - a1 - a2
+    f2 = ap + a1 + a2
+    f3 = ap - a1 + a2
+    f4 = ap + a1 - a2
+    if (min(f1, f2, f3, f4) < -1.0e-12_dp) then
        istat = PS_NO_PHASE_SPACE
        return
     end if
-    q = sqrt(max(0.0_dp, lam)) / (2.0_dp*mparent)
+    q = scale*sqrt(max(0.0_dp, f1*f2*f3*f4))/(2.0_dp*ap)
+    if (.not.finite_bounded_scalar(q)) then
+       q = 0.0_dp
+       istat = PS_NUMERIC_FAIL
+    end if
   end function two_body_q
 
   subroutine split_pair_from_cluster(cvec, m1, m2, qrel, ehat, nhat, pi_out, pj_out, istat)
@@ -339,37 +601,74 @@ contains
     pi_out = 0.0_dp
     pj_out = 0.0_dp
 
-    kabs = sqrt(dot3(cvec(1:3), cvec(1:3)))
+    if (.not.finite_bounded_vector(cvec) .or. .not.finite_bounded_scalar(m1) .or. &
+         .not.finite_bounded_scalar(m2) .or. .not.finite_bounded_scalar(qrel) .or. &
+         .not.all(ieee_is_finite(ehat)) .or. .not.all(ieee_is_finite(nhat))) then
+       istat = PS_BAD_INPUT
+       return
+    end if
+    if (min(m1, m2, qrel) < 0.0_dp .or. cvec(0) <= 0.0_dp) then
+       istat = PS_BAD_INPUT
+       return
+    end if
+    if (abs(norm3(ehat) - 1.0_dp) > 1.0e-6_dp .or. &
+         abs(norm3(nhat) - 1.0_dp) > 1.0e-6_dp) then
+       istat = PS_BAD_INPUT
+       return
+    end if
+
+    kabs = norm3(cvec(1:3))
     cth = max(-1.0_dp, min(1.0_dp, dot3(ehat, nhat)))
     trans = ehat - cth*nhat
 
-    if (abs(m1) <= 1.0e-30_dp .and. abs(m2) <= 1.0e-30_dp) then
+    if (m1 == 0.0_dp .and. m2 == 0.0_dp) then
        ! Stable massless formula. It remains well conditioned when cvec^2 -> 0.
        ei_lab = 0.5_dp*(cvec(0) + kabs*cth)
        ppar_i = 0.5_dp*(kabs + cvec(0)*cth)
        pi_out(0) = ei_lab
        pi_out(1:3) = ppar_i*nhat + qrel*trans
        pj_out = cvec - pi_out
+       if (.not.finite_bounded_vector(pi_out) .or. .not.finite_bounded_vector(pj_out)) then
+          pi_out = 0.0_dp
+          pj_out = 0.0_dp
+          istat = PS_NUMERIC_FAIL
+       end if
        return
     end if
 
     mcluster = invariant_mass(cvec)
-    if (mcluster <= 1.0e-30_dp) then
+    if (.not.finite_bounded_scalar(mcluster)) then
+       istat = PS_NO_PHASE_SPACE
+       return
+    end if
+    if (mcluster <= 0.0_dp) then
        istat = PS_NO_PHASE_SPACE
        return
     end if
 
-    ei_star = sqrt(m1*m1 + qrel*qrel)
-    ej_star = sqrt(m2*m2 + qrel*qrel)
+    ei_star = hypot2(m1, qrel)
+    ej_star = hypot2(m2, qrel)
     if (abs((ei_star + ej_star) - mcluster) > &
-         1.0e-8_dp*max(1.0_dp, mcluster)) then
+         1.0e-8_dp*max(mcluster, ei_star + ej_star, tiny(1.0_dp))) then
        ! The construction assumes that cvec has the invariant mass implied by qrel.
        istat = PS_NUMERIC_FAIL
        return
     end if
 
+    if (mcluster < max(cvec(0), kabs)/ps_quartic_input_limit) then
+       istat = PS_NUMERIC_FAIL
+       return
+    end if
     e_over_m = cvec(0) / mcluster
     k_over_m = kabs / mcluster
+    if (.not.ieee_is_finite(e_over_m) .or. .not.ieee_is_finite(k_over_m)) then
+       istat = PS_NUMERIC_FAIL
+       return
+    end if
+    if (max(e_over_m, k_over_m) > ps_quartic_input_limit) then
+       istat = PS_NUMERIC_FAIL
+       return
+    end if
 
     ei_lab = e_over_m*ei_star + k_over_m*qrel*cth
     ppar_i = k_over_m*ei_star + e_over_m*qrel*cth
@@ -377,6 +676,11 @@ contains
     pi_out(0) = ei_lab
     pi_out(1:3) = ppar_i*nhat + qrel*trans
     pj_out = cvec - pi_out
+    if (.not.finite_bounded_vector(pi_out) .or. .not.finite_bounded_vector(pj_out)) then
+       pi_out = 0.0_dp
+       pj_out = 0.0_dp
+       istat = PS_NUMERIC_FAIL
+    end if
   end subroutine split_pair_from_cluster
 
   subroutine generate_phase_space(n, mass, ptot, p, status)
@@ -394,29 +698,35 @@ contains
     call set_status(status, PS_OK)
     p = 0.0_dp
 
-    if (n < 1) then
+    if (n < 1 .or. .not.masses_are_valid(n, mass) .or. &
+         .not.finite_bounded_vector(ptot)) then
        call set_status(status, PS_BAD_INPUT)
        return
     end if
 
-    do i = 1, n
-       if (mass(i) < -tiny_rel) then
-          call set_status(status, PS_BAD_INPUT)
-          return
-       end if
-    end do
-
-    if (ptot(0) <= 0.0_dp) then
+    if (ptot(0) <= 0.0_dp .or. normalized_msq4(ptot) <= 0.0_dp) then
        call set_status(status, PS_BAD_INPUT)
        return
     end if
 
     ecm = invariant_mass(ptot)
-    tol = 1.0e-12_dp * max(1.0_dp, ecm)
+    if (.not.finite_bounded_scalar(ecm)) then
+       call set_status(status, PS_BAD_INPUT)
+       return
+    end if
+    if (ecm <= 0.0_dp) then
+       call set_status(status, PS_BAD_INPUT)
+       return
+    end if
     sum_mass = 0.0_dp
     do i = 1, n
-       sum_mass = sum_mass + max(0.0_dp, mass(i))
+       if (mass(i) > ps_quartic_input_limit - sum_mass) then
+          call set_status(status, PS_BAD_INPUT)
+          return
+       end if
+       sum_mass = sum_mass + mass(i)
     end do
+    tol = 1.0e-12_dp * max(ecm, sum_mass, tiny(1.0_dp))
 
     if (ecm < sum_mass - tol) then
        call set_status(status, PS_NO_PHASE_SPACE)
@@ -429,6 +739,11 @@ contains
           return
        end if
        p(:, 1) = ptot
+       if (.not.final_state_is_valid(n, mass, p, ptot)) then
+          p = 0.0_dp
+          call set_status(status, PS_NUMERIC_FAIL)
+          return
+       end if
        call set_status(status, PS_OK)
        return
     end if
@@ -442,11 +757,16 @@ contains
        end do
        beta = ptot(1:3) / ptot(0)
        call boost_many(n, pcm, beta, p, st)
+       if (st /= PS_OK) then
+          p = 0.0_dp
+       else if (.not.final_state_is_valid(n, mass, p, ptot)) then
+          p = 0.0_dp
+          st = PS_NUMERIC_FAIL
+       end if
        call set_status(status, st)
        return
     end if
 
-    call init_random_seed()
     do i = 1, n
        call random_number(r)
        cth = 2.0_dp*r(1) - 1.0_dp
@@ -466,6 +786,10 @@ contains
     end do
 
     qmass = invariant_mass(qsum)
+    if (.not.ieee_is_finite(qmass)) then
+       call set_status(status, PS_NUMERIC_FAIL)
+       return
+    end if
     if (qmass <= 0.0_dp) then
        call set_status(status, PS_NUMERIC_FAIL)
        return
@@ -479,6 +803,14 @@ contains
     end if
 
     q = (ecm/qmass) * qr
+    if (.not.all(ieee_is_finite(q))) then
+       call set_status(status, PS_NUMERIC_FAIL)
+       return
+    end if
+    if (maxval(abs(q)) > ps_quartic_input_limit) then
+       call set_status(status, PS_NUMERIC_FAIL)
+       return
+    end if
     do i = 1, n
        kvec(:, i) = q(1:3, i)
     end do
@@ -492,26 +824,19 @@ contains
     pcm = 0.0_dp
     do i = 1, n
        pcm(1:3, i) = scale*q(1:3, i)
-       pcm(0, i) = sqrt(mass(i)*mass(i) + dot3(pcm(1:3, i), pcm(1:3, i)))
+       pcm(0, i) = hypot2(mass(i), norm3(pcm(1:3, i)))
     end do
 
     beta = ptot(1:3) / ptot(0)
     call boost_many(n, pcm, beta, p, st)
+    if (st /= PS_OK) then
+       p = 0.0_dp
+    else if (.not.final_state_is_valid(n, mass, p, ptot)) then
+       p = 0.0_dp
+       st = PS_NUMERIC_FAIL
+    end if
     call set_status(status, st)
   end subroutine generate_phase_space
-
-  SUBROUTINE init_random_seed()
-    INTEGER :: i, n, clock
-    INTEGER, DIMENSION(:), ALLOCATABLE :: seed
-
-    CALL RANDOM_SEED(size = n)
-    ALLOCATE(seed(n))
-    
-    seed = 1
-    CALL RANDOM_SEED(PUT = seed)
-
-    DEALLOCATE(seed)
-  END SUBROUTINE init_random_seed
 
 
   subroutine generate_scattering_phase_space(nout, mass, pinitial, p, status)
@@ -527,29 +852,37 @@ contains
     call set_status(status, PS_OK)
     p = 0.0_dp
 
-    if (nout < 1) then
+    if (nout < 1 .or. .not.masses_are_valid(nout, mass) .or. &
+         .not.all(ieee_is_finite(pinitial))) then
+       call set_status(status, PS_BAD_INPUT)
+       return
+    end if
+    if (maxval(abs(pinitial)) > ps_quartic_input_limit) then
        call set_status(status, PS_BAD_INPUT)
        return
     end if
 
-    tol = 1.0e-8_dp * max(1.0_dp, max_abs4(pinitial(:,1)) + max_abs4(pinitial(:,2)))
     if (pinitial(0,1) <= 0.0_dp .or. pinitial(0,2) <= 0.0_dp) then
        call set_status(status, PS_BAD_INPUT)
        return
     end if
+    tol = validation_rel*max(max_abs4(pinitial(:,1)), max_abs4(pinitial(:,2)), &
+         tiny(1.0_dp))**2
     if (abs(msq4(pinitial(:,1))) > tol .or. abs(msq4(pinitial(:,2))) > tol) then
        call set_status(status, PS_BAD_INPUT)
        return
     end if
 
     ptot = pinitial(:, 1) + pinitial(:, 2)
-    if (ptot(0) <= 0.0_dp .or. msq4(ptot) <= 0.0_dp) then
+    if (ptot(0) <= 0.0_dp .or. normalized_msq4(ptot) <= 0.0_dp .or. &
+         .not.finite_bounded_vector(ptot)) then
        call set_status(status, PS_BAD_INPUT)
        return
     end if
 
     p(:, 1:2) = pinitial
     call generate_phase_space(nout, mass, ptot, p(:, 3:nout+2), st)
+    if (st == PS_OK .and. .not.scattering_event_is_valid(nout, mass, p)) st = PS_NUMERIC_FAIL
     call set_status(status, st)
     if (st /= PS_OK) p = 0.0_dp
   end subroutine generate_scattering_phase_space
@@ -564,6 +897,11 @@ contains
     real(dp) :: pinitial(0:3,2), ebeam
 
     p = 0.0_dp
+    if (nout < 1 .or. .not.masses_are_valid(nout, mass) .or. &
+         .not.finite_bounded_scalar(sqrts)) then
+       call set_status(status, PS_BAD_INPUT)
+       return
+    end if
     if (sqrts <= 0.0_dp) then
        call set_status(status, PS_BAD_INPUT)
        return
@@ -597,7 +935,20 @@ contains
     call set_status(status, PS_OK)
     pout = 0.0_dp
 
-    if (n < 2 .or. isoft < 1 .or. isoft > n .or. lambda < 0.0_dp) then
+    if (n < 2 .or. isoft < 1 .or. isoft > n .or. &
+         .not.finite_bounded_scalar(lambda) .or. &
+         .not.masses_are_valid(n, mass) .or. .not.all(ieee_is_finite(pin))) then
+       call set_status(status, PS_BAD_INPUT)
+       return
+    end if
+    if (lambda < 0.0_dp .or. maxval(abs(pin)) > ps_quartic_input_limit) then
+       call set_status(status, PS_BAD_INPUT)
+       return
+    end if
+
+    call total_momentum(n, pin, ptot)
+    if (.not.final_state_is_valid(n, mass, pin, ptot) .or. ptot(0) <= 0.0_dp .or. &
+         normalized_msq4(ptot) <= 0.0_dp) then
        call set_status(status, PS_BAD_INPUT)
        return
     end if
@@ -615,12 +966,6 @@ contains
        end if
     end do
 
-    call total_momentum(n, pin, ptot)
-    if (ptot(0) <= 0.0_dp) then
-       call set_status(status, PS_BAD_INPUT)
-       return
-    end if
-
     beta = -ptot(1:3) / ptot(0)
     beta_back = ptot(1:3) / ptot(0)
     call boost_many(n, pin, beta, pcm, st)
@@ -634,14 +979,13 @@ contains
 
     pout_cm = 0.0_dp
     pout_cm(1:3, isoft) = lambda * pcm(1:3, isoft)
-    pout_cm(0, isoft) = sqrt(mass(isoft)*mass(isoft) + &
-         dot3(pout_cm(1:3, isoft), pout_cm(1:3, isoft)))
+    pout_cm(0, isoft) = hypot2(mass(isoft), norm3(pout_cm(1:3, isoft)))
 
     r0 = p_cm_tot - pcm(:, isoft)
     rnew = p_cm_tot - pout_cm(:, isoft)
     mnew = invariant_mass(rnew)
 
-    tol = 1.0e-10_dp * max(1.0_dp, mnew)
+    tol = 1.0e-10_dp * max(mnew, mass(idx(1)), tiny(1.0_dp))
 
     if (nspec == 1) then
        if (abs(mnew - mass(idx(1))) > tol) then
@@ -650,7 +994,7 @@ contains
        end if
        pout_cm(:, idx(1)) = rnew
     else
-       if (r0(0) <= 0.0_dp .or. msq4(r0) <= 0.0_dp) then
+       if (r0(0) <= 0.0_dp .or. normalized_msq4(r0) <= 0.0_dp) then
           call set_status(status, PS_NO_PHASE_SPACE)
           return
        end if
@@ -672,7 +1016,7 @@ contains
 
        do a = 1, nspec
           knew(1:3, a) = scale*krest(1:3, a)
-          knew(0, a) = sqrt(mm(a)*mm(a) + dot3(knew(1:3, a), knew(1:3, a)))
+          knew(0, a) = hypot2(mm(a), norm3(knew(1:3, a)))
        end do
 
        if (rnew(0) <= 0.0_dp) then
@@ -690,6 +1034,10 @@ contains
     end if
 
     call boost_many(n, pout_cm, beta_back, pout, st)
+    if (st == PS_OK .and. .not.final_state_is_valid(n, mass, pout, ptot)) then
+       pout = 0.0_dp
+       st = PS_NUMERIC_FAIL
+    end if
     call set_status(status, st)
   end subroutine soft_deform
 
@@ -708,13 +1056,25 @@ contains
     real(dp) :: ptot(0:3), p_cm_tot(0:3), beta(3), beta_back(3), beta_r(3)
     real(dp) :: c0(0:3), r0(0:3), cnew(0:3), rnew(0:3), pstar_i(0:3)
     real(dp) :: m0, mr, q0, qnew, mnew, ecm, outer_p, outer_e_c, outer_e_r
-    real(dp) :: lam_outer, nhat(3), ehat(3), fallback(3), tol
+    real(dp) :: lam_outer, lam_scale, lam_tol, nhat(3), ehat(3), fallback(3), tol
 
     call set_status(status, PS_OK)
     pout = 0.0_dp
 
     if (n < 2 .or. i1 < 1 .or. i1 > n .or. i2 < 1 .or. i2 > n .or. &
-         i1 == i2 .or. lambda < 0.0_dp) then
+         i1 == i2 .or. .not.finite_bounded_scalar(lambda) .or. &
+         .not.masses_are_valid(n, mass) .or. .not.all(ieee_is_finite(pin))) then
+       call set_status(status, PS_BAD_INPUT)
+       return
+    end if
+    if (lambda < 0.0_dp .or. maxval(abs(pin)) > ps_quartic_input_limit) then
+       call set_status(status, PS_BAD_INPUT)
+       return
+    end if
+
+    call total_momentum(n, pin, ptot)
+    if (.not.final_state_is_valid(n, mass, pin, ptot) .or. ptot(0) <= 0.0_dp .or. &
+         normalized_msq4(ptot) <= 0.0_dp) then
        call set_status(status, PS_BAD_INPUT)
        return
     end if
@@ -737,12 +1097,6 @@ contains
        end if
     end do
 
-    call total_momentum(n, pin, ptot)
-    if (ptot(0) <= 0.0_dp) then
-       call set_status(status, PS_BAD_INPUT)
-       return
-    end if
-
     beta = -ptot(1:3) / ptot(0)
     beta_back = ptot(1:3) / ptot(0)
     call boost_many(n, pin, beta, pcm, st)
@@ -759,7 +1113,7 @@ contains
     r0 = p_cm_tot - c0
     m0 = invariant_mass(c0)
     mr = invariant_mass(r0)
-    tol = 1.0e-10_dp * max(1.0_dp, ecm)
+    tol = 1.0e-10_dp * max(ecm, m0, mr, tiny(1.0_dp))
 
     q0 = two_body_q(m0, mass(i1), mass(i2), st)
     if (st /= PS_OK) then
@@ -768,10 +1122,10 @@ contains
     end if
 
     fallback = pcm(1:3, i1)
-    if (sqrt(dot3(fallback, fallback)) <= 1.0e-30_dp) fallback = (/ 1.0_dp, 0.0_dp, 0.0_dp /)
+    if (norm3(fallback) == 0.0_dp) fallback = (/ 1.0_dp, 0.0_dp, 0.0_dp /)
     call unit_vector(c0(1:3), fallback, nhat)
 
-    if (m0 > 1.0e-30_dp .and. q0 > 1.0e-30_dp) then
+    if (m0 > 0.0_dp .and. q0 > 0.0_dp) then
        beta_r = -c0(1:3) / c0(0)
        call boost_one(pcm(:, i1), beta_r, pstar_i, st)
        if (st /= PS_OK) then
@@ -784,7 +1138,7 @@ contains
     end if
 
     if (nspec > 1) then
-       if (r0(0) <= 0.0_dp .or. msq4(r0) <= 0.0_dp) then
+       if (r0(0) <= 0.0_dp .or. normalized_msq4(r0) <= 0.0_dp) then
           call set_status(status, PS_NO_PHASE_SPACE)
           return
        end if
@@ -798,9 +1152,18 @@ contains
        end do
     end if
 
+    if (q0 > 0.0_dp) then
+       if (lambda > ps_quartic_input_limit/q0) then
+          call set_status(status, PS_NUMERIC_FAIL)
+          return
+       end if
+    end if
     qnew = lambda*q0
-    mnew = sqrt(mass(i1)*mass(i1) + qnew*qnew) + &
-           sqrt(mass(i2)*mass(i2) + qnew*qnew)
+    mnew = hypot2(mass(i1), qnew) + hypot2(mass(i2), qnew)
+    if (.not.finite_bounded_scalar(mnew)) then
+       call set_status(status, PS_NUMERIC_FAIL)
+       return
+    end if
 
     if (ecm < mnew + mr - tol) then
        call set_status(status, PS_NO_PHASE_SPACE)
@@ -808,7 +1171,13 @@ contains
     end if
 
     lam_outer = kallen(ecm*ecm, mnew*mnew, mr*mr)
-    if (lam_outer < -tol*max(1.0_dp, ecm*ecm)) then
+    lam_scale = max(ecm, mnew, mr, tiny(1.0_dp))
+    lam_tol = 1.0e-10_dp*lam_scale**4
+    if (.not.ieee_is_finite(lam_outer)) then
+       call set_status(status, PS_NO_PHASE_SPACE)
+       return
+    end if
+    if (lam_outer < -lam_tol) then
        call set_status(status, PS_NO_PHASE_SPACE)
        return
     end if
@@ -850,6 +1219,10 @@ contains
     end if
 
     call boost_many(n, pout_cm, beta_back, pout, st)
+    if (st == PS_OK .and. .not.final_state_is_valid(n, mass, pout, ptot)) then
+       pout = 0.0_dp
+       st = PS_NUMERIC_FAIL
+    end if
     call set_status(status, st)
   end subroutine collinear_deform
 
@@ -864,7 +1237,13 @@ contains
     integer :: st, ifinal
 
     pout = 0.0_dp
-    if (nout < 1 .or. isoft_col < 3 .or. isoft_col > nout + 2) then
+    if (nout < 1 .or. isoft_col < 3 .or. isoft_col > nout + 2 .or. &
+         .not.finite_bounded_scalar(lambda) .or. &
+         .not.scattering_event_is_valid(nout, mass, pin)) then
+       call set_status(status, PS_BAD_INPUT)
+       return
+    end if
+    if (lambda < 0.0_dp) then
        call set_status(status, PS_BAD_INPUT)
        return
     end if
@@ -881,6 +1260,11 @@ contains
     if (st /= PS_OK) then
        pout = 0.0_dp
        call set_status(status, st)
+       return
+    end if
+    if (.not.scattering_event_is_valid(nout, mass, pout)) then
+       pout = 0.0_dp
+       call set_status(status, PS_NUMERIC_FAIL)
        return
     end if
     call set_status(status, PS_OK)
@@ -902,7 +1286,13 @@ contains
 
     status = PS_OK
     pout = 0.0_dp
-    if (nout < 2 .or. ifinal < 1 .or. ifinal > nout .or. lambda < 0.0_dp) then
+    if (nout < 2 .or. ifinal < 1 .or. ifinal > nout .or. &
+         .not.finite_bounded_scalar(lambda) .or. &
+         .not.scattering_event_is_valid(nout, mass, pin)) then
+       status = PS_BAD_INPUT
+       return
+    end if
+    if (lambda < 0.0_dp) then
        status = PS_BAD_INPUT
        return
     end if
@@ -918,7 +1308,7 @@ contains
     end do
 
     ptot = pin(:, 1) + pin(:, 2)
-    if (ptot(0) <= 0.0_dp .or. msq4(ptot) <= 0.0_dp) then
+    if (ptot(0) <= 0.0_dp .or. normalized_msq4(ptot) <= 0.0_dp) then
        status = PS_BAD_INPUT
        return
     end if
@@ -934,35 +1324,45 @@ contains
     p_cm_tot(0) = invariant_mass(ptot)
     pout_cm = 0.0_dp
     pout_cm(1:3, ifinal) = lambda*pcm(1:3, ifinal)
-    pout_cm(0, ifinal) = sqrt(mass(ifinal)*mass(ifinal) + dot3(pout_cm(1:3, ifinal), pout_cm(1:3, ifinal)))
+    pout_cm(0, ifinal) = hypot2(mass(ifinal), norm3(pout_cm(1:3, ifinal)))
 
     r0 = p_cm_tot - pcm(:, ifinal)
-    tol = 1.0e-10_dp*max(1.0_dp, p_cm_tot(0))
-    if (r0(0) <= 0.0_dp .or. msq4(r0) < -tol) then
+    tol = 1.0e-10_dp*max(p_cm_tot(0), max_abs4(r0), tiny(1.0_dp))
+    if (r0(0) <= 0.0_dp .or. normalized_msq4(r0) < -1.0e-10_dp) then
        status = PS_NO_PHASE_SPACE
        return
     end if
     m_spec = invariant_mass(r0)
-    beta_r = -r0(1:3) / r0(0)
-    do a = 1, nspec
-       call boost_one(pcm(:, idx(a)), beta_r, krest(:, a), st)
-       if (st /= PS_OK) then
-          status = st
+    if (nspec > 1) then
+       if (normalized_msq4(r0) <= 0.0_dp) then
+          status = PS_NO_PHASE_SPACE
           return
        end if
-    end do
+       beta_r = -r0(1:3) / r0(0)
+       do a = 1, nspec
+          call boost_one(pcm(:, idx(a)), beta_r, krest(:, a), st)
+          if (st /= PS_OK) then
+             status = st
+             return
+          end if
+       end do
+    end if
 
     rnew = 0.0_dp
     rnew(1:3) = -pout_cm(1:3, ifinal)
-    rnew(0) = sqrt(m_spec*m_spec + dot3(rnew(1:3), rnew(1:3)))
-    beta_r = rnew(1:3) / rnew(0)
-    do a = 1, nspec
-       call boost_one(krest(:, a), beta_r, pout_cm(:, idx(a)), st)
-       if (st /= PS_OK) then
-          status = st
-          return
-       end if
-    end do
+    rnew(0) = hypot2(m_spec, norm3(rnew(1:3)))
+    if (nspec == 1) then
+       pout_cm(:,idx(1)) = rnew
+    else
+       beta_r = rnew(1:3) / rnew(0)
+       do a = 1, nspec
+          call boost_one(krest(:, a), beta_r, pout_cm(:, idx(a)), st)
+          if (st /= PS_OK) then
+             status = st
+             return
+          end if
+       end do
+    end if
 
     call boost_many(nout, pout_cm, beta_back, pout(:, 3:nout+2), st)
     if (st /= PS_OK) then
@@ -970,6 +1370,7 @@ contains
        return
     end if
     call total_momentum(nout, pout(:, 3:nout+2), pnew)
+    tol = 1.0e-10_dp*max(max_abs4(pnew), tiny(1.0_dp))
     if (abs(pnew(1)) > tol .or. abs(pnew(2)) > tol) then
        status = PS_BAD_INPUT
        return
@@ -982,6 +1383,10 @@ contains
     end if
     pout(:, 1) = (/ e1, 0.0_dp, 0.0_dp, e1 /)
     pout(:, 2) = (/ e2, 0.0_dp, 0.0_dp, -e2 /)
+    if (.not.scattering_event_is_valid(nout, mass, pout)) then
+       pout = 0.0_dp
+       status = PS_NUMERIC_FAIL
+    end if
   end subroutine soft_deform_variable_shat_event
 
   subroutine collinear_deform_event(nout, mass, pin, icol1, icol2, lambda, pout, status)
@@ -998,7 +1403,12 @@ contains
     pout = 0.0_dp
     if (nout < 1 .or. icol1 < 1 .or. icol1 > nout + 2 .or. &
          icol2 < 1 .or. icol2 > nout + 2 .or. icol1 == icol2 .or. &
-         lambda < 0.0_dp) then
+         .not.finite_bounded_scalar(lambda) .or. &
+         .not.scattering_event_is_valid(nout, mass, pin)) then
+       call set_status(status, PS_BAD_INPUT)
+       return
+    end if
+    if (lambda < 0.0_dp) then
        call set_status(status, PS_BAD_INPUT)
        return
     end if
@@ -1020,6 +1430,11 @@ contains
           return
        end if
        pout(:, 1:2) = pin(:, 1:2)
+       if (.not.scattering_event_is_valid(nout, mass, pout)) then
+          pout = 0.0_dp
+          call set_status(status, PS_NUMERIC_FAIL)
+          return
+       end if
        call set_status(status, PS_OK)
        return
     end if
@@ -1028,6 +1443,7 @@ contains
        iinit = icol1
        ifinal = icol2
        call collinear_initial_final_deform(nout, mass, pin, iinit, ifinal, lambda, pout, st)
+       if (st /= PS_OK) pout = 0.0_dp
        call set_status(status, st)
        return
     end if
@@ -1036,6 +1452,7 @@ contains
        iinit = icol2
        ifinal = icol1
        call collinear_initial_final_deform(nout, mass, pin, iinit, ifinal, lambda, pout, st)
+       if (st /= PS_OK) pout = 0.0_dp
        call set_status(status, st)
        return
     end if
@@ -1056,17 +1473,23 @@ contains
     integer, allocatable :: idx(:)
     real(dp), allocatable :: pcm(:,:), pout_cm(:,:), krest(:,:), knew(:,:)
     real(dp), allocatable :: mm(:), kvec(:,:)
-    real(dp) :: ptot(0:3), psum_final(0:3), p_cm_tot(0:3)
+    real(dp) :: ptot(0:3), p_cm_tot(0:3)
     real(dp) :: beta(3), beta_back(3), beta_r(3)
     real(dp) :: f0(0:3), fnew(0:3), r0(0:3), rnew(0:3)
     real(dp) :: nhat(3), uperp(3), kvec_f(3), kperp(3)
-    real(dp) :: pabs, kpar, kperp_abs, theta0, theta_new, mnew, scale, tol
+    real(dp) :: pabs, kpar, kperp_abs, theta0, theta_new, mnew, scale
 
     status = PS_OK
     pout = 0.0_dp
 
     if (nout < 1 .or. iinit_col < 1 .or. iinit_col > 2 .or. &
-         ifinal_col < 3 .or. ifinal_col > nout + 2 .or. lambda < 0.0_dp) then
+         ifinal_col < 3 .or. ifinal_col > nout + 2 .or. &
+         .not.finite_bounded_scalar(lambda) .or. &
+         .not.scattering_event_is_valid(nout, mass, pin)) then
+       status = PS_BAD_INPUT
+       return
+    end if
+    if (lambda < 0.0_dp) then
        status = PS_BAD_INPUT
        return
     end if
@@ -1084,34 +1507,7 @@ contains
        return
     end if
 
-    do i = 1, nout
-       if (mass(i) < -tiny_rel) then
-          status = PS_BAD_INPUT
-          return
-       end if
-    end do
-
     ptot = pin(:, 1) + pin(:, 2)
-    tol = 1.0e-8_dp * max(1.0_dp, max_abs4(ptot))
-
-    if (pin(0,1) <= 0.0_dp .or. pin(0,2) <= 0.0_dp) then
-       status = PS_BAD_INPUT
-       return
-    end if
-    if (abs(msq4(pin(:,1))) > tol .or. abs(msq4(pin(:,2))) > tol) then
-       status = PS_BAD_INPUT
-       return
-    end if
-    if (ptot(0) <= 0.0_dp .or. msq4(ptot) <= 0.0_dp) then
-       status = PS_BAD_INPUT
-       return
-    end if
-
-    call total_momentum(nout, pin(:, 3:nout+2), psum_final)
-    if (max_abs4(psum_final - ptot) > 1.0e-6_dp*max(1.0_dp, max_abs4(ptot))) then
-       status = PS_BAD_INPUT
-       return
-    end if
 
     allocate(idx(max(1, nspec)), pcm(0:3,nout+2), pout_cm(0:3,nout+2))
     allocate(krest(0:3,max(1, nspec)), knew(0:3,max(1, nspec)))
@@ -1141,9 +1537,9 @@ contains
 
     f0 = pcm(:, ifinal_col)
     kvec_f = f0(1:3)
-    pabs = sqrt(max(0.0_dp, dot3(kvec_f, kvec_f)))
+    pabs = norm3(kvec_f)
 
-    if (pabs <= 1.0e-30_dp) then
+    if (pabs == 0.0_dp) then
        if (abs(lambda - 1.0_dp) <= 1.0e-14_dp) then
           pout = pin
           status = PS_OK
@@ -1155,8 +1551,8 @@ contains
 
     kpar = dot3(kvec_f, nhat)
     kperp = kvec_f - kpar*nhat
-    kperp_abs = sqrt(max(0.0_dp, dot3(kperp, kperp)))
-    if (kperp_abs > 1.0e-30_dp) then
+    kperp_abs = norm3(kperp)
+    if (kperp_abs > 0.0_dp) then
        uperp = kperp / kperp_abs
     else
        call perpendicular_unit(nhat, uperp)
@@ -1177,13 +1573,19 @@ contains
     pout_cm(:, ifinal_col) = fnew
 
     if (nspec == 1) then
-       if (abs(mnew - mm(1)) > 1.0e-8_dp*max(1.0_dp, mnew, mm(1))) then
+       if (rnew(0) <= 0.0_dp .or. normalized_msq4(rnew) < -1.0e-10_dp) then
+          status = PS_NO_PHASE_SPACE
+          return
+       end if
+       if (abs(mnew - mm(1)) > &
+            1.0e-8_dp*max(mnew, mm(1), tiny(1.0_dp))) then
           status = PS_NO_PHASE_SPACE
           return
        end if
        pout_cm(:, idx(1)) = rnew
     else
-       if (r0(0) <= 0.0_dp .or. msq4(r0) <= 0.0_dp .or. rnew(0) <= 0.0_dp .or. msq4(rnew) < -tol) then
+       if (r0(0) <= 0.0_dp .or. normalized_msq4(r0) <= 0.0_dp .or. &
+            rnew(0) <= 0.0_dp .or. normalized_msq4(rnew) < -1.0e-10_dp) then
           status = PS_NO_PHASE_SPACE
           return
        end if
@@ -1206,7 +1608,7 @@ contains
 
        do a = 1, nspec
           knew(1:3, a) = scale*krest(1:3, a)
-          knew(0, a) = sqrt(mm(a)*mm(a) + dot3(knew(1:3, a), knew(1:3, a)))
+          knew(0, a) = hypot2(mm(a), norm3(knew(1:3, a)))
        end do
 
        beta_r = rnew(1:3) / rnew(0)
@@ -1227,6 +1629,11 @@ contains
 
     ! Keep the beam momenta bitwise equal to the input convention.
     pout(:, 1:2) = pin(:, 1:2)
+    if (.not.scattering_event_is_valid(nout, mass, pout)) then
+       pout = 0.0_dp
+       status = PS_NUMERIC_FAIL
+       return
+    end if
     status = PS_OK
   end subroutine collinear_initial_final_deform
 

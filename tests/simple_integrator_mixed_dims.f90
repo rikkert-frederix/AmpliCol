@@ -7,7 +7,19 @@ program simple_integrator_mixed_dims_test
   integer :: ndim(nchannel),ndim_extra(nchannel),nintegral(nchannel)
   real(kind=8) :: f(1),f_abs(1),aux(naux,1)
   real(kind=8),allocatable :: result(:,:),unc(:,:),aux_result(:,:),aux_unc(:,:)
-  logical :: to_write(1),done
+  logical :: to_write(1),done,success
+
+  call integ%get_channel_results(result,unc,success)
+  if (success .or. any(shape(result).ne.[2,0]) .or. any(shape(unc).ne.[2,0])) then
+     write(*,*) 'FAIL: uninitialised primary result query was not empty'
+     stop 1
+  endif
+  call integ%get_channel_aux_results(aux_result,aux_unc,success)
+  if (success .or. any(shape(aux_result).ne.[0,0]) .or. &
+       any(shape(aux_unc).ne.[0,0])) then
+     write(*,*) 'FAIL: uninitialised auxiliary result query was not empty'
+     stop 1
+  endif
 
   ndim=(/1,2/)
   ndim_extra=(/0,1/)
@@ -25,8 +37,16 @@ program simple_integrator_mixed_dims_test
      aux(:,1)=(/2d0,3d0/)
      call integ%fill_points(1,f_abs,f,to_write,done,f_aux=aux)
   enddo
-  call integ%get_channel_results(result,unc)
-  call integ%get_channel_aux_results(aux_result,aux_unc)
+  call integ%get_channel_results(result,unc,success)
+  if (.not.success) then
+     write(*,*) 'FAIL: initialised primary result query reported failure'
+     stop 1
+  endif
+  call integ%get_channel_aux_results(aux_result,aux_unc,success)
+  if (.not.success) then
+     write(*,*) 'FAIL: initialised auxiliary result query reported failure'
+     stop 1
+  endif
   call assert_all_close(result(2,:),1d0,'primary result')
   call assert_all_close(aux_result(1,:),2d0,'first auxiliary result')
   call assert_all_close(aux_result(2,:),3d0,'second auxiliary result')

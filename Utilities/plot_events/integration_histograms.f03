@@ -5,11 +5,13 @@ module integration_histograms
   ! associated with one random point (notably R and all mapped CS dipoles) are
   ! first summed in point(:,:) and only then squared.  Leaf sample means are
   ! combined across iterations by point count and summed across leaves.
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
 
   integer,parameter :: curve_nlo=1,curve_born=2
   integer,parameter :: title_length=160
+  real(kind=8),parameter :: histogram_value_limit=0.25d0*huge(1d0)**0.25d0
 
   type :: histogram_data
      integer :: label=0
@@ -30,7 +32,7 @@ module integration_histograms
   integer,allocatable,save :: touched_histograms(:)
   integer(kind=8),allocatable,save :: npoints_iter(:),npoints_total(:)
   integer,save :: nleaves=0,current_leaf=0,nhistograms_touched=0
-  logical,save :: initialized=.false.,point_open=.false.,write_nlo=.false.
+  logical,save :: initialized=.false.,point_open=.false.,point_invalid=.false.,write_nlo=.false.
   character(len=256),save :: output_file=''
 
   public :: histogram_initialize,histogram_book,histogram_begin_point
@@ -66,6 +68,7 @@ contains
     current_leaf=0
     nhistograms_touched=0
     point_open=.false.
+    point_invalid=.false.
     initialized=.true.
   end subroutine histogram_initialize
 
@@ -78,7 +81,13 @@ contains
     integer :: i,nold
 
     call require_initialized('histogram_book')
-    if (label.le.0 .or. nbin.le.0 .or. xmax.le.xmin) then
+    if (label.le.0 .or. nbin.le.0 .or. .not.ieee_is_finite(xmin) .or. &
+         .not.ieee_is_finite(xmax)) then
+       write(*,*) 'ERROR: invalid histogram booking:',label,nbin,xmin,xmax
+       stop 1
+    endif
+    if (abs(xmin).gt.histogram_value_limit .or. &
+         abs(xmax).gt.histogram_value_limit .or. xmax.le.xmin) then
        write(*,*) 'ERROR: invalid histogram booking:',label,nbin,xmin,xmax
        stop 1
     endif
@@ -141,6 +150,7 @@ contains
        stop 1
     endif
     point_open=.true.
+    point_invalid=.false.
   end subroutine histogram_begin_point
 
   subroutine histogram_fill(label,x,wgt_nlo,wgt_born)
@@ -150,6 +160,19 @@ contains
     if (.not.point_open) then
        write(*,*) 'ERROR: histogram_fill called outside a point'
        stop 1
+    endif
+    if (point_invalid) return
+    if (.not.ieee_is_finite(x) .or. .not.ieee_is_finite(wgt_nlo) .or. &
+         .not.ieee_is_finite(wgt_born)) then
+       point_invalid=.true.
+       call report_invalid_histogram_point(label)
+       return
+    endif
+    if (abs(wgt_nlo).gt.histogram_value_limit .or. &
+         abs(wgt_born).gt.histogram_value_limit) then
+       point_invalid=.true.
+       call report_invalid_histogram_point(label)
+       return
     endif
     if (wgt_nlo.eq.0d0 .and. wgt_born.eq.0d0) return
     ih=find_histogram(label)
@@ -164,6 +187,12 @@ contains
        histograms(ih)%ntouched=histograms(ih)%ntouched+1
        histograms(ih)%touched_bins(histograms(ih)%ntouched)=ibin
        histograms(ih)%touched(ibin)=.true.
+    endif
+    if (abs(histograms(ih)%point(curve_nlo,ibin)+wgt_nlo).gt.histogram_value_limit .or. &
+         abs(histograms(ih)%point(curve_born,ibin)+wgt_born).gt.histogram_value_limit) then
+       point_invalid=.true.
+       call report_invalid_histogram_point(label)
+       return
     endif
     histograms(ih)%point(curve_nlo,ibin)=histograms(ih)%point(curve_nlo,ibin)+wgt_nlo
     histograms(ih)%point(curve_born,ibin)=histograms(ih)%point(curve_born,ibin)+wgt_born
@@ -180,10 +209,12 @@ contains
        ih=touched_histograms(iactive)
        do itouched=1,histograms(ih)%ntouched
           ibin=histograms(ih)%touched_bins(itouched)
-          histograms(ih)%accum(:,current_leaf,ibin)=&
-               histograms(ih)%accum(:,current_leaf,ibin)+histograms(ih)%point(:,ibin)
-          histograms(ih)%accum2(:,current_leaf,ibin)=&
-               histograms(ih)%accum2(:,current_leaf,ibin)+histograms(ih)%point(:,ibin)**2
+          if (.not.point_invalid) then
+             histograms(ih)%accum(:,current_leaf,ibin)=&
+                  histograms(ih)%accum(:,current_leaf,ibin)+histograms(ih)%point(:,ibin)
+             histograms(ih)%accum2(:,current_leaf,ibin)=&
+                  histograms(ih)%accum2(:,current_leaf,ibin)+histograms(ih)%point(:,ibin)**2
+          endif
           histograms(ih)%point(:,ibin)=0d0
           histograms(ih)%touched(ibin)=.false.
        enddo
@@ -192,7 +223,23 @@ contains
     nhistograms_touched=0
     current_leaf=0
     point_open=.false.
+    point_invalid=.false.
   end subroutine histogram_commit_point
+
+  subroutine report_invalid_histogram_point(label)
+    integer,intent(in) :: label
+    integer(kind=8),save :: invalid_points=0_8
+    invalid_points=invalid_points+1_8
+    if (invalid_points.le.10_8 .or. mod(invalid_points,1000_8).eq.0_8) then
+       write(*,'(a,i0,a,i0)') 'WARNING: discarded invalid histogram point, count=',&
+            invalid_points,' label=',label
+       write(99,'(a,i0,a,i0)') 'WARNING: discarded invalid histogram point, count=',&
+            invalid_points,' label=',label
+    elseif (invalid_points.eq.11_8) then
+       write(*,'(a)') 'WARNING: further invalid-histogram-point messages suppressed'
+       write(99,'(a)') 'WARNING: further invalid-histogram-point messages suppressed'
+    endif
+  end subroutine report_invalid_histogram_point
 
   subroutine histogram_finalize_iteration()
     integer :: ih,ileaf,icurve,ibin

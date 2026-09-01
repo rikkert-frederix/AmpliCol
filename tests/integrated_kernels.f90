@@ -1,9 +1,10 @@
 program integrated_kernels_test
   use cs_integrated_kernels
+  use, intrinsic :: ieee_arithmetic, only: ieee_value,ieee_quiet_nan
   implicit none
   real(kind=8), parameter :: tol=1d-13
   real(kind=8) :: alpha,c(-2:0),x,correction,regular_gz,subtracted
-  real(kind=8) :: lf,current_regular,current_plus,expected
+  real(kind=8) :: lf,current_regular,current_plus,expected,nan
   type(cs_distribution) :: p,k,kt,ka
   integer :: info
 
@@ -182,6 +183,22 @@ program integrated_kernels_test
 
   call assert_close(cs_fdh_endpoint_shift(cs_parton_q),-0.5d0*cs_cf_lc,'FDH quark shift')
   call assert_close(cs_fdh_endpoint_shift(cs_parton_g),-cs_ca/6d0,'FDH gluon shift')
+
+  nan=ieee_value(0d0,ieee_quiet_nan)
+  call cs_ap_distribution(cs_parton_q,cs_parton_q,nan,5,p,info)
+  call assert_true(info.eq.-20,'non-finite AP coordinate rejected')
+  call cs_kbar_distribution(cs_parton_q,cs_parton_q,x,7,k,info)
+  call assert_true(info.ne.0,'invalid AP flavour count rejected')
+  call cs_i_qg(c)
+  call cs_ff_alpha_endpoint(nan,c,correction,info)
+  call assert_true(info.eq.-20 .and. correction.eq.0d0,&
+       'non-finite FF alpha rejected')
+  c(0)=nan
+  call cs_fi_distribution(c,x,alpha,regular_gz,subtracted,info)
+  call assert_true(info.eq.-20 .and. regular_gz.eq.0d0 .and. subtracted.eq.0d0,&
+       'non-finite FI primitive rejected')
+  call cs_if_alpha_distribution(cs_parton_q,cs_parton_q,x,5,nan,ka,info)
+  call assert_true(info.eq.-20,'non-finite IF alpha rejected')
 
   write(*,'(a)') 'integrated kernel tests: PASS'
 

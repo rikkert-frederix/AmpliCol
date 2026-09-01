@@ -4,6 +4,8 @@ module particles
        configured_z_width=>z_width,configured_w_mass=>w_mass,&
        configured_w_width=>w_width,configured_higgs_mass=>higgs_mass,&
        configured_higgs_width=>higgs_width,ignore_final_state_width_fix
+  use run_parameters, only: run_parameter_limit,run_parameter_floor
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   integer,parameter :: model_particle_capacity = 24
   integer,parameter :: model_vertex_capacity = 222
@@ -32,7 +34,7 @@ module particles
   type physics_model
      type(particle),dimension(:),allocatable :: particle_list
      type(vertex),dimension(:),allocatable :: vertex_list
-     integer :: npart,nint
+     integer :: npart=0,nint=0
    contains
      procedure,public :: init_part,get_mass,get_width,get_spin&
           &,get_antipart,init_vert,get_dim,get_inter_dim,is_quark&
@@ -95,13 +97,17 @@ contains
     class(physics_model),intent(in) :: this
     integer,intent(in) :: ipdg
     integer :: i
+    find_particle_index=0
+    if (this%npart.lt.1) return
+    if (.not.allocated(this%particle_list)) return
+    if (lbound(this%particle_list,1).ne.1 .or. &
+         size(this%particle_list).lt.this%npart) return
     do i=1,this%npart
        if (this%particle_list(i)%type.eq.ipdg .or. this%particle_list(i)%anti_type.eq.ipdg) then
           find_particle_index=i
           return
        endif
     enddo
-    find_particle_index=0
   end function find_particle_index
 
   integer function particle_property_sign(this,ipdg)
@@ -109,6 +115,11 @@ contains
     class(physics_model),intent(in) :: this
     integer,intent(in) :: ipdg
     integer :: i
+    particle_property_sign=0
+    if (this%npart.lt.1) return
+    if (.not.allocated(this%particle_list)) return
+    if (lbound(this%particle_list,1).ne.1 .or. &
+         size(this%particle_list).lt.this%npart) return
     do i=1,this%npart
        if (this%particle_list(i)%type.eq.ipdg) then
           particle_property_sign=1
@@ -118,7 +129,6 @@ contains
           return
        endif
     enddo
-    particle_property_sign=0
   end function particle_property_sign
 
   real(kind=8) function weak_coupling()
@@ -204,10 +214,12 @@ contains
   subroutine init_part(this,tmass,twidth,zmass,zwidth,wmass,wwidth,hmass,hwidth)
     implicit none
     class(physics_model),intent(inout) :: this
-    integer :: i,l
+    integer :: i,l,allocation_status
     real(kind=8),intent(in),optional :: tmass,twidth,zmass,zwidth,wmass,wwidth,hmass,hwidth
     real(kind=8) :: tmass_local,twidth_local,zmass_local,zwidth_local
     real(kind=8) :: wmass_local,wwidth_local,hmass_local,hwidth_local
+    real(kind=8) :: model_parameters(8)
+    character(len=256) :: allocation_message
     tmass_local=configured_top_mass
     twidth_local=configured_top_width
     zmass_local=configured_z_mass
@@ -224,11 +236,38 @@ contains
     if (present(wwidth)) wwidth_local=wwidth
     if (present(hmass)) hmass_local=hmass
     if (present(hwidth)) hwidth_local=hwidth
+    model_parameters=[tmass_local,twidth_local,zmass_local,zwidth_local,&
+         wmass_local,wwidth_local,hmass_local,hwidth_local]
+    if (.not.all(ieee_is_finite(model_parameters))) then
+       write (*,*) 'ERROR: particle masses and widths must be finite and numerically representable'
+       stop 1
+    endif
+    if (any(abs(model_parameters).gt.run_parameter_limit) .or. &
+         any((model_parameters.ne.0d0) .and. &
+         (abs(model_parameters).lt.run_parameter_floor))) then
+       write (*,*) 'ERROR: particle masses and widths must be finite and numerically representable'
+       stop 1
+    endif
+    if (tmass_local.lt.0d0 .or. twidth_local.lt.0d0 .or. zmass_local.le.0d0 .or. &
+         zwidth_local.lt.0d0 .or. wmass_local.le.0d0 .or. wwidth_local.lt.0d0 .or. &
+         hmass_local.le.0d0 .or. hwidth_local.lt.0d0) then
+       write (*,*) 'ERROR: invalid particle mass or width'
+       stop 1
+    endif
     l=0
     if (allocated(this%particle_list)) deallocate(this%particle_list)
     if (allocated(this%vertex_list)) deallocate(this%vertex_list)
+    this%npart=0
+    this%nint=0
     this%npart=model_particle_capacity ! gluon, quarks, tensors, bosons, Higgs and leptons
-    allocate(this%particle_list(this%npart))
+    allocation_message=''
+    allocate(this%particle_list(this%npart),stat=allocation_status,&
+         errmsg=allocation_message)
+    if (allocation_status.ne.0) then
+       write (*,*) 'ERROR: could not allocate the particle model: ',&
+            trim(allocation_message)
+       stop 1
+    endif
 
     ! 5 massless quarks
     do i=1,5
@@ -297,11 +336,29 @@ contains
   subroutine init_vert(this)
     implicit none
     class(physics_model) :: this
-    integer :: i,l
+    integer :: i,l,allocation_status
+    character(len=256) :: allocation_message
+    if (this%npart.lt.1 .or. .not.allocated(this%particle_list)) then
+       write (*,*) 'ERROR: cannot initialise vertices before particles'
+       stop 1
+    endif
+    if (lbound(this%particle_list,1).ne.1 .or. &
+         size(this%particle_list).lt.this%npart) then
+       write (*,*) 'ERROR: incompatible particle storage during vertex initialisation'
+       stop 1
+    endif
     l=0
     if (allocated(this%vertex_list)) deallocate(this%vertex_list)
+    this%nint=0
     this%nint = model_vertex_capacity ! number of vertices
-    allocate(this%vertex_list(this%nint))
+    allocation_message=''
+    allocate(this%vertex_list(this%nint),stat=allocation_status,&
+         errmsg=allocation_message)
+    if (allocation_status.ne.0) then
+       write (*,*) 'ERROR: could not allocate the interaction model: ',&
+            trim(allocation_message)
+       stop 1
+    endif
     ! gluon-gluon to gluon vertex
     call append_vertex(this,l,0,[21,21,21],[1d0,0d0])
     ! gluon-gluon to tensor vertex
@@ -567,6 +624,16 @@ contains
        call append_vertex(this,l,24,[23,-(11+(2*i-2)),-(11+(2*i-2))],z_fermion_coupling(this,-(11+(2*i-2))))
     enddo
 
+    do i=1,l
+       if (.not.all(ieee_is_finite(this%vertex_list(i)%coupl))) then
+          write (*,*) 'ERROR: model construction produced a non-finite coupling',i
+          stop 1
+       endif
+       if (any(abs(this%vertex_list(i)%coupl).gt.0.25d0*huge(1d0)**0.25d0)) then
+          write (*,*) 'ERROR: model construction produced an unsafe coupling',i
+          stop 1
+       endif
+    enddo
     this%nint=l
     write (99,*) l,'interactions loaded'
   end subroutine init_vert
@@ -622,8 +689,13 @@ contains
        write (*,*) 'Particle not in model (set width)',ipdg
        stop 1
     endif
-    if (new_width.lt.0d0) then
-       write (*,*) 'Cannot assign a negative particle width',ipdg,new_width
+    if (.not.ieee_is_finite(new_width)) then
+       write (*,*) 'Cannot assign an invalid particle width',ipdg,new_width
+       stop 1
+    endif
+    if (new_width.lt.0d0 .or. new_width.gt.run_parameter_limit .or. &
+         (new_width.ne.0d0 .and. new_width.lt.run_parameter_floor)) then
+       write (*,*) 'Cannot assign an invalid particle width',ipdg,new_width
        stop 1
     endif
     this%particle_list(i)%width=new_width
@@ -633,10 +705,17 @@ contains
     implicit none
     class(physics_model),intent(inout) :: this
     integer,intent(in) :: n,nprocs
-    integer,dimension(n,nprocs),intent(in) :: processes
+    integer,dimension(:,:),intent(in) :: processes
     integer :: i,iproc,ipdg
     real(kind=8) :: old_width
     if (ignore_final_state_width_fix) return
+    if (n.lt.3 .or. nprocs.lt.1 .or. &
+         lbound(processes,1).ne.1 .or. lbound(processes,2).ne.1 .or. &
+         size(processes,1).ne.n .or. size(processes,2).ne.nprocs) then
+       write (*,*) 'Invalid process table while applying final-state widths',&
+            n,nprocs,size(processes,1),size(processes,2)
+       stop 1
+    endif
     do iproc=1,nprocs
        do i=3,n
           ipdg=processes(i,iproc)
@@ -775,6 +854,15 @@ contains
     implicit none
     class(physics_model) :: this
     integer :: i,itype
+    if (this%nint.lt.1 .or. .not.allocated(this%vertex_list)) then
+       write (*,*) 'Interaction model has not been initialised (dim)',itype
+       stop 1
+    endif
+    if (lbound(this%vertex_list,1).ne.1 .or. &
+         size(this%vertex_list).lt.this%nint) then
+       write (*,*) 'Interaction model has incompatible storage (dim)',itype
+       stop 1
+    endif
     do i=1,this%nint
        if (this%vertex_list(i)%type.eq.itype) then
           get_inter_dim=this%get_dim(this%vertex_list(i)%particles(3))
@@ -819,7 +907,9 @@ contains
     implicit none
     class(physics_model) :: this
     integer :: iPDG
-    is_massless_fermion=this%is_fermion(iPDG).and.this%get_mass(iPDG).eq.0d0
+    is_massless_fermion=.false.
+    if (.not.this%is_fermion(iPDG)) return
+    is_massless_fermion=this%get_mass(iPDG).eq.0d0
   end function is_massless_fermion
   logical function is_chiral_eligible(this,iPDG)
     implicit none
@@ -831,7 +921,8 @@ contains
     implicit none
     class(physics_model) :: this
     integer :: iPDG
-    is_lepton_any=abs(iPDG).ge.11 .and. abs(iPDG).le.16
+    is_lepton_any=(iPDG.ge.11 .and. iPDG.le.16) .or. &
+         (iPDG.le.-11 .and. iPDG.ge.-16)
   end function is_lepton_any
   logical function is_gluon(this,iPDG)
     implicit none
@@ -849,7 +940,10 @@ contains
     implicit none
     class(physics_model) :: this
     integer :: iPDG
-    is_scalar=abs(iPDG).eq.25.or.abs(iPDG).eq.125.or.abs(iPDG).eq.126.or.abs(iPDG).eq.127
+    is_scalar=iPDG.eq.25 .or. iPDG.eq.-25 .or. &
+         iPDG.eq.125 .or. iPDG.eq.-125 .or. &
+         iPDG.eq.126 .or. iPDG.eq.-126 .or. &
+         iPDG.eq.127 .or. iPDG.eq.-127
   end function is_scalar
   logical function is_gluon_aux_tensor(this,iPDG)
     implicit none
@@ -867,7 +961,7 @@ contains
     implicit none
     class(physics_model) :: this
     integer :: iPDG
-    is_w_aux_tensor=abs(iPDG).eq.26
+    is_w_aux_tensor=iPDG.eq.26 .or. iPDG.eq.-26
   end function is_w_aux_tensor
   logical function is_auxiliary_tensor(this,iPDG)
     implicit none
@@ -880,7 +974,7 @@ contains
     implicit none
     class(physics_model) :: this
     integer :: iPDG
-    is_singlet=.not.(abs(iPDG).le.6 .or. iPDG.eq.21)
+    is_singlet=.not.((iPDG.ge.-6 .and. iPDG.le.6) .or. iPDG.eq.21)
   end function is_singlet
   logical function is_photon(this,iPDG)
     implicit none
@@ -892,7 +986,7 @@ contains
     implicit none
     class(physics_model) :: this
     integer :: iPDG
-    is_massive_vector=iPDG.eq.23 .or. abs(iPDG).eq.24
+    is_massive_vector=iPDG.eq.23 .or. iPDG.eq.24 .or. iPDG.eq.-24
   end function is_massive_vector
   logical function is_higgs(this,iPDG)
     implicit none
@@ -910,12 +1004,9 @@ contains
     implicit none
     class(physics_model) :: this
     integer :: iPDG
-    if ((this%is_quark(iPDG).or.this%is_antiquark(iPDG).or.&
-         this%is_colour_flow_vector(iPDG)) .and. &
-         this%get_mass(iPDG).eq.0d0) then
-       is_jet=.true.
-    else
-       is_jet=.false.
-    endif
+    is_jet=.false.
+    if (.not.(this%is_quark(iPDG) .or. this%is_antiquark(iPDG) .or. &
+         this%is_colour_flow_vector(iPDG))) return
+    is_jet=this%get_mass(iPDG).eq.0d0
   end function is_jet
 end module particles

@@ -1,6 +1,8 @@
 module cs_lc_spin_dipoles
   use cs_dipole_mappings, only: dp, dot4, new_index,cs_dot4_scale,&
-       cs_value_is_resolved
+       cs_value_is_resolved,cs_roundoff_tolerance,cs_normalize_unit_interval,&
+       cs_quartic_input_limit
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
 
   real(dp), parameter :: pi_dp = 3.1415926535897932384626433832795_dp
@@ -8,7 +10,7 @@ module cs_lc_spin_dipoles
   real(dp), parameter :: cf_lc = ca / 2.0_dp
   real(dp), parameter :: tr = 0.5_dp
   real(dp), parameter :: tr_u1 = tr / ca
-  real(dp), parameter :: tiny_dip = 1.0d-30
+  real(dp), parameter :: tiny_dip = tiny(1.0_dp)
 
   integer, parameter :: ch_none = 0
   integer, parameter :: ch_i_qg = 11
@@ -31,7 +33,7 @@ contains
     ! errors and must remain fatal to the caller.
     integer, intent(in) :: status
     select case (status)
-    case (-17:-10,-101,-103,-104,-106,-108,-201,-202,-203,-301,-302,-303)
+    case (-20,-17:-10,-101,-103,-104,-106,-108,-201,-202,-203,-301,-302,-303)
        is_numerical=.true.
     case default
        is_numerical=.false.
@@ -53,13 +55,23 @@ contains
 
   logical function is_quark(f)
     integer, intent(in) :: f
-    is_quark = .not.is_gluon(f)
+    is_quark = (f >= 1 .and. f <= 6) .or. (f <= -1 .and. f >= -6)
   end function is_quark
+
+
+  logical function same_quark_flavour(f1,f2)
+    integer, intent(in) :: f1,f2
+    same_quark_flavour=.false.
+    if (.not.is_quark(f1) .or. .not.is_quark(f2)) return
+    same_quark_flavour=f1 == f2 .or. f1 == -f2
+  end function same_quark_flavour
 
 
   logical function is_q_qbar_pair(f1, f2)
     integer, intent(in) :: f1, f2
-    is_q_qbar_pair = (is_quark(f1) .and. f1 == -f2)
+    is_q_qbar_pair = .false.
+    if (.not.is_quark(f1) .or. .not.is_quark(f2)) return
+    is_q_qbar_pair = f1 == -f2
   end function is_q_qbar_pair
 
 
@@ -194,6 +206,115 @@ contains
   end subroutine scalar_to_vhel
 
 
+  subroutine final_velocity_factors(p_i,p_j,p_k,mass_parent,mass_spectator,vreal,vborn,info)
+    ! Massive final-final relative velocities.  Evaluate the Kallen
+    ! functions with scale-aware boundary handling and validate the two
+    ! scalar-product denominators before forming either ratio.
+    real(dp), intent(in) :: p_i(0:3),p_j(0:3),p_k(0:3)
+    real(dp), intent(in) :: mass_parent,mass_spectator
+    real(dp), intent(out) :: vreal,vborn
+    integer, intent(out) :: info
+    real(dp) :: qvec(0:3),pairvec(0:3)
+    real(dp) :: q2,pij2,mk2,mp2,q2_scale,pij2_scale
+    real(dp) :: lambda_real,lambda_born,lambda_real_scale,lambda_born_scale
+    real(dp) :: denom_real,denom_born,denom_real_scale,denom_born_scale
+    logical :: valid
+
+    vreal=0.0_dp
+    vborn=0.0_dp
+    info=0
+    if (.not.all(ieee_is_finite(p_i)) .or. .not.all(ieee_is_finite(p_j)) .or. &
+         .not.all(ieee_is_finite(p_k)) .or. .not.ieee_is_finite(mass_parent) .or. &
+         .not.ieee_is_finite(mass_spectator)) then
+       info=-20
+       return
+    endif
+    if (mass_parent.lt.0.0_dp .or. mass_spectator.lt.0.0_dp) then
+       info=-20
+       return
+    endif
+
+    qvec=p_i+p_j+p_k
+    pairvec=p_i+p_j
+    q2=dot4(qvec,qvec)
+    pij2=dot4(pairvec,pairvec)
+    mk2=mass_spectator*mass_spectator
+    mp2=mass_parent*mass_parent
+    q2_scale=cs_dot4_scale(qvec,qvec)
+    pij2_scale=cs_dot4_scale(pairvec,pairvec)
+    if (.not.ieee_is_finite(q2) .or. .not.ieee_is_finite(pij2) .or. &
+         .not.ieee_is_finite(q2_scale) .or. .not.ieee_is_finite(pij2_scale)) then
+       info=-20
+       return
+    endif
+    if (q2.le.cs_roundoff_tolerance(q2_scale)) then
+       info=-20
+       return
+    endif
+    if (pij2.lt.-cs_roundoff_tolerance(pij2_scale)) then
+       info=-20
+       return
+    endif
+
+    lambda_real=q2*q2+pij2*pij2+mk2*mk2-&
+         2.0_dp*(q2*pij2+q2*mk2+pij2*mk2)
+    lambda_born=q2*q2+mp2*mp2+mk2*mk2-&
+         2.0_dp*(q2*mp2+q2*mk2+mp2*mk2)
+    lambda_real_scale=abs(q2*q2)+abs(pij2*pij2)+abs(mk2*mk2)+&
+         2.0_dp*(abs(q2*pij2)+abs(q2*mk2)+abs(pij2*mk2))
+    lambda_born_scale=abs(q2*q2)+abs(mp2*mp2)+abs(mk2*mk2)+&
+         2.0_dp*(abs(q2*mp2)+abs(q2*mk2)+abs(mp2*mk2))
+    if (.not.ieee_is_finite(lambda_real) .or. .not.ieee_is_finite(lambda_born) .or. &
+         .not.ieee_is_finite(lambda_real_scale) .or. &
+         .not.ieee_is_finite(lambda_born_scale)) then
+       info=-20
+       return
+    endif
+    if (lambda_real.le.cs_roundoff_tolerance(lambda_real_scale) .or. &
+         lambda_born.lt.-cs_roundoff_tolerance(lambda_born_scale)) then
+       info=-20
+       return
+    endif
+
+    denom_real=q2-pij2-mk2
+    denom_born=q2-mp2-mk2
+    denom_real_scale=abs(q2)+abs(pij2)+mk2
+    denom_born_scale=abs(q2)+mp2+mk2
+    if (denom_real.le.cs_roundoff_tolerance(denom_real_scale) .or. &
+         denom_born.le.cs_roundoff_tolerance(denom_born_scale)) then
+       info=-20
+       return
+    endif
+    vreal=sqrt(lambda_real)/denom_real
+    vborn=sqrt(max(0.0_dp,lambda_born))/denom_born
+    if (.not.ieee_is_finite(vreal) .or. .not.ieee_is_finite(vborn)) then
+       vreal=0.0_dp
+       vborn=0.0_dp
+       info=-20
+       return
+    endif
+    call cs_normalize_unit_interval(vreal,valid)
+    if (.not.valid) then
+       vreal=0.0_dp
+       vborn=0.0_dp
+       info=-20
+       return
+    endif
+    call cs_normalize_unit_interval(vborn,valid)
+    if (.not.valid) then
+       vreal=0.0_dp
+       vborn=0.0_dp
+       info=-20
+       return
+    endif
+    if (vreal.le.cs_roundoff_tolerance(1.0_dp)) then
+       vreal=0.0_dp
+       vborn=0.0_dp
+       info=-20
+    endif
+  end subroutine final_velocity_factors
+
+
   subroutine cs_lc_dipole_spinrho(p, flav_real, flav_born, ijk, alpha_s, rho, eps_parent, dip, info, lc_weight, &
        mass_real, mass_parent)
     ! Leading-colour, spin-correlated Catani-Seymour dipole.  The optional
@@ -232,12 +353,13 @@ contains
     logical :: iini, kini
     real(dp) :: wt, pref, vcontract_alt
     real(dp) :: sij, sik, sjk, dotij, sij_parent
-    real(dp) :: dotij_scale,parent_scale
+    real(dp) :: dotij_scale,parent_scale,sik_scale,sjk_scale
+    real(dp) :: topology_den,topology_scale
     real(dp) :: mi, mj, mk, mparent
     real(dp) :: x, y, z, u
     complex(dp) :: vhel(2,2)
     real(dp) :: vcontract
-    logical :: use_masses
+    logical :: use_masses,valid
 
     i=ijk(1)
     j=ijk(2)
@@ -261,7 +383,15 @@ contains
           istat = -2
           goto 900
        endif
-       if (size(mass_real) /= n .or. any(mass_real < 0.0_dp) .or. mass_parent < 0.0_dp) then
+       if (size(mass_real) /= n) then
+          istat = -2
+          goto 900
+       endif
+       if (.not.all(ieee_is_finite(mass_real)) .or. .not.ieee_is_finite(mass_parent)) then
+          istat=-20
+          goto 900
+       endif
+       if (any(mass_real < 0.0_dp) .or. mass_parent < 0.0_dp) then
           istat = -2
           goto 900
        endif
@@ -281,6 +411,32 @@ contains
        istat = -2
        goto 900
     end if
+    if (.not.all(ieee_is_finite(p)) .or. .not.ieee_is_finite(alpha_s) .or. &
+         .not.ieee_is_finite(wt)) then
+       istat=-20
+       goto 900
+    endif
+    if (.not.all(ieee_is_finite(real(rho,dp))) .or. &
+         .not.all(ieee_is_finite(aimag(rho))) .or. &
+         .not.all(ieee_is_finite(real(eps_parent,dp))) .or. &
+         .not.all(ieee_is_finite(aimag(eps_parent)))) then
+       istat=-20
+       goto 900
+    endif
+    if (maxval(abs(p)).gt.cs_quartic_input_limit) then
+       istat=-20
+       goto 900
+    endif
+    if (use_masses) then
+       if (max(maxval(abs(mass_real)),abs(mass_parent)).gt.cs_quartic_input_limit) then
+          istat=-20
+          goto 900
+       endif
+    endif
+    if (alpha_s.lt.0.0_dp) then
+       istat=-2
+       goto 900
+    endif
 
     if (i < 1 .or. i > n .or. j < 1 .or. j > n .or. k < 1 .or. k > n) then
        istat = -3
@@ -302,7 +458,7 @@ contains
        mj = mass_real(j)
        mk = mass_real(k)
        mparent = mass_parent
-       if (mj > 100.0_dp*epsilon(1.0_dp)*max(1.0_dp,mparent)) then
+       if (mj > 100.0_dp*epsilon(1.0_dp)*max(tiny(1.0_dp),abs(mparent))) then
           istat = -7
           goto 900
        endif
@@ -344,14 +500,34 @@ contains
 
        sik = 2.0_dp * dot4(p(:,i), p(:,k))
        sjk = 2.0_dp * dot4(p(:,j), p(:,k))
+       sik_scale=2.0_dp*cs_dot4_scale(p(:,i),p(:,k))
+       sjk_scale=2.0_dp*cs_dot4_scale(p(:,j),p(:,k))
 
-       if (abs(sik + sjk) <= tiny_dip .or. abs(sij + sik + sjk) <= tiny_dip) then
+       topology_den=sik+sjk
+       topology_scale=sik_scale+sjk_scale
+       if (.not.cs_value_is_resolved(topology_den,topology_scale)) then
           istat = -11
           goto 900
-       end if
+       endif
 
-       z = sik / (sik + sjk)
-       y = sij / (sij + sik + sjk)
+       z=sik/topology_den
+       call cs_normalize_unit_interval(z,valid)
+       if (.not.valid) then
+          istat=-11
+          goto 900
+       endif
+       topology_den=sij+sik+sjk
+       topology_scale=2.0_dp*dotij_scale+sik_scale+sjk_scale
+       if (.not.cs_value_is_resolved(topology_den,topology_scale)) then
+          istat=-11
+          goto 900
+       endif
+       y=sij/topology_den
+       call cs_normalize_unit_interval(y,valid)
+       if (.not.valid) then
+          istat=-11
+          goto 900
+       endif
 
        call final_splitting_matrix(.false., alpha_s, flav_real(i), flav_real(j), flav_born(ni), &
             z, y_dummy=y, x_dummy=0.0_dp, p_i=p(:,i), p_j=p(:,j), &
@@ -370,16 +546,30 @@ contains
 
        sik = 2.0_dp * dot4(p(:,i), p(:,k))
        sjk = 2.0_dp * dot4(p(:,j), p(:,k))
+       sik_scale=2.0_dp*cs_dot4_scale(p(:,i),p(:,k))
+       sjk_scale=2.0_dp*cs_dot4_scale(p(:,j),p(:,k))
 
-       if (abs(sik + sjk) <= tiny_dip) then
+       topology_den=sik+sjk
+       topology_scale=sik_scale+sjk_scale
+       if (.not.cs_value_is_resolved(topology_den,topology_scale)) then
           istat = -12
           goto 900
        end if
 
-       z = sik / (sik + sjk)
-       x = (sik + sjk - sij) / (sik + sjk)
+       z=sik/topology_den
+       x=(topology_den-sij)/topology_den
+       call cs_normalize_unit_interval(z,valid)
+       if (.not.valid) then
+          istat=-12
+          goto 900
+       endif
+       call cs_normalize_unit_interval(x,valid)
+       if (.not.valid) then
+          istat=-13
+          goto 900
+       endif
 
-       if (abs(x) <= tiny_dip) then
+       if (x.le.cs_roundoff_tolerance(1.0_dp)) then
           istat = -13
           goto 900
        end if
@@ -400,20 +590,33 @@ contains
 
        sik = 2.0_dp * dot4(p(:,i), p(:,k))
        sjk = 2.0_dp * dot4(p(:,j), p(:,k))
+       sik_scale=2.0_dp*cs_dot4_scale(p(:,i),p(:,k))
 
-       if (abs(sij + sik) <= tiny_dip) then
+       topology_den=sij+sik
+       topology_scale=2.0_dp*dotij_scale+sik_scale
+       if (.not.cs_value_is_resolved(topology_den,topology_scale)) then
           istat = -14
           goto 900
        end if
 
-       x = (sij + sik - sjk) / (sij + sik)
+       x=(topology_den-sjk)/topology_den
+       call cs_normalize_unit_interval(x,valid)
+       if (.not.valid) then
+          istat=-15
+          goto 900
+       endif
 
-       if (abs(x) <= tiny_dip) then
+       if (x.le.cs_roundoff_tolerance(1.0_dp)) then
           istat = -15
           goto 900
        end if
 
-       u = sij / (sij + sik)
+       u=sij/topology_den
+       call cs_normalize_unit_interval(u,valid)
+       if (.not.valid) then
+          istat=-14
+          goto 900
+       endif
 
        call initial_final_splitting_matrix(alpha_s, flav_real(i), flav_real(j), flav_born(ni), &
             x, u, p_emit=p(:,i), p_unres=p(:,j), p_spec=p(:,k), mass_spec=mk, eps_parent=eps_parent, &
@@ -430,15 +633,21 @@ contains
 
        sik = 2.0_dp * dot4(p(:,i), p(:,k))
        sjk = 2.0_dp * dot4(p(:,j), p(:,k))
+       sik_scale=2.0_dp*cs_dot4_scale(p(:,i),p(:,k))
 
-       if (abs(sik) <= tiny_dip) then
+       if (.not.cs_value_is_resolved(sik,sik_scale)) then
           istat = -16
           goto 900
        end if
 
        x = (sik - sij - sjk) / sik
+       call cs_normalize_unit_interval(x,valid)
+       if (.not.valid) then
+          istat=-17
+          goto 900
+       endif
 
-       if (abs(x) <= tiny_dip) then
+       if (x.le.cs_roundoff_tolerance(1.0_dp)) then
           istat = -17
           goto 900
        end if
@@ -455,6 +664,10 @@ contains
     end if
 
 900 continue
+    if (istat.eq.0 .and. .not.ieee_is_finite(dip)) then
+       dip=0.0_dp
+       istat=-20
+    endif
     info = istat
   end subroutine cs_lc_dipole_spinrho
 
@@ -477,19 +690,22 @@ contains
 
     real(dp) :: zi, zj, zq, denom_i, denom_j
     real(dp) :: scalar, aterm, coeff, dotij, y, vreal, vtilde
-    real(dp) :: q2, pij2, mk2, mp2, lambda_real, lambda_born
+    real(dp) :: dotij_scale
     real(dp) :: zim, zjm
     real(dp) :: r(0:3), vten(0:3,0:3)
     logical :: massive
+    integer :: velocity_info
 
     info = 0
+    vhel=cmplx(0.0_dp,0.0_dp,kind=dp)
     zi = z
     zj = 1.0_dp - z
     dotij = dot4(p_i, p_j)
-    massive = mass_i > 100.0_dp*epsilon(1.0_dp) .or. mass_j > 100.0_dp*epsilon(1.0_dp) .or. &
-         mass_k > 100.0_dp*epsilon(1.0_dp) .or. mass_parent > 100.0_dp*epsilon(1.0_dp)
+    dotij_scale=cs_dot4_scale(p_i,p_j)
+    massive = mass_i > 0.0_dp .or. mass_j > 0.0_dp .or. &
+         mass_k > 0.0_dp .or. mass_parent > 0.0_dp
 
-    if (abs(dotij) <= tiny_dip) then
+    if (.not.cs_value_is_resolved(dotij,dotij_scale)) then
        info = -101
        return
     end if
@@ -513,25 +729,14 @@ contains
           denom_i = 1.0_dp - zq * (1.0_dp - y_dummy)
        end if
 
-       if (abs(denom_i) <= tiny_dip) then
+       if (.not.cs_value_is_resolved(denom_i,1.0_dp+abs(zq)+abs(x_dummy)+abs(y_dummy))) then
           info = -103
           return
        end if
 
        if (massive .and. .not.is_fi) then
-          q2 = dot4(p_i+p_j+p_k,p_i+p_j+p_k)
-          pij2 = dot4(p_i+p_j,p_i+p_j)
-          mk2 = mass_k*mass_k
-          mp2 = mass_parent*mass_parent
-          lambda_real = q2*q2 + pij2*pij2 + mk2*mk2 - 2.0_dp*(q2*pij2 + q2*mk2 + pij2*mk2)
-          lambda_born = q2*q2 + mp2*mp2 + mk2*mk2 - 2.0_dp*(q2*mp2 + q2*mk2 + mp2*mk2)
-          if (q2 <= tiny_dip .or. lambda_real <= tiny_dip .or. lambda_born < -tiny_dip) then
-             info = -106
-             return
-          endif
-          vreal = sqrt(max(0.0_dp,lambda_real))/(q2-pij2-mk2)
-          vtilde = sqrt(max(0.0_dp,lambda_born))/(q2-mp2-mk2)
-          if (abs(vreal) <= tiny_dip) then
+          call final_velocity_factors(p_i,p_j,p_k,mass_parent,mass_k,vreal,vtilde,velocity_info)
+          if (velocity_info.ne.0) then
              info = -106
              return
           endif
@@ -565,13 +770,14 @@ contains
              denom_j = 1.0_dp - zj * (1.0_dp - y_dummy)
           end if
 
-          if (abs(denom_i) <= tiny_dip .or. abs(denom_j) <= tiny_dip) then
+          if (.not.cs_value_is_resolved(denom_i,1.0_dp+abs(zi)+abs(x_dummy)+abs(y_dummy)) .or. &
+               .not.cs_value_is_resolved(denom_j,1.0_dp+abs(zj)+abs(x_dummy)+abs(y_dummy))) then
              info = -104
              return
           end if
 
-          if (massive .and. (mass_i > 100.0_dp*epsilon(1.0_dp) .or. &
-               mass_j > 100.0_dp*epsilon(1.0_dp) .or. mass_parent > 100.0_dp*epsilon(1.0_dp))) then
+          if (massive .and. (mass_i > 0.0_dp .or. mass_j > 0.0_dp .or. &
+               mass_parent > 0.0_dp)) then
              info = -107
              return
           endif
@@ -581,16 +787,8 @@ contains
           ! gluons in a colour-ordered sum.
           aterm = 1.0_dp/denom_i - 1.0_dp
           if (massive .and. .not.is_fi) then
-             q2 = dot4(p_i+p_j+p_k,p_i+p_j+p_k)
-             pij2 = dot4(p_i+p_j,p_i+p_j)
-             mk2 = mass_k*mass_k
-             lambda_real = q2*q2 + pij2*pij2 + mk2*mk2 - 2.0_dp*(q2*pij2 + q2*mk2 + pij2*mk2)
-             if (q2 <= tiny_dip .or. lambda_real <= tiny_dip) then
-                info = -107
-                return
-             endif
-             vreal = sqrt(lambda_real)/(q2-pij2-mk2)
-             if (abs(vreal) <= tiny_dip) then
+             call final_velocity_factors(p_i,p_j,p_k,mass_parent,mass_k,vreal,vtilde,velocity_info)
+             if (velocity_info.ne.0) then
                 info = -107
                 return
              endif
@@ -609,22 +807,14 @@ contains
 
        else if (is_q_qbar_pair(fi, fj)) then
 
-          if (massive .and. (mass_i > 100.0_dp*epsilon(1.0_dp) .or. &
-               mass_j > 100.0_dp*epsilon(1.0_dp) .or. mass_parent > 100.0_dp*epsilon(1.0_dp))) then
+          if (massive .and. (mass_i > 0.0_dp .or. mass_j > 0.0_dp .or. &
+               mass_parent > 0.0_dp)) then
              info = -108
              return
           endif
           if (massive .and. .not.is_fi) then
-             q2 = dot4(p_i+p_j+p_k,p_i+p_j+p_k)
-             pij2 = dot4(p_i+p_j,p_i+p_j)
-             mk2 = mass_k*mass_k
-             lambda_real = q2*q2 + pij2*pij2 + mk2*mk2 - 2.0_dp*(q2*pij2 + q2*mk2 + pij2*mk2)
-             if (q2 <= tiny_dip .or. lambda_real <= tiny_dip) then
-                info = -108
-                return
-             endif
-             vreal = sqrt(lambda_real)/(q2-pij2-mk2)
-             if (abs(vreal) <= tiny_dip) then
+             call final_velocity_factors(p_i,p_j,p_k,mass_parent,mass_k,vreal,vtilde,velocity_info)
+             if (velocity_info.ne.0) then
                 info = -108
                 return
              endif
@@ -651,6 +841,13 @@ contains
           return
        end if
     end if
+    if (info.eq.0) then
+       if (.not.all(ieee_is_finite(real(vhel,dp))) .or. &
+            .not.all(ieee_is_finite(aimag(vhel)))) then
+          vhel=cmplx(0.0_dp,0.0_dp,kind=dp)
+          info=-20
+       endif
+    endif
   end subroutine final_splitting_matrix
 
 
@@ -669,10 +866,11 @@ contains
     integer, intent(out) :: info
 
     integer :: ch
-    real(dp) :: scalar, denom, dotjk, coeff, aterm, parent_tr
+    real(dp) :: scalar, denom, dotjk, dotjk_scale, coeff, aterm, parent_tr
     real(dp) :: r(0:3), vten(0:3,0:3)
 
     info = 0
+    vhel=cmplx(0.0_dp,0.0_dp,kind=dp)
     if (mass_spec < 0.0_dp) then
        info = -205
        return
@@ -685,7 +883,7 @@ contains
 
        denom = 1.0_dp - x + u
 
-       if (abs(denom) <= tiny_dip) then
+       if (.not.cs_value_is_resolved(denom,1.0_dp+abs(x)+abs(u))) then
           info = -201
           return
        end if
@@ -705,9 +903,12 @@ contains
     case (ch_i_qq)
 
        dotjk = dot4(p_unres, p_spec)
+       dotjk_scale=cs_dot4_scale(p_unres,p_spec)
 
-       if (abs(x) <= tiny_dip .or. abs(u) <= tiny_dip .or. abs(1.0_dp - u) <= tiny_dip .or. &
-           abs(dotjk) <= tiny_dip) then
+       if (x.le.cs_roundoff_tolerance(1.0_dp) .or. &
+            u.le.cs_roundoff_tolerance(1.0_dp) .or. &
+            1.0_dp-u.le.cs_roundoff_tolerance(1.0_dp) .or. &
+            .not.cs_value_is_resolved(dotjk,dotjk_scale)) then
           info = -202
           return
        end if
@@ -729,10 +930,14 @@ contains
        end if
 
        dotjk = dot4(p_unres, p_spec)
+       dotjk_scale=cs_dot4_scale(p_unres,p_spec)
        denom = 1.0_dp - x + u
 
-       if (abs(x) <= tiny_dip .or. abs(u) <= tiny_dip .or. abs(1.0_dp - u) <= tiny_dip .or. &
-           abs(dotjk) <= tiny_dip .or. abs(denom) <= tiny_dip) then
+       if (x.le.cs_roundoff_tolerance(1.0_dp) .or. &
+            u.le.cs_roundoff_tolerance(1.0_dp) .or. &
+            1.0_dp-u.le.cs_roundoff_tolerance(1.0_dp) .or. &
+            .not.cs_value_is_resolved(dotjk,dotjk_scale) .or. &
+            .not.cs_value_is_resolved(denom,1.0_dp+abs(x)+abs(u))) then
           info = -203
           return
        end if
@@ -752,6 +957,13 @@ contains
        return
 
     end select
+    if (info.eq.0) then
+       if (.not.all(ieee_is_finite(real(vhel,dp))) .or. &
+            .not.all(ieee_is_finite(aimag(vhel)))) then
+          vhel=cmplx(0.0_dp,0.0_dp,kind=dp)
+          info=-20
+       endif
+    endif
   end subroutine initial_final_splitting_matrix
 
 
@@ -769,16 +981,18 @@ contains
 
     integer :: ch
     real(dp) :: scalar, dotab, dotja, dotjb, coeff, aterm, parent_tr
+    real(dp) :: dotab_scale,dotja_scale,dotjb_scale
     real(dp) :: r(0:3), vten(0:3,0:3)
 
     info = 0
+    vhel=cmplx(0.0_dp,0.0_dp,kind=dp)
     call initial_channel(fa, fj, fp, ch)
 
     select case (ch)
 
     case (ch_i_qg)
 
-       if (abs(1.0_dp - x) <= tiny_dip) then
+       if (1.0_dp-x.le.cs_roundoff_tolerance(1.0_dp)) then
           info = -301
           return
        end if
@@ -796,9 +1010,14 @@ contains
        dotab = dot4(p_emit, p_spec)
        dotja = dot4(p_unres, p_emit)
        dotjb = dot4(p_unres, p_spec)
+       dotab_scale=cs_dot4_scale(p_emit,p_spec)
+       dotja_scale=cs_dot4_scale(p_unres,p_emit)
+       dotjb_scale=cs_dot4_scale(p_unres,p_spec)
 
-       if (abs(x) <= tiny_dip .or. abs(dotab) <= tiny_dip .or. &
-           abs(dotja) <= tiny_dip .or. abs(dotjb) <= tiny_dip) then
+       if (x.le.cs_roundoff_tolerance(1.0_dp) .or. &
+            .not.cs_value_is_resolved(dotab,dotab_scale) .or. &
+            .not.cs_value_is_resolved(dotja,dotja_scale) .or. &
+            .not.cs_value_is_resolved(dotjb,dotjb_scale)) then
           info = -302
           return
        end if
@@ -822,9 +1041,15 @@ contains
        dotab = dot4(p_emit, p_spec)
        dotja = dot4(p_unres, p_emit)
        dotjb = dot4(p_unres, p_spec)
+       dotab_scale=cs_dot4_scale(p_emit,p_spec)
+       dotja_scale=cs_dot4_scale(p_unres,p_emit)
+       dotjb_scale=cs_dot4_scale(p_unres,p_spec)
 
-       if (abs(x) <= tiny_dip .or. abs(1.0_dp - x) <= tiny_dip .or. &
-           abs(dotab) <= tiny_dip .or. abs(dotja) <= tiny_dip .or. abs(dotjb) <= tiny_dip) then
+       if (x.le.cs_roundoff_tolerance(1.0_dp) .or. &
+            1.0_dp-x.le.cs_roundoff_tolerance(1.0_dp) .or. &
+            .not.cs_value_is_resolved(dotab,dotab_scale) .or. &
+            .not.cs_value_is_resolved(dotja,dotja_scale) .or. &
+            .not.cs_value_is_resolved(dotjb,dotjb_scale)) then
           info = -303
           return
        end if
@@ -844,6 +1069,13 @@ contains
        return
 
     end select
+    if (info.eq.0) then
+       if (.not.all(ieee_is_finite(real(vhel,dp))) .or. &
+            .not.all(ieee_is_finite(aimag(vhel)))) then
+          vhel=cmplx(0.0_dp,0.0_dp,kind=dp)
+          info=-20
+       endif
+    endif
   end subroutine initial_initial_splitting_matrix
 
 
@@ -864,12 +1096,12 @@ contains
        ! parent q, real incoming q, unresolved g
        ch = ch_i_qg
 
-    else if (is_quark(fp) .and. is_gluon(fa) .and. is_quark(fj) .and. abs(fp) == abs(fj)) then
+    else if (is_gluon(fa) .and. same_quark_flavour(fp,fj)) then
 
        ! parent q, real incoming g, unresolved q/qbar
        ch = ch_i_gq
 
-    else if (is_gluon(fp) .and. is_quark(fa) .and. is_quark(fj) .and. abs(fa) == abs(fj)) then
+    else if (is_gluon(fp) .and. same_quark_flavour(fa,fj)) then
 
        ! parent g, real incoming q/qbar, unresolved q/qbar
        ch = ch_i_qq

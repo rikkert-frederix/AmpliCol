@@ -35,12 +35,16 @@ module color_algebra
 ! 'get_next_iperm' that can be used to loop over permuation of
 ! objects.
 !
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+  implicit none
   private
   integer,dimension(:,:,:),allocatable,public :: Tr
   real*16,dimension(:),allocatable,public :: coef
-  integer,dimension(:,:),allocatable,public :: coef_Nc
+  integer(kind=8),dimension(:,:),allocatable,public :: coef_Nc
   integer,dimension(:),allocatable,public :: F
   integer,parameter :: Nc=3
+  integer,parameter :: max_color_workspace_labels=17
+  logical :: simplification_changed=.false.
   public &
        & Tr_allocate, &         ! allocate memory for lambda matrices (and F-string)
        & Tr_deallocate, &       ! deallocate memory for lambda matrices (and F-string)
@@ -65,16 +69,43 @@ contains
 ! permutation of 'n' different matrices, declares the Tr() and coef() arrays
 ! to cover the maximum possible size in all intermediate steps.
     implicit none
-    integer :: n
+    integer,intent(in) :: n
+    integer :: i,max_terms,istat
+    integer(kind=8) :: term_count
+    character(len=256) :: allocation_message
+    if (n.lt.1 .or. n.gt.max_color_workspace_labels) then
+       write (*,*) 'Unsupported colour-trace workspace size:',n,max_color_workspace_labels
+       stop 1
+    endif
+    term_count=1_8
+    do i=1,n
+       if (term_count.gt.shiftr(huge(term_count),1)) then
+          write (*,*) 'Colour-trace term count exceeds 64-bit integer range:',n
+          stop 1
+       endif
+       term_count=2_8*term_count
+    enddo
+    if (term_count.gt.int(huge(max_terms),kind=8)) then
+       write (*,*) 'Colour-trace term count exceeds default integer range:',term_count
+       stop 1
+    endif
+    max_terms=int(term_count)
     if (allocated(Tr)) deallocate(Tr)
     if (allocated(coef)) deallocate(coef)
     if (allocated(coef_Nc)) deallocate(coef_Nc)
     if (allocated(F)) deallocate(F)
-    allocate(coef(2**n))
-    allocate(coef_Nc(-n:n,0:2**n))
-    allocate(Tr(0:2*(n-1),0:n,0:2**n))
-    allocate(F(n-4))
-    coef_Nc(:,:)=0
+    allocate(coef(max_terms),coef_Nc(-n:n,0:max_terms),&
+         Tr(0:2*(n-1),0:n,0:max_terms),F(max(0,n-4)),&
+         stat=istat,errmsg=allocation_message)
+    if (istat.ne.0) then
+       call Tr_deallocate
+       write (*,*) 'Could not allocate colour-trace workspace:',trim(allocation_message)
+       stop 1
+    endif
+    Tr=0
+    coef=0.0_16
+    coef_Nc=0_8
+    F=0
   end subroutine Tr_allocate
 
   subroutine Tr_deallocate
@@ -85,6 +116,114 @@ contains
     if (allocated(F)) deallocate(F)
   end subroutine Tr_deallocate
 
+  subroutine require_term_capacity(additional)
+    implicit none
+    integer,intent(in) :: additional
+    integer :: current_terms
+    if (.not.allocated(Tr) .or. additional.lt.0) then
+       write (*,*) 'Invalid colour-trace capacity request:',additional
+       stop 1
+    endif
+    current_terms=Tr(0,0,0)
+    if (current_terms.lt.0 .or. current_terms.gt.ubound(Tr,3) .or. &
+         additional.gt.ubound(Tr,3)-current_terms) then
+       write (*,*) 'Colour-trace term workspace exhausted:',current_terms,additional,ubound(Tr,3)
+       stop 1
+    endif
+  end subroutine require_term_capacity
+
+  subroutine add_nc_coefficients(target,source,context)
+    implicit none
+    integer,intent(in) :: target,source
+    character(len=*),intent(in) :: context
+    integer :: power
+    integer(kind=8) :: first,second,min_value
+    min_value=-huge(0_8)-1_8
+    if (target.lt.lbound(coef_Nc,2) .or. target.gt.ubound(coef_Nc,2) .or. &
+         source.lt.lbound(coef_Nc,2) .or. source.gt.ubound(coef_Nc,2)) then
+       write (*,*) 'Invalid coefficient column in ',trim(context),target,source
+       stop 1
+    endif
+    do power=lbound(coef_Nc,1),ubound(coef_Nc,1)
+       first=coef_Nc(power,target)
+       second=coef_Nc(power,source)
+       if (second.gt.0_8) then
+          if (first.gt.huge(first)-second) then
+             write (*,*) '64-bit analytic colour coefficient overflow in ',trim(context),power
+             stop 1
+          endif
+       elseif (second.lt.0_8) then
+          if (first.lt.min_value-second) then
+             write (*,*) '64-bit analytic colour coefficient overflow in ',trim(context),power
+             stop 1
+          endif
+       endif
+       coef_Nc(power,target)=first+second
+    enddo
+  end subroutine add_nc_coefficients
+
+  subroutine negate_nc_coefficients(iterm,context)
+    implicit none
+    integer,intent(in) :: iterm
+    character(len=*),intent(in) :: context
+    integer(kind=8),parameter :: min_value=-huge(0_8)-1_8
+    if (any(coef_Nc(:,iterm).eq.min_value)) then
+       write (*,*) '64-bit analytic colour coefficient overflow in ',trim(context),iterm
+       stop 1
+    endif
+    coef_Nc(:,iterm)=-coef_Nc(:,iterm)
+  end subroutine negate_nc_coefficients
+
+  subroutine validate_trace_state()
+    implicit none
+    integer :: iterm,iprod,element,jprod,jelement,label,occurrences
+    if (.not.allocated(Tr) .or. .not.allocated(coef) .or. &
+         .not.allocated(coef_Nc)) then
+       write (*,*) 'Colour-trace simplification requested without an allocated workspace'
+       stop 1
+    endif
+    if (Tr(0,0,0).lt.0 .or. Tr(0,0,0).gt.ubound(Tr,3) .or. &
+         Tr(0,0,0).gt.size(coef) .or. Tr(0,0,0).gt.ubound(coef_Nc,2)) then
+       write (*,*) 'Invalid number of terms in colour trace:',Tr(0,0,0)
+       stop 1
+    endif
+    if (Tr(0,0,0).gt.0) then
+       if (.not.all(ieee_is_finite(coef(1:Tr(0,0,0))))) then
+          write (*,*) 'Non-finite coefficient in colour trace'
+          stop 1
+       endif
+    endif
+    do iterm=1,Tr(0,0,0)
+       if (Tr(0,0,iterm).lt.0 .or. Tr(0,0,iterm).gt.ubound(Tr,2)) then
+          write (*,*) 'Invalid number of trace products:',iterm,Tr(0,0,iterm)
+          stop 1
+       endif
+       do iprod=1,Tr(0,0,iterm)
+          if (Tr(0,iprod,iterm).lt.0 .or. Tr(0,iprod,iterm).gt.ubound(Tr,1)) then
+             write (*,*) 'Invalid trace length:',iterm,iprod,Tr(0,iprod,iterm)
+             stop 1
+          endif
+          do element=1,Tr(0,iprod,iterm)
+             label=Tr(element,iprod,iterm)
+             if (label.le.0) then
+                write (*,*) 'Invalid non-positive colour index:',iterm,iprod,element,label
+                stop 1
+             endif
+             occurrences=0
+             do jprod=1,Tr(0,0,iterm)
+                do jelement=1,Tr(0,jprod,iterm)
+                   if (Tr(jelement,jprod,iterm).eq.label) occurrences=occurrences+1
+                enddo
+             enddo
+             if (occurrences.ne.2) then
+                write (*,*) 'Uncontracted or multiply contracted colour index:',iterm,label,occurrences
+                stop 1
+             endif
+          enddo
+       enddo
+    enddo
+  end subroutine validate_trace_state
+
   subroutine Tr_full_simplify(res)
 ! Calls Tr_simplify repeatedly until no traces left. Returns the colour
 ! factor. Note there is no fail-safe, so might go into an infinite loop if
@@ -93,6 +232,7 @@ contains
     logical :: done
     integer :: iterm
     real*16 :: res
+    call validate_trace_state()
     ! Tr(a)=0
     call simplify_Tr1()
     ! Tr()=Nc
@@ -107,12 +247,20 @@ contains
              exit
           endif
        enddo
+       if (.not.done .and. .not.simplification_changed) then
+          write (*,*) 'Cannot simplify an inconsistent or uncontracted colour trace'
+          stop 1
+       endif
     enddo
-    res=0d0
-    coef_Nc(:,0)=0
+    res=0.0_16
+    coef_Nc(:,0)=0_8
     do iterm=1,Tr(0,0,0)
        res=res+coef(iterm)
-       coef_Nc(:,0)=coef_Nc(:,0)+coef_Nc(:,iterm)
+       if (.not.ieee_is_finite(res)) then
+          write (*,*) 'Non-finite exact colour factor during trace simplification'
+          stop 1
+       endif
+       call add_nc_coefficients(0,iterm,'final colour-factor sum')
     enddo
   end subroutine Tr_full_simplify
 
@@ -160,6 +308,7 @@ contains
 ! simplifies a sum of products of traces of T^a_ij colour factors and
 ! simplifies single elements.
     implicit none
+    simplification_changed=.false.
     ! Tr(a,x,b)*Tr(c,x,d)=(Tr(a,d,c,b)-1/Nc*Tr(a,b)*Tr(c,d))
     call Tr_pair_simplify()
     ! Tr(a)=0
@@ -189,9 +338,10 @@ contains
        do iprod=1,Tr(0,0,iterm)
           ! trace of 1 element:
           if (Tr(0,iprod,iterm).eq.1) then
-             coef(iterm)=0d0
-             coef_Nc(:,iterm)=0
+             coef(iterm)=0.0_16
+             coef_Nc(:,iterm)=0_8
              removed=.true.
+             simplification_changed=.true.
              call remove_iterm(iterm)
              exit
           endif
@@ -243,7 +393,12 @@ contains
           ! trace of zero elements:
           if (Tr(0,iprod,iterm).eq.0) then
              coef(iterm)=coef(iterm)*Nc
+             if (.not.ieee_is_finite(coef(iterm))) then
+                write (*,*) 'Non-finite coefficient while removing an empty colour trace',iterm
+                stop 1
+             endif
              call update_coef_Nc(+1,iterm)
+             simplification_changed=.true.
              call remove_iprod(iprod,iterm)
              cycle ! do not increment iprod, since all has been shifted by
                    ! remove_iprod()
@@ -292,6 +447,8 @@ contains
                 do ele2=1,Tr(0,iprod2,iterm)
                    if (Tr(ele1,iprod1,iterm).eq.Tr(ele2,iprod2,iterm)) then
                       ! Add one extra term corresponding to Tr(a,d,c,b)
+                      call require_term_capacity(1)
+                      simplification_changed=.true.
                       Tr(0,0,0)=Tr(0,0,0)+1
                       Tr(0,0,Tr(0,0,0))=Tr(0,0,iterm)-1
                       do iprod=1,Tr(0,0,iterm)
@@ -325,7 +482,7 @@ contains
                                                Tr(ele2+1:Tr(0,iprod2,iterm)+1,iprod2,iterm)]
                       coef(iterm)=-coef(iterm)/Nc
                       call update_coef_Nc(-1,iterm)
-                      coef_Nc(:,iterm)=-coef_Nc(:,iterm)
+                      call negate_nc_coefficients(iterm,'pair trace simplification')
                       exit elements
                    endif
                 enddo
@@ -355,6 +512,8 @@ contains
                 if (Tr(ele1,iprod,iterm).eq.Tr(ele2,iprod,iterm)) then
 
                    ! First, add an extra term equal to (Tr(a,c)*Tr(b))
+                   call require_term_capacity(1)
+                   simplification_changed=.true.
                    Tr(0,0,0)=Tr(0,0,0)+1
                    Tr(0,0,Tr(0,0,0))=Tr(0,0,iterm)+1 ! new term has one more product
                    do i=1,Tr(0,0,Tr(0,0,0)) ! loop over all the terms in the product
@@ -384,7 +543,7 @@ contains
                                                         Tr(ele2+1:Tr(0,iprod,iterm)+2,iprod,iterm)]
                    coef(iterm)=-coef(iterm)/Nc
                    call update_coef_Nc(-1,iterm)
-                   coef_Nc(:,iterm)=-coef_Nc(:,iterm)
+                   call negate_nc_coefficients(iterm,'repeated-index trace simplification')
                    replace=.true.
                    exit elements
                 endif
@@ -406,6 +565,18 @@ contains
     ! 'nF' is the number of F matrices in the trace
     implicit none
     integer :: maxl,i,iterm,nF
+    if (.not.allocated(F)) then
+       write (*,*) 'Adjoint colour matrices are not allocated'
+       stop 1
+    endif
+    if (nF.lt.1 .or. nF.gt.size(F)) then
+       write (*,*) 'Invalid number of adjoint colour matrices:',nF
+       stop 1
+    endif
+    if (any(F(1:nF).le.0)) then
+       write (*,*) 'Adjoint colour string contains an invalid index:',F(1:nF)
+       stop 1
+    endif
     ! number of terms in the string of Fs: nF
     if (Tr(0,0,0).ne.0) then
        write (*,*) 'Can only convert Fs to Tr when there is no Tr() yet'
@@ -415,10 +586,12 @@ contains
     do i=1,nF
        if (i.eq.1) then
           ! create the first traces of fundamental matrices
+          call require_term_capacity(2)
           Tr(0,0,0)=2
           coef(2)=-coef(1)
 !          write(*,*) coef(1)
-          coef_Nc(:,2)=-coef_Nc(:,1)
+          coef_Nc(:,2)=coef_Nc(:,1)
+          call negate_nc_coefficients(2,'adjoint-to-fundamental conversion')
           Tr(0,0,1)=1
           Tr(0,0,2)=1
           Tr(0,1,1)=3
@@ -451,7 +624,7 @@ contains
                    Tr(1:3,Tr(0,0,iterm),iterm)=(/ F(i) , maxl+i , maxl+1 /)
                 endif
                 coef(iterm)=-coef(iterm)
-                coef_Nc(:,iterm)=-coef_Nc(:,iterm)
+                call negate_nc_coefficients(iterm,'adjoint-to-fundamental conversion')
              endif
           enddo
        endif
@@ -473,14 +646,18 @@ contains
           call check_identical(iterm,jterm,identical)
           if (identical) then
              coef(jterm)=coef(jterm)+coef(iterm)
-             coef_Nc(:,jterm)=coef_Nc(:,jterm)+coef_Nc(:,iterm)
+             if (.not.ieee_is_finite(coef(jterm))) then
+                write (*,*) 'Non-finite coefficient while combining identical colour traces'
+                stop 1
+             endif
+             call add_nc_coefficients(jterm,iterm,'identical colour-trace combination')
              call remove_iterm(iterm)
              exit
           endif
        enddo
     enddo
     do iterm=Tr(0,0,0),1,-1
-       if (coef(iterm).eq.0d0) then
+       if (coef(iterm).eq.0.0_16) then
           if (all(coef_Nc(:,iterm).eq.0)) then
              call remove_iterm(iterm)
           endif
@@ -507,19 +684,21 @@ contains
   subroutine double_trs()
     ! Simply dublicate all the terms
     implicit none
-    integer :: iterm,iprod,ele1
-    do iterm=1,Tr(0,0,0)
-       Tr(0,0,Tr(0,0,0)+iterm)=Tr(0,0,iterm)
+    integer :: iterm,iprod,ele1,current_terms
+    current_terms=Tr(0,0,0)
+    call require_term_capacity(current_terms)
+    do iterm=1,current_terms
+       Tr(0,0,current_terms+iterm)=Tr(0,0,iterm)
        do iprod=1,Tr(0,0,iterm)
-          Tr(0,iprod,Tr(0,0,0)+iterm)=Tr(0,iprod,iterm)
+          Tr(0,iprod,current_terms+iterm)=Tr(0,iprod,iterm)
           do ele1=1,Tr(0,iprod,iterm)
-             Tr(ele1,iprod,Tr(0,0,0)+iterm)=Tr(ele1,iprod,iterm)
+             Tr(ele1,iprod,current_terms+iterm)=Tr(ele1,iprod,iterm)
           enddo
        enddo
-       coef(Tr(0,0,0)+iterm)=coef(iterm)
-       coef_Nc(:,Tr(0,0,0)+iterm)=coef_Nc(:,iterm)
+       coef(current_terms+iterm)=coef(iterm)
+       coef_Nc(:,current_terms+iterm)=coef_Nc(:,iterm)
     enddo
-    Tr(0,0,0)=2*Tr(0,0,0)
+    Tr(0,0,0)=2*current_terms
   end subroutine double_trs
   
   subroutine remove_iterm(iterm)
@@ -943,10 +1122,10 @@ contains
     ! alternative to compute only the (N)LC terms for all-gloun amplitude
     ! squared.
     implicit none
-    integer :: n                 ! number of gluons
-    integer,dimension(n) :: iper ! order in amplitude
-    integer,dimension(n) :: jper ! order in conjugate amplitude
-    integer :: acc               ! is equal to 0,1,-1 or 99.
+    integer,intent(in) :: n                 ! number of gluons
+    integer,dimension(n),intent(in) :: iper ! order in amplitude
+    integer,dimension(n),intent(in) :: jper ! order in conjugate amplitude
+    integer,intent(out) :: acc               ! is equal to 0,1,-1 or 99.
                                  ! 99 : LC contributions (NLC coefficient of that term is '-n')
                                  ! 1,-1 ; NLC contribution with positive/negative sign
                                  ! 0 : not a NLC contribution, but NNLC or further suppressed.
@@ -954,6 +1133,7 @@ contains
     integer,dimension(n) :: itemp
     itemp=0
     acc=0
+    if (n.lt.1 .or. .not.sequences_are_permutations(iper,jper)) return
     ! find i1, i.e. the location where jper and iper start to differ
     do i=1,n
        if (jper(i).ne.iper(i)) exit
@@ -1022,11 +1202,11 @@ contains
 
   subroutine check_NLC_1qqbar(next,iper,jper,acc)
     implicit none
-    integer :: next                 ! number of external particles
+    integer,intent(in) :: next                 ! number of external particles
 
-    integer,dimension(next-2) :: iper ! order in amplitude
-    integer,dimension(next-2) :: jper ! order in conjugate amplitude
-    integer :: acc               ! is equal to 0,1,-1 or 99.
+    integer,dimension(next-2),intent(in) :: iper ! order in amplitude
+    integer,dimension(next-2),intent(in) :: jper ! order in conjugate amplitude
+    integer,intent(out) :: acc               ! is equal to 0,1,-1 or 99.
                                  ! 99 : LC contributions (NLC coefficient of that term is '-n')
                                  ! 1,-1 ; NLC contribution with positive/negative sign
                                  ! 0 : not a NLC contribution, but NNLC or further suppressed.
@@ -1036,6 +1216,11 @@ contains
 
 
     acc = 0
+          if (next.lt.2 .or. .not.sequences_are_permutations(iper,jper)) return
+          if (size(iper).eq.0) then
+             acc=99
+             return
+          endif
           do i=1,next-2
             if (jper(i).ne.iper(i)) exit
           enddo
@@ -1086,16 +1271,16 @@ contains
 
   subroutine check_NLC_2qqbar(next,iper,jper,rri,rrj,iii,jjj,acc)
     implicit none
-    integer :: next                 ! number of external particles
+    integer,intent(in) :: next                 ! number of external particles
  
-    integer,dimension(next-4) :: iper ! order in amplitude
-    integer,dimension(next-4) :: jper ! order in conjugate amplitude
-    integer :: acc               ! is equal to 0,1,-1 or 99.
+    integer,dimension(next-4),intent(in) :: iper ! order in amplitude
+    integer,dimension(next-4),intent(in) :: jper ! order in conjugate amplitude
+    integer,intent(out) :: acc               ! is equal to 0,1,-1 or 99.
                                  ! 99 : LC contributions (NLC coefficient of that term is '-n')
                                  ! 1,-1 ; NLC contribution with positive/negative sign
                                  ! 0 : not a NLC contribution, but NNLC or further suppressed.
     integer :: i,i1,i2,i3,i4,i5,sign,ii,jj,yy
-    integer rri,rrj,iii,jjj
+    integer,intent(in) :: rri,rrj,iii,jjj
     integer,dimension(2*(next-4)) :: temp
     integer,dimension(next-4,2) :: index_i
 
@@ -1110,7 +1295,7 @@ contains
     integer,dimension(1:rrj-1) :: itemp6
     integer,dimension(1:next-4-rri-1) :: itemp7
 
-    logical disjoint
+    logical :: disjoint,equal_outer_strings,equal_inner_strings
     integer :: ind_i,ind_j
     integer,dimension(2*(next-4)-2) :: perm
     integer skipped
@@ -1123,6 +1308,11 @@ contains
     itemp=0
 
     acc = 0
+    if (next.lt.4) return
+    if (rri.lt.0 .or. rri.gt.next-4 .or. rrj.lt.0 .or. rrj.gt.next-4) return
+    if (iii.lt.1 .or. iii.gt.2 .or. jjj.lt.1 .or. jjj.gt.2) return
+    if (.not.sequences_are_permutations(iper,jper)) return
+    index_i=0
 
     if ((iii .eq. 2) .and. (jjj .eq. 2)) then
         if (rri .eq. rrj) then
@@ -1153,10 +1343,19 @@ contains
          yy = 1
           do ii=1,2*(next-4) 
              if (temp(ii) .eq. jj) then
+                  if (yy.gt.2) then
+                     acc=0
+                     return
+                  endif
                   index_i(jj,yy) = ii
                   yy=yy+1
              endif
           enddo 
+
+         if (yy.ne.3) then
+            acc=0
+            return
+         endif
 
          if (mod(abs(index_i(jj,1)-index_i(jj,2)),2) .eq. 1) then
              continue
@@ -1202,6 +1401,11 @@ contains
       Cc(1:rrj) = jper(1:rrj)
       Dd(1:next-4-rrj) = jper(rrj+1:next-4)
 
+      equal_outer_strings=.false.
+      if (size(Bb).eq.size(Dd)) equal_outer_strings=all(Bb.eq.Dd)
+      equal_inner_strings=.false.
+      if (size(Aa).eq.size(Cc)) equal_inner_strings=all(Aa.eq.Cc)
+
       temp2(1:rri) = Aa(1:rri)
       temp2(rri+1:rri+rrj) = Cc(rrj:1:-1)
       
@@ -1221,7 +1425,7 @@ contains
 
     if (disjoint) then
 
-          if ((size(Aa) .ne. 0) .and. (all(Bb .eq. Dd) .or. size(Bb) .eq. 0)) then
+          if ((size(Aa) .ne. 0) .and. equal_outer_strings) then
  
           do i=1,rri
             if (CC(i).ne.Aa(i)) exit
@@ -1267,7 +1471,7 @@ contains
              acc=sign
           endif 
  
-          elseif ((size(Bb) .ne. 0) .and. (all(Aa .eq. Cc) .or. size(Aa) .eq. 0)) then 
+          elseif ((size(Bb) .ne. 0) .and. equal_inner_strings) then
 
           do i=1,next-4-rrj
              if (Dd(i).ne.Bb(i)) exit
@@ -1320,21 +1524,24 @@ contains
 
     elseif (.not. disjoint) then
 
-      do ii=1,rri+rrj
-       if (any(temp3(:) == temp2(ii))) then
-           do jj=1,size(temp3)
-              if (temp3(jj) .eq. temp2(ii)) then 
-                        ind_i = ii
-                        ind_j = jj
-                        skipped = temp2(ii)
-                        goto 1
-              endif
-           enddo
-       endif
-      enddo
+      ind_i=0
+      ind_j=0
+      find_common_generator: do ii=1,size(temp2)
+         do jj=1,size(temp3)
+            if (temp3(jj) .eq. temp2(ii)) then
+               ind_i=ii
+               ind_j=jj
+               exit find_common_generator
+            endif
+         enddo
+      enddo find_common_generator
+      if (ind_i.eq.0 .or. ind_j.eq.0) then
+         acc=0
+         return
+      endif
+      skipped=temp2(ind_i)
 
-
-1   if ((size(temp2) .eq. 1) .or. (size(temp3) .eq. 1)) then
+      if ((size(temp2) .eq. 1) .or. (size(temp3) .eq. 1)) then
             acc = 0 
             return
     endif
@@ -1418,10 +1625,19 @@ contains
          yy = 1
           do ii=1,2*(next-4)-2
              if (perm(ii) .eq. jj) then
+                  if (yy.gt.2) then
+                     acc=0
+                     return
+                  endif
                   index_i(jj,yy) = ii
                   yy=yy+1
              endif
           enddo
+
+         if (yy.ne.3) then
+            acc=0
+            return
+         endif
        
          if (mod(abs(index_i(jj,1)-index_i(jj,2)),2) .eq. 1) then
             continue
@@ -1469,16 +1685,16 @@ contains
 
   subroutine check_NLC_2qqbar_SF(next,iper,jper,ri,rj,ii,jj,acc)
     implicit none
-    integer :: next                 ! number of external particles
+    integer,intent(in) :: next                 ! number of external particles
 
-    integer,dimension(next-4) :: iper ! order in amplitude
-    integer,dimension(next-4) :: jper ! order in conjugate amplitude
-    integer :: acc               ! is equal to 0,1,-1 or 99.
+    integer,dimension(next-4),intent(in) :: iper ! order in amplitude
+    integer,dimension(next-4),intent(in) :: jper ! order in conjugate amplitude
+    integer,intent(out) :: acc               ! is equal to 0,1,-1 or 99.
                                  ! 99 : LC contributions (NLC coefficient of that term is '-n')
                                  ! 1,-1 ; NLC contribution with positive/negative sign
                                  ! 0 : not a NLC contribution, but NNLC or further suppressed.
     integer :: i1,i2,i3,i4,i5,sign,i,j,yy
-    integer ri,rj,ii,jj
+    integer,intent(in) :: ri,rj,ii,jj
     integer,dimension(2*(next-4)) :: temp
     integer,dimension(next-4,2) :: index_i
 
@@ -1492,7 +1708,7 @@ contains
     integer,dimension(1:rj-1) :: itemp6
     integer,dimension(1:next-4-ri-1) :: itemp7
 
-    logical disjoint
+    logical :: disjoint,equal_outer_strings,equal_inner_strings
     integer :: ind_i,ind_j
     integer,dimension(2*(next-4)-2) :: perm
     integer skipped
@@ -1501,6 +1717,13 @@ contains
     integer, dimension(next-4-ri) :: Bb
     integer, dimension(rj) :: Cc
     integer, dimension(next-4-rj) :: Dd
+
+    acc=0
+    if (next.lt.4) return
+    if (ri.lt.0 .or. ri.gt.next-4 .or. rj.lt.0 .or. rj.gt.next-4) return
+    if (ii.lt.1 .or. ii.gt.2 .or. jj.lt.1 .or. jj.gt.2) return
+    if (.not.sequences_are_permutations(iper,jper)) return
+    index_i=0
 
     if (((ii .eq. 1) .and. (jj .eq. 2)) .or. ((ii .eq. 2) .and. (jj .eq. 1)))  then
 
@@ -1513,10 +1736,19 @@ contains
          yy = 1
           do i=1,2*(next-4)
              if (temp(i) .eq. j) then
+                  if (yy.gt.2) then
+                     acc=0
+                     return
+                  endif
                   index_i(j,yy) = i
                   yy=yy+1
              endif
           enddo
+
+         if (yy.ne.3) then
+            acc=0
+            return
+         endif
 
          if (mod(abs(index_i(j,1)-index_i(j,2)),2) .eq. 1) then
              continue
@@ -1561,6 +1793,11 @@ contains
       Cc(1:rj) = jper(1:rj)
       Dd(1:next-4-rj) = jper(rj+1:next-4)
 
+      equal_outer_strings=.false.
+      if (size(Bb).eq.size(Dd)) equal_outer_strings=all(Bb.eq.Dd)
+      equal_inner_strings=.false.
+      if (size(Aa).eq.size(Cc)) equal_inner_strings=all(Aa.eq.Cc)
+
       temp2(1:ri) = Aa(1:ri)
       temp2(ri+1:ri+rj) = Cc(rj:1:-1)
 
@@ -1580,7 +1817,7 @@ contains
 
   if (disjoint) then
 
-        if ((size(Aa) .ne. 0) .and. (all(Bb .eq. Dd) .or. size(Bb) .eq. 0)) then
+        if ((size(Aa) .ne. 0) .and. equal_outer_strings) then
 
           do i=1,ri
             if (CC(i).ne.Aa(i)) exit
@@ -1632,7 +1869,7 @@ contains
            endif
             acc = 0
 
-        elseif ((size(Bb) .ne. 0) .and. (all(Aa .eq. Cc) .or. size(Aa) .eq. 0)) then
+        elseif ((size(Bb) .ne. 0) .and. equal_inner_strings) then
 
           do i=1,next-4-rj
              if (Dd(i).ne.Bb(i)) exit
@@ -1694,20 +1931,24 @@ contains
 
      elseif (.not. disjoint) then
 
-      do i=1,ri+rj
-       if (any(temp3(:) == temp2(i))) then
-           do j=1,size(temp3)
-              if (temp3(j) .eq. temp2(i)) then
-                        ind_i = i
-                        ind_j = j
-                        skipped = temp2(i)
-                        goto 2
-              endif
-           enddo
-       endif
-      enddo
+      ind_i=0
+      ind_j=0
+      find_common_generator: do i=1,size(temp2)
+         do j=1,size(temp3)
+            if (temp3(j) .eq. temp2(i)) then
+               ind_i=i
+               ind_j=j
+               exit find_common_generator
+            endif
+         enddo
+      enddo find_common_generator
+      if (ind_i.eq.0 .or. ind_j.eq.0) then
+         acc=0
+         return
+      endif
+      skipped=temp2(ind_i)
 
-2     if ((size(temp2) .eq. 1) .or. (size(temp3) .eq. 1)) then
+      if ((size(temp2) .eq. 1) .or. (size(temp3) .eq. 1)) then
             acc = 0
             return
       endif
@@ -1784,10 +2025,19 @@ contains
          yy = 1
           do i=1,2*(next-4)-2
              if (perm(i) .eq. j) then
+                  if (yy.gt.2) then
+                     acc=0
+                     return
+                  endif
                   index_i(j,yy) = i
                   yy=yy+1
              endif
           enddo
+
+         if (yy.ne.3) then
+            acc=0
+            return
+         endif
 
 
          if (mod(abs(index_i(j,1)-index_i(j,2)),2) .eq. 1) then
@@ -1825,13 +2075,25 @@ contains
 
     endif
 
-    else
-       write(*,*) 'ERROR: only for 2qqbar processes'
     endif
 
    end subroutine check_NLC_2qqbar_SF
 
-  
+  pure logical function sequences_are_permutations(first,second)
+    implicit none
+    integer,intent(in) :: first(:),second(:)
+    integer :: i
+
+    sequences_are_permutations=.false.
+    if (size(first).ne.size(second)) return
+    do i=1,size(first)
+       if (count(first.eq.first(i)).ne.1) return
+       if (count(second.eq.first(i)).ne.1) return
+    enddo
+    sequences_are_permutations=.true.
+  end function sequences_are_permutations
+
+
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   ! HELPER FUNCTIONS
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!

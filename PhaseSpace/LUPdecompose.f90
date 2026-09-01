@@ -5,6 +5,8 @@ module LUPdecomposition
 ! 3. compute a determinant.
 ! Based on the C code that can be found here https://en.wikipedia.org/wiki/LU_decomposition
 ! Written January 2022.
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+  implicit none
   private
   public :: LUPdecompose,LUPsolve,LUPinvert,LUPdeterminant
 contains
@@ -23,9 +25,13 @@ contains
     logical,intent(out) :: success
     real(kind=8),intent(in) :: tol 
     integer(kind=4) :: i,j,k,imax
-    real(kind=8) :: maxA,absA
+    real(kind=8) :: maxA,absA,multiplier,updated_entry
     real(kind=8),dimension(n) :: tmp
-    success=.true.
+    success=.false.
+    p=0
+    if (n.le.0) return
+    if (.not.ieee_is_finite(tol) .or. tol.lt.0d0 .or. &
+         .not.all(ieee_is_finite(a))) return
     do i=1,n
        p(i)=i
     enddo
@@ -34,15 +40,14 @@ contains
        maxA=0d0
        imax=i
        do k=i,n
-          absA=abs(a(i,k))
+          absA=abs(a(k,i))
           if (absA.gt.maxA) then
              maxA=absA
              imax=k
           endif
        enddo
-       if (maxA .lt. tol) then
+       if (maxA.le.tol) then
           write (99,*) 'LUP decomposition failure: matrix is degenerate'
-          success=.false.
           return
        endif
        if (imax .ne. i ) then
@@ -52,23 +57,27 @@ contains
           p(imax)=j
           
           ! pivoting rows of a
-          tmp(1:n)=a(1:n,i)
-          a(1:n,i)=a(1:n,imax)
-          a(1:n,imax)=tmp(1:n)
+          tmp(1:n)=a(i,1:n)
+          a(i,1:n)=a(imax,1:n)
+          a(imax,1:n)=tmp(1:n)
           
           ! counting pivots starting from n (for determinant)
           p(0)=p(0)+1
        endif
        do j=i+1,n
-          A(i,j)=A(i,j)/A(i,i)
+          a(j,i)=a(j,i)/a(i,i)
+          if (.not.ieee_is_finite(a(j,i))) return
           do k=i+1,n
-             A(k,j)=A(k,j)-A(i,j)*A(k,i)
+             if (.not.safe_lup_product(a(j,i),a(i,k),multiplier)) return
+             if (.not.safe_lup_difference(a(j,k),multiplier,updated_entry)) return
+             a(j,k)=updated_entry
           enddo
        enddo
     enddo
+    success=.true.
   end subroutine LUPdecompose
 
-  subroutine LUPSolve(a,p,b,n,x)
+  subroutine LUPSolve(a,p,b,n,x,success)
 ! INPUT: A,P filled in LUPDecompose; b - rhs vector; N - dimension
 ! OUTPUT: x - solution vector of A*x=b
     implicit none
@@ -77,23 +86,49 @@ contains
     real(kind=8),dimension(n,n),intent(in) :: a
     real(kind=8),dimension(n),intent(in) :: b
     real(kind=8),dimension(n),intent(out) :: x
+    logical,intent(out),optional :: success
     integer(kind=4) i,k
+    real(kind=8) :: term,updated_value
 
+    x=0d0
+    if (present(success)) success=.false.
+    if (.not.valid_lup_inputs(a,p,n) .or. .not.all(ieee_is_finite(b))) return
     do i=1,n
        x(i)=b(p(i))
-       do k=1,i
-          x(i)=x(i)-a(k,i)*x(k)
+       do k=1,i-1
+          if (.not.safe_lup_product(a(i,k),x(k),term)) then
+             x=0d0
+             return
+          endif
+          if (.not.safe_lup_difference(x(i),term,updated_value)) then
+             x=0d0
+             return
+          endif
+          x(i)=updated_value
        enddo
     enddo
     do i=n,1,-1
        do k=i+1,n
-          x(i)=x(i)-a(k,i)*x(k)
+          if (.not.safe_lup_product(a(i,k),x(k),term)) then
+             x=0d0
+             return
+          endif
+          if (.not.safe_lup_difference(x(i),term,updated_value)) then
+             x=0d0
+             return
+          endif
+          x(i)=updated_value
        enddo
-       x(i)=x(i)/a(i,i)
+       if (.not.safe_lup_ratio(x(i),a(i,i),updated_value)) then
+          x=0d0
+          return
+       endif
+       x(i)=updated_value
     enddo
+    if (present(success)) success=.true.
   end subroutine LUPSolve
   
-  subroutine LUPinvert(a,p,n,ia)
+  subroutine LUPinvert(a,p,n,ia,success)
 ! INPUT: A,P filled in LUPDecompose; N - dimension
 ! OUTPUT: IA is the inverse of the initial matrix
     implicit none
@@ -101,28 +136,27 @@ contains
     integer(kind=4),dimension(0:n),intent(in) :: p
     real(kind=8),dimension(n,n),intent(in) :: a
     real(kind=8),dimension(n,n),intent(out) :: ia
-    integer(kind=4) i,j,k
+    logical,intent(out),optional :: success
+    integer(kind=4) :: j
+    real(kind=8),dimension(n) :: rhs,column
+    logical :: column_success
+    ia=0d0
+    if (present(success)) success=.false.
+    if (.not.valid_lup_inputs(a,p,n)) return
     do j=1,n
-       do i=1,n
-          if (p(i).eq.j) then
-             ia(j,i)=1d0
-          else
-             ia(j,i)=0d0
-          endif
-          do k=1,i-1
-             ia(j,i)=ia(j,i)-ia(k,i)*ia(j,k)
-          enddo
-       enddo
-       do i=n,1,-1
-          do k=i+1,n
-             ia(j,i)=ia(j,i)-a(k,i)*ia(j,k)
-          enddo
-          ia(j,i)=ia(j,i)/ia(i,i)
-       enddo
+       rhs=0d0
+       rhs(j)=1d0
+       call LUPsolve(a,p,rhs,n,column,column_success)
+       if (.not.column_success) then
+          ia=0d0
+          return
+       endif
+       ia(:,j)=column
     enddo
+    if (present(success)) success=.true.
   end subroutine LUPinvert
 
-  subroutine LUPdeterminant(a,p,n,det)
+  subroutine LUPdeterminant(a,p,n,det,success)
 ! INPUT: A,P filled in LUPDecompose; N - dimension. 
 ! OUTPUT: det returns the determinant of the initial matrix
     implicit none
@@ -130,11 +164,89 @@ contains
     integer(kind=4),dimension(0:n),intent(in) :: p
     real(kind=8),dimension(n,n),intent(in) :: a
     real(kind=8),intent(out) :: det
+    logical,intent(out),optional :: success
     integer(kind=4) i
+    real(kind=8) :: updated_det
     det=1d0
+    if (present(success)) success=.false.
+    if (.not.valid_lup_inputs(a,p,n)) then
+       det=0d0
+       return
+    endif
     do i=1,n
-       det=det*a(i,i)
+       if (.not.safe_lup_product(det,a(i,i),updated_det)) then
+          det=0d0
+          return
+       endif
+       det=updated_det
     enddo
     if (mod(p(0)-n,2).ne.0) det=-det
+    if (present(success)) success=.true.
   end subroutine LUPdeterminant
+
+  logical function valid_lup_inputs(a,p,n) result(valid)
+    integer(kind=4),intent(in) :: n
+    integer(kind=4),dimension(0:n),intent(in) :: p
+    real(kind=8),dimension(n,n),intent(in) :: a
+    integer :: i
+    valid=.false.
+    if (n.le.0 .or. .not.all(ieee_is_finite(a))) return
+    if (p(0).lt.n .or. p(0).gt.2*n-1) return
+    do i=1,n
+       if (count(p(1:n).eq.i).ne.1) return
+       if (a(i,i).eq.0d0) return
+    enddo
+    valid=.true.
+  end function valid_lup_inputs
+
+  logical function safe_lup_product(first,second,value) result(valid)
+    real(kind=8),intent(in) :: first,second
+    real(kind=8),intent(out) :: value
+    valid=.false.
+    value=0d0
+    if (.not.ieee_is_finite(first) .or. .not.ieee_is_finite(second)) return
+    if (first.eq.0d0 .or. second.eq.0d0) then
+       valid=.true.
+       return
+    endif
+    if (abs(second).gt.1d0) then
+       if (abs(first).gt.huge(1d0)/abs(second)) return
+    elseif (abs(first).gt.1d0) then
+       if (abs(second).gt.huge(1d0)/abs(first)) return
+    endif
+    value=first*second
+    valid=ieee_is_finite(value)
+    if (.not.valid) value=0d0
+  end function safe_lup_product
+
+  logical function safe_lup_difference(first,second,value) result(valid)
+    real(kind=8),intent(in) :: first,second
+    real(kind=8),intent(out) :: value
+    valid=.false.
+    value=0d0
+    if (.not.ieee_is_finite(first) .or. .not.ieee_is_finite(second)) return
+    if (second.gt.0d0) then
+       if (first.lt.-huge(1d0)+second) return
+    elseif (second.lt.0d0) then
+       if (first.gt.huge(1d0)+second) return
+    endif
+    value=first-second
+    valid=ieee_is_finite(value)
+    if (.not.valid) value=0d0
+  end function safe_lup_difference
+
+  logical function safe_lup_ratio(numerator,denominator,value) result(valid)
+    real(kind=8),intent(in) :: numerator,denominator
+    real(kind=8),intent(out) :: value
+    valid=.false.
+    value=0d0
+    if (.not.ieee_is_finite(numerator) .or. .not.ieee_is_finite(denominator)) return
+    if (denominator.eq.0d0) return
+    if (abs(denominator).lt.1d0) then
+       if (abs(numerator).gt.huge(1d0)*abs(denominator)) return
+    endif
+    value=numerator/denominator
+    valid=ieee_is_finite(value)
+    if (.not.valid) value=0d0
+  end function safe_lup_ratio
 end module LUPdecomposition

@@ -28,6 +28,8 @@ program amplicol_generate
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   integer,parameter :: n_tail_records=8,n_contribution_components=9
+  real(kind=8),parameter :: integration_value_limit=0.25d0*huge(1d0)**0.25d0
+  real(kind=8),parameter :: integration_value_floor=sqrt(tiny(1d0))
   type :: tail_record
      logical :: valid=.false.,real_pass=.false.
      integer :: ichan=0,iint=0,physical_iint=0,stratum=0,iteration=0
@@ -46,7 +48,8 @@ program amplicol_generate
   real(kind=8) :: weight
   integer :: i
   real(kind=8),dimension(:),allocatable :: mass,width
-  character(len=80) :: filename,real_filename,logfile,limit_logfile,tag
+  character(len=1024) :: filename,real_filename,logfile,limit_logfile
+  character(len=80) :: tag
   character(len=256) :: input_filename,tail_logfile,tail_replay_output,&
        tail_residual_replay_output,tail_replay_file
   integer(kind=4) :: PS_choice
@@ -59,6 +62,8 @@ program amplicol_generate
   integer,dimension(:),allocatable :: integration_ndim_extra
   integer,dimension(:,:),allocatable :: integration_adaptation_classes
   integer :: ichan,iint,itmax,ncalls0,iamp,nborn_groups,nreal_groups,born_flavour_scheme,real_flavour_scheme
+  integer :: event_tmp_unit,event_output_unit,io_status
+  character(len=256) :: io_message
   integer :: limit_point
   integer,parameter :: n_limit_points=100,n_limit_failures=5
   integer,dimension(:,:,:),allocatable :: soft_fail,soft_tested
@@ -73,7 +78,8 @@ program amplicol_generate
   character(len=5) :: zone
   character(len=19) :: formatted
   logical :: create_amplitude_library,use_amplitude_library,read_momenta,limit_test,has_real_process
-  logical :: limits_ok,replay_tail,tail_tracking_enabled
+  logical :: limits_ok,replay_tail,tail_tracking_enabled,real_requires_jets,scale_process_has_jet
+  logical :: matrix_element_test_mode,matrix_element_checks_done
   logical :: timing_enabled,time_detail_point,time_point_sample
   integer(kind=8) :: timing_point
   real(kind=8) :: tLoopBefore,tLoopAfter,tSampleBefore,tSampleAfter,tFinalBefore,tFinalAfter
@@ -90,6 +96,9 @@ program amplicol_generate
   logical :: tail_last_migration_converged
 
   call get_run_arguments()
+  event_tmp_unit=0
+  matrix_element_test_mode=read_momenta
+  matrix_element_checks_done=.false.
   call read_run_parameters(input_filename)
   call write_run_parameters(99)
   timing_enabled=timing_mode.ne.timing_none
@@ -137,6 +146,18 @@ program amplicol_generate
            stop 1
         endif
         pgl(nborn_groups+1:ngroups)%is_subtracted_real=.true.
+        real_requires_jets=.false.
+        do igroup=nborn_groups+1,ngroups
+           do iproc=1,pgl(igroup)%nproc
+              if (real_subtracted_jet_requirement(pgl(igroup)%processes(:,iproc)).gt.0) &
+                   real_requires_jets=.true.
+           enddo
+        enddo
+        if (real_requires_jets .and. (pTj_min.le.0d0 .or. DRjj_min.le.0d0)) then
+           write(*,*) 'ERROR: an NLO observable with resolved Born jets requires positive pTj_min and DRjj_min.'
+           write(*,*) ' configured pTj_min/DRjj_min:',pTj_min,DRjj_min
+           stop 1
+        endif
         call clear_process_file_metadata()
      else
         call read_processes_from_file(filename)
@@ -211,6 +232,20 @@ program amplicol_generate
            enddo
         enddo
      enddo
+     if (scale_choice.eq.4) then
+        do iproc=1,pgl(igroup)%nproc
+           scale_process_has_jet=.false.
+           do i=3,pgl(igroup)%next
+              if (phys_model%is_jet(pgl(igroup)%iden_processes(i,1,iproc))) &
+                   scale_process_has_jet=.true.
+           enddo
+           if (.not.scale_process_has_jet) then
+              write(*,*) 'ERROR: minimum-jet-pT scale requested for a subprocess without a jet:',&
+                   igroup,iproc
+              stop 1
+           endif
+        enddo
+     endif
      ! Initialise the phase-space parametrisation
      if (timing_mode.eq.timing_detailed) call cpu_time(tBefore)
      call setup_cuts_for_each_particle(pgl(igroup),igroup)
@@ -232,7 +267,15 @@ program amplicol_generate
      deallocate(mass)
      deallocate(width)
 
-     if (use_amplitude_library) cycle
+     if (use_amplitude_library) then
+        if (matrix_element_test_mode) then
+           do iamp=1,pgl(igroup)%nproc
+              call run_madgraph_check(pgl(igroup)%next,igroup,iamp,&
+                   pgl(igroup)%processes(1:pgl(igroup)%next,iamp))
+           enddo
+        endif
+        cycle
+     endif
      
      call setup_spin(pgl(igroup))
 
@@ -255,13 +298,6 @@ program amplicol_generate
            call pgl(igroup)%amps(iamp)%init(1,pgl(igroup)%next,1,pgl(igroup)%processes(1,iamp),&
                 pgl(igroup)%spin,pgl(igroup)%color_orders(1,iamp),phys_model)
            if (pgl(igroup)%is_subtracted_real .or. limit_test) call initialise_subtraction(igroup,iamp)
-           if (read_momenta) then
-              if (.not.allocated(p_read)) allocate(p_read(pgl(igroup)%next,0:3))
-              call read_in_momenta(pgl(igroup)%next,igroup,iamp,p_read)
-              do i=1,pgl(igroup)%next
-                 pgl(igroup)%ps(1)%p(:,i)=p_read(i,:)
-              enddo
-           endif
         enddo
      else
         call pgl(igroup)%amps(1)%init(1,pgl(igroup)%next,pgl(igroup)%nproc,pgl(igroup)%processes,&
@@ -314,11 +350,21 @@ program amplicol_generate
      endif
   endif
 
-  if (.not.has_real_process) then
+  ! Accuracy-driven runs are integration-only: no unweighted-event candidates
+  ! are produced, so neither create nor finalise a temporary LHE file.
+  if (.not.has_real_process .and. .not.create_amplitude_library .and. &
+       .not.matrix_element_test_mode .and. accuracy.le.0d0) then
      filename='Outputs/'//trim(adjustl(tag))//'events_tmp.lhe'
-     open(unit=11,file=filename,action='readwrite',status='unknown')
+     io_message=''
+     open(newunit=event_tmp_unit,file=trim(filename),action='readwrite',status='replace',&
+          iostat=io_status,iomsg=io_message)
+     if (io_status.ne.0) then
+        write (*,*) 'Could not create temporary event file ',trim(filename),': ',&
+             trim(io_message)
+        stop 1
+     endif
      if (timing_mode.eq.timing_detailed) call cpu_time(tBefore)
-     call write_unique_in_file(pgl_unique,unique_map,unique_map_value,abs(ncalls0))
+     call write_unique_in_file(event_tmp_unit,pgl_unique,unique_map,unique_map_value,abs(ncalls0))
   endif
   
   allocate(nintegrals(ngroups),integration_ndim_extra(ngroups))
@@ -385,7 +431,7 @@ program amplicol_generate
      t_Initialise=tLoopBefore-tTot_B
   endif
   do
-     timing_point=timing_point+1_8
+     timing_point=checked_add8(timing_point,1_8,'integration point counter')
      time_point_sample=.false.
      time_detail_point=.false.
      if (timing_mode.eq.timing_detailed) then
@@ -448,6 +494,12 @@ program amplicol_generate
      if (histogram_active) call histogram_begin_point(ichan,iint)
      call integrand(ichan,iint,simple_integrator%x(:,1),simple_integrator%wgt(1),&
           f(1),f_abs(1),f_aux(:,1))
+     if (matrix_element_test_mode .and. matrix_element_checks_done) then
+        write (*,*) ''
+        write (*,*) 'Passed all requested MadGraph matrix-element checks.'
+        write (99,*) 'Passed all requested MadGraph matrix-element checks.'
+        exit main_run
+     endif
      if (histogram_active) call histogram_commit_point()
      tail_convergence_ok=.true.
      if (tail_tracking_enabled) tail_convergence_ok=migration_tail_convergence_ok()
@@ -457,7 +509,7 @@ program amplicol_generate
      if (histogram_active .and. iteration_finished) call histogram_finalize_iteration()
      if (tail_tracking_enabled .and. iteration_finished) then
         call finalize_tail_iteration()
-        tail_iteration=tail_iteration+1
+        tail_iteration=checked_add(tail_iteration,1,'tail-diagnostic iteration counter')
         call write_tail_diagnostics()
         call report_migration_tail_convergence()
         tail_iteration_npoints=0_8
@@ -486,7 +538,7 @@ program amplicol_generate
         if (timing_mode.eq.timing_detailed) call cpu_time(tSampleBefore)
         call unwgt_process(pgl(ichan),iint) ! pick a random process
         call unwgt_helicity(pgl(ichan))     ! pick a random helicity for the process picked
-        call write_event(11,pgl(ichan),1d0)
+        call write_event(event_tmp_unit,pgl(ichan),1d0)
         if (timing_mode.eq.timing_detailed) then
            call cpu_time(tSampleAfter)
            t_Evt_write=t_Evt_write+tSampleAfter-tSampleBefore
@@ -501,31 +553,59 @@ program amplicol_generate
      t_Int_loop=t_Int_loop+tLoopAfter-tLoopBefore
      call cpu_time(tFinalBefore)
   endif
-  if (.not.has_real_process) then
+  if (.not.has_real_process .and. .not.create_amplitude_library .and. &
+       .not.matrix_element_test_mode .and. accuracy.le.0d0) then
      if (timing_mode.eq.timing_detailed) call cpu_time(tSampleBefore)
-     call flush(11)
+     flush(event_tmp_unit,iostat=io_status,iomsg=io_message)
+     if (io_status.ne.0) then
+        write (*,*) 'Could not flush temporary event file: ',trim(io_message)
+        stop 1
+     endif
      call simple_integrator%assign_evnt_wgts(wgts)
      if (timing_mode.eq.timing_detailed) then
         call cpu_time(tSampleAfter)
         t_Evt_wgt_assign=t_Evt_wgt_assign+tSampleAfter-tSampleBefore
      endif
      if (timing_mode.eq.timing_detailed) call cpu_time(tSampleBefore)
-     rewind(11)
+     rewind(event_tmp_unit,iostat=io_status,iomsg=io_message)
+     if (io_status.ne.0) then
+        write (*,*) 'Could not rewind temporary event file: ',trim(io_message)
+        stop 1
+     endif
      filename='Outputs/'//trim(adjustl(tag))//'events.lhe'
-     open(unit=12,file=filename,action='write',status='unknown')
+     open(newunit=event_output_unit,file=trim(filename),action='write',status='replace',&
+          iostat=io_status,iomsg=io_message)
+     if (io_status.ne.0) then
+        write (*,*) 'Could not create final event file ',trim(filename),': ',trim(io_message)
+        stop 1
+     endif
      write (*,*) 'Updating event weights...'
      write (99,*) 'Updating event weights...'
      do i=1,size(wgts,dim=2)
-        call event_update_wgt(11,12,wgts(1,i))
+        call event_update_wgt(event_tmp_unit,event_output_unit,wgts(1,i),i.eq.1)
      enddo
-     close(11,status='DELETE')
-     write(12,'(a)') '</LesHouchesEvents>'
-     close(12)
+     write(event_output_unit,'(a)',iostat=io_status,iomsg=io_message) '</LesHouchesEvents>'
+     if (io_status.ne.0) then
+        write (*,*) 'Could not finish final event file: ',trim(io_message)
+        stop 1
+     endif
+     close(event_output_unit,iostat=io_status,iomsg=io_message)
+     if (io_status.ne.0) then
+        write (*,*) 'Could not close final event file: ',trim(io_message)
+        stop 1
+     endif
+     ! Only discard the recoverable candidate file after the final file has
+     ! been closed successfully.
+     close(event_tmp_unit,status='delete',iostat=io_status,iomsg=io_message)
+     if (io_status.ne.0) then
+        write (*,*) 'Could not remove temporary event file: ',trim(io_message)
+        stop 1
+     endif
      if (timing_mode.eq.timing_detailed) then
         call cpu_time(tSampleAfter)
         t_Evt_wgt_update=t_Evt_wgt_update+tSampleAfter-tSampleBefore
      endif
-  else
+  elseif (has_real_process) then
      call print_contribution_results()
   endif
   if (timing_enabled) then
@@ -544,21 +624,73 @@ program amplicol_generate
      call print_timing(99)
   endif
   end block main_run
-  close(99)
+  close(99,iostat=io_status,iomsg=io_message)
+  if (io_status.ne.0) then
+     write (*,*) 'Could not close run log: ',trim(io_message)
+     stop 1
+  endif
   
 contains
 
+  logical function matrix_element_checks_complete()
+    implicit none
+    integer :: group_index
+
+    matrix_element_checks_complete=.false.
+    if (me_points.lt.1) then
+       write (*,*) 'Invalid requested matrix-element check count:',me_points
+       stop 1
+    endif
+    do group_index=1,ngroups
+       if (pgl(group_index)%nproc.lt.1) then
+          write (*,*) 'Invalid empty process group during matrix-element checks:',&
+               group_index
+          stop 1
+       endif
+       if (.not.allocated(pgl(group_index)%passed)) then
+          write (*,*) 'Missing process counters during matrix-element checks:',&
+               group_index
+          stop 1
+       endif
+       if (size(pgl(group_index)%passed).lt.pgl(group_index)%nproc) then
+          write (*,*) 'Process counter array is too short during matrix-element checks:',&
+               group_index,size(pgl(group_index)%passed),pgl(group_index)%nproc
+          stop 1
+       endif
+       if (any(pgl(group_index)%passed(1:pgl(group_index)%nproc).lt.me_points)) return
+    enddo
+    matrix_element_checks_complete=.true.
+  end function matrix_element_checks_complete
+
   subroutine print_contribution_results()
     implicit none
-    real(kind=8),allocatable :: channel_res(:,:),channel_unc(:,:),aux_res(:,:),aux_unc(:,:)
+    real(kind=8),allocatable :: aux_res(:,:),aux_unc(:,:)
     real(kind=8) :: component(n_contribution_components),component_unc(n_contribution_components),finite,finite_unc
+    real(kind=8) :: closure_scale,closure_residual,closure_tolerance
     character(len=32),parameter :: labels(7)=[character(len=32) ::&
          'Born','Real - local dipoles','Integrated I coefficient -2',&
          'Integrated I coefficient -1','Integrated I finite',&
          'Integrated P','Integrated K']
     integer :: i,j
-    call simple_integrator%get_channel_results(channel_res,channel_unc)
     call simple_integrator%get_channel_aux_results(aux_res,aux_unc)
+    if (ngroups.lt.1 .or. size(aux_res,1).ne.n_contribution_components .or. &
+         size(aux_unc,1).ne.n_contribution_components .or. &
+         size(aux_res,2).ne.ngroups .or. size(aux_unc,2).ne.ngroups) then
+       write(*,*) 'ERROR: contribution results have incompatible dimensions',&
+            shape(aux_res),shape(aux_unc),ngroups
+       stop 1
+    endif
+    if (.not.all(ieee_is_finite(aux_res)) .or. &
+         .not.all(ieee_is_finite(aux_unc))) then
+       write(*,*) 'ERROR: contribution results contain non-finite values'
+       stop 1
+    endif
+    if (any(abs(aux_res).gt.integration_value_limit) .or. &
+         any(aux_unc.lt.0d0) .or. any(aux_unc.gt.integration_value_limit) .or. &
+         any((aux_unc.ne.0d0) .and. aux_unc.lt.integration_value_floor)) then
+       write(*,*) 'ERROR: contribution results exceed the supported numerical range'
+       stop 1
+    endif
     component=0d0
     component_unc=0d0
     do i=1,ngroups
@@ -574,8 +706,12 @@ contains
     write (99,'(a,2x,e14.7,1x,a,1x,e12.5)') 'Real - local dipoles, regular:',component(8),'+/-',component_unc(8)
     write (*,'(a,2x,e14.7,1x,a,1x,e12.5)') 'Real - local dipoles, migration:',component(9),'+/-',component_unc(9)
     write (99,'(a,2x,e14.7,1x,a,1x,e12.5)') 'Real - local dipoles, migration:',component(9),'+/-',component_unc(9)
-    if (abs(component(2)-component(8)-component(9)).gt.&
-         5d-12*max(1d0,abs(component(2)),abs(component(8))+abs(component(9)))) then
+    closure_scale=max(1d0,abs(component(2)),abs(component(8)),abs(component(9)))
+    closure_residual=abs(component(2)/closure_scale-component(8)/closure_scale-&
+         component(9)/closure_scale)
+    closure_tolerance=5d-12*max(1d0/closure_scale,abs(component(2))/closure_scale,&
+         abs(component(8))/closure_scale+abs(component(9))/closure_scale)
+    if (closure_residual.gt.closure_tolerance) then
        write(*,*) 'ERROR: regular and migration strata do not close:',component(2),component(8),component(9)
        stop 1
     endif
@@ -583,7 +719,7 @@ contains
     finite_unc=sqrt(sum(component_unc((/1,2,5,6,7/))**2))
     write (*,'(a,2x,e14.7,1x,a,1x,e12.5)') 'Finite B+(R-D)+I0+P+K:',finite,'+/-',finite_unc
     write (99,'(a,2x,e14.7,1x,a,1x,e12.5)') 'Finite B+(R-D)+I0+P+K:',finite,'+/-',finite_unc
-    deallocate(channel_res,channel_unc,aux_res,aux_unc)
+    deallocate(aux_res,aux_unc)
   end subroutine print_contribution_results
 
   subroutine print_timing(iunit)
@@ -673,11 +809,14 @@ contains
     logical,intent(in),optional :: replay_unsplit
     real(kind=8), dimension(:),allocatable,save :: val,val_abs,vol_ichan
     real(kind=8),dimension(pgl(ichan)%nproc) :: colour_singlet_multichannel_weight
-    integer :: ih,iproc,a,target_label,eval_iint,integration_role,icopy,idip,requested_stratum,point_stratum
-    integer :: resolution_info,resolution_dipole,kernel_info,kernel_dipole
+    integer :: iproc,a,target_label,eval_iint,integration_role,icopy,idip,requested_stratum,point_stratum
+    integer :: resolution_info,resolution_dipole,kernel_info,kernel_dipole,integrated_info,scale_info,pdf_info,alpha_info
+    integer :: amplitude_info
     real(kind=8),dimension(0:3,pgl(ichan)%next) :: p_generated
     real(kind=8), parameter :: pi=3.14159265358979323846d0,conv=389379660d0
     real(kind=8) :: amp2_integrand,amp2_dip,icoeff(-2:0),pterm,kterm,z,real_hist_factor,real_counter_scale
+    real(kind=8) :: coupling_factor,coupling_base
+    integer :: coupling_power
     real(kind=8) :: full_f,full_f_abs,regular_f,migration_f,real_margin,threshold_distance
     real(kind=8),allocatable :: dipole_values(:),real_hist_weights(:)
     real(kind=8),allocatable :: mapped_margins(:)
@@ -685,9 +824,11 @@ contains
     integer :: mapped_process(pgl(ichan)%next-1)
     real(kind=8) :: unresolved_invariant,resolution_tolerance
     real(kind=8),allocatable :: hard_copy(:)
-    logical :: done,time_physics,real_pass,unsplit_real,stratum_selected
+    logical :: done,time_physics,real_pass,unsplit_real,stratum_selected,analysis_weights_valid
     logical,allocatable :: alpha_active_flags(:),mapped_pass_flags(:)
-    real(kind=8),external :: alphaspdf
+    f=0d0
+    f_abs=0d0
+    f_components=0d0
     time_physics=(timing_mode.eq.timing_detailed) .and. time_point_sample
     unsplit_real=.false.
     if (present(replay_unsplit)) unsplit_real=replay_unsplit
@@ -721,10 +862,16 @@ contains
        allocate(vol_ichan(1:ngroups))
     endif
     ! some point-by-point initialisation
-    f=0d0
-    f_abs=0d0
-    f_components=0d0
     val_abs=0d0
+    if (.not.all(numerical_value_is_safe(x)) .or. &
+         .not.numerical_value_is_safe(vol)) then
+       call report_numerical_rejection('integration input',ichan,eval_iint)
+       return
+    endif
+    if (any(x.lt.0d0) .or. any(x.gt.1d0)) then
+       call report_numerical_rejection('integration input',ichan,eval_iint)
+       return
+    endif
     if (keep_processes_separate) then
        iproc=eval_iint
     else
@@ -734,19 +881,42 @@ contains
     stratum_selected=.true.
     threshold_distance=-1d0
     if (tail_tracking_enabled .and. pgl(ichan)%is_subtracted_real) then
-       tail_npoints(ichan,iint)=tail_npoints(ichan,iint)+1_8
-       tail_iteration_npoints(ichan,iint)=tail_iteration_npoints(ichan,iint)+1_8
+       tail_npoints(ichan,iint)=checked_add8(tail_npoints(ichan,iint),1_8,&
+            'tail-diagnostic point counter')
+       tail_iteration_npoints(ichan,iint)=checked_add8(&
+            tail_iteration_npoints(ichan,iint),1_8,&
+            'tail-diagnostic iteration point counter')
     endif
 
     ! Generate phase-space point based on the random numbers 'x(1:ndim)'
     if (time_physics) call cpu_time(tBefore)
-    if (.not.read_momenta) then
+    if (read_momenta) then
+       if (allocated(p_read)) then
+          if (size(p_read,1).ne.pgl(ichan)%next .or. size(p_read,2).ne.4) deallocate(p_read)
+       endif
+       if (.not.allocated(p_read)) allocate(p_read(pgl(ichan)%next,0:3))
+       call read_in_momenta(pgl(ichan)%next,ichan,eval_iint,p_read)
+       do a=1,pgl(ichan)%next
+          pgl(ichan)%ps(1)%p(:,a)=p_read(a,:)
+       enddo
+       pgl(ichan)%ps(1)%jac=1d0
+       pgl(ichan)%ps(1)%xbjrk(1)=&
+            (pgl(ichan)%ps(1)%p(0,1)+pgl(ichan)%ps(1)%p(3,1))/sqrts
+       pgl(ichan)%ps(1)%xbjrk(2)=&
+            (pgl(ichan)%ps(1)%p(0,2)-pgl(ichan)%ps(1)%p(3,2))/sqrts
+    else
        pgl(ichan)%ps(1)%x=x(1:size(pgl(ichan)%ps(1)%x))
        call pgl(ichan)%phase_space%generate_momenta(pgl(ichan)%ps(1))
     endif
     if (debug ) then
        write (*,*) pgl(ichan)%ps(1)%jac
        stop 1
+    endif
+    if (.not.numerical_value_is_safe(pgl(ichan)%ps(1)%jac) .or. &
+         .not.all(numerical_value_is_safe(pgl(ichan)%ps(1)%p)) .or. &
+         (include_pdf .and. .not.all(numerical_value_is_safe(pgl(ichan)%ps(1)%xbjrk)))) then
+       call report_numerical_rejection('phase space',ichan,eval_iint)
+       return
     endif
     if (pgl(ichan)%ps(1)%jac.lt.0d0) then
        val=0d0
@@ -765,6 +935,11 @@ contains
           target_label=pgl(ichan)%phase_space_permutations(a,iproc)
           pgl(ichan)%ps(1)%p(:,target_label)=p_generated(:,a)
        enddo
+    endif
+    if (.not.generated_momenta_are_valid(pgl(ichan)%ps(1)%p,&
+         pgl(ichan)%phase_space%masses,pgl(ichan)%ps(1)%xbjrk,include_pdf)) then
+       call report_numerical_rejection('physical momenta',ichan,eval_iint)
+       return
     endif
     if (pgl(ichan)%is_subtracted_real) then
        call check_real_subtraction_resolution(eval_iint,ichan,resolution_info,&
@@ -785,23 +960,38 @@ contains
           return
        endif
     endif
-    pgl(ichan)%passed(eval_iint) = pgl(ichan)%passed(eval_iint) + 1
-    call compute_multichannel_weight(ichan,eval_iint,pgl(ichan)%ps(1),colour_singlet_multichannel_weight)
+    if (pgl(ichan)%passed(eval_iint).lt.huge(pgl(ichan)%passed(eval_iint))) &
+         pgl(ichan)%passed(eval_iint)=pgl(ichan)%passed(eval_iint)+1
+    call compute_multichannel_weight(ichan,eval_iint,pgl(ichan)%ps(1),&
+         colour_singlet_multichannel_weight,max(1,requested_stratum))
+    if (.not.all(numerical_value_is_safe(colour_singlet_multichannel_weight))) then
+       call report_numerical_rejection('multichannel weight',ichan,eval_iint)
+       return
+    endif
     if (time_physics) then
        call cpu_time(tAfter)
        t_PS= t_PS + (tAfter-tBefore)*dble(timing_sample)
        tBefore=tAfter
     endif
-    call compute_the_amps(eval_iint,ichan,use_amplitude_library)
+    call compute_the_amps(eval_iint,ichan,use_amplitude_library,amplitude_info)
     if (time_physics) then
        call cpu_time(tAfter)
        t_amp=t_amp+(tAfter-tBefore)*dble(timing_sample)
        tBefore=tAfter
     endif
+    if (amplitude_info.ne.0) then
+       call report_numerical_rejection('matrix-element current',ichan,eval_iint)
+       return
+    endif
     call square_the_amps(eval_iint,ichan)
     if (time_physics) then
        call cpu_time(tAfter)
        t_mat=t_mat+(tAfter-tBefore)*dble(timing_sample)
+    endif
+    if (.not.all(numerical_value_is_safe(pgl(ichan)%amp2)) .or. &
+         .not.all(numerical_value_is_safe(pgl(ichan)%amp2_hel(1:pgl(ichan)%nhel(eval_iint))))) then
+       call report_numerical_rejection('matrix element',ichan,eval_iint)
+       return
     endif
     if ((.not. use_amplitude_library) &
          .and. pgl(ichan)%passed(eval_iint).le.nevent_hel_filter &
@@ -813,11 +1003,20 @@ contains
           t_Amp_opt=t_Amp_opt+(tAfter-tBefore)*dble(timing_sample)
        endif
        if (done) return
+       if (.not.all(numerical_value_is_safe(pgl(ichan)%amp2)) .or. &
+            .not.all(numerical_value_is_safe(pgl(ichan)%amp2_hel(1:pgl(ichan)%nhel(eval_iint))))) then
+          call report_numerical_rejection('optimised matrix element',ichan,eval_iint)
+          return
+       endif
     endif
 
     if (read_momenta) then
-        call perform_check(eval_iint,ichan)
-        if (pgl(ichan)%passed(eval_iint).gt.me_points) read_momenta=.false.
+        if (pgl(ichan)%passed(eval_iint).le.me_points) &
+             call perform_check(eval_iint,ichan)
+        if (matrix_element_checks_complete()) then
+           read_momenta=.false.
+           matrix_element_checks_done=.true.
+        endif
     endif
 
     real_pass=.true.
@@ -828,7 +1027,7 @@ contains
        call evaluate_real_dipoles(eval_iint,ichan,amp2_dip,kernel_info,kernel_dipole,dipole_values)
        if (kernel_info.ne.0) then
           if (dipole_status_is_numerical(kernel_info)) then
-             call report_subtraction_rejection('kernel',ichan,eval_iint,&
+             call report_subtraction_rejection('local dipole',ichan,eval_iint,&
                   kernel_dipole,kernel_info,0d0,0d0)
              return
           endif
@@ -862,31 +1061,101 @@ contains
        else
           amp2_integrand=-amp2_dip
        endif
+       if (.not.numerical_value_is_safe(amp2_dip) .or. &
+            .not.numerical_value_is_safe(amp2_integrand) .or. &
+            .not.all(numerical_value_is_safe(dipole_values)) .or. &
+            .not.all(ieee_is_finite(mapped_margins)) .or. &
+            .not.ieee_is_finite(threshold_distance)) then
+          call report_numerical_rejection('local subtraction',ichan,eval_iint)
+          return
+       endif
     endif
 
     ! set scales and update alphaS
     if (time_physics) call cpu_time(tBefore)
+    scale_info=0
     call set_scale(scale_choice,pgl(ichan)%next,pgl(ichan)%ps(1)%p,&
-         pgl(ichan)%iden_processes(:,1,iproc),scale_ren)
+         pgl(ichan)%iden_processes(:,1,iproc),scale_ren,scale_info)
+    if (scale_info.ne.0) then
+       call report_numerical_rejection('dynamic scale',ichan,eval_iint)
+       return
+    endif
+    if (.not.numerical_value_is_safe(scale_ren)) then
+       call report_numerical_rejection('dynamic scale',ichan,eval_iint)
+       return
+    endif
     scale_fac=scale_ren
     scale_shower=scale_ren
+    alpha_info=0
     if (use_lhapdf) then
        alphas=alphaspdf(scale_ren)
     else
-       alphas=alphas_Q(scale_ren,2,alphas_MZ)
+       alphas=alphas_Q(scale_ren,2,alphas_MZ,alpha_info)
+    endif
+    if (alpha_info.ne.0 .or. .not.numerical_value_is_safe(alphas)) then
+       call report_numerical_rejection('running coupling',ichan,eval_iint)
+       return
+    endif
+    if (alphas.le.0d0) then
+       call report_numerical_rejection('running coupling',ichan,eval_iint)
+       return
     endif
     
     ! MINT weight, phase-space jacobian and GeV -> pb conversion factor
-    weight=vol*pgl(ichan)%ps(1)%jac*conv
+    if (.not.product_is_safe(vol,pgl(ichan)%ps(1)%jac)) then
+       call report_numerical_rejection('common weight',ichan,eval_iint)
+       return
+    endif
+    weight=vol*pgl(ichan)%ps(1)%jac
+    if (.not.product_is_safe(weight,conv)) then
+       call report_numerical_rejection('common weight',ichan,eval_iint)
+       return
+    endif
+    weight=weight*conv
 
     ! multiply by the strong coupling
-    if (pgl(ichan)%amps(eval_iint)%n_sing(1).lt.pgl(ichan)%next-2) then
-       weight=weight*(4*pi*alphas)**(pgl(ichan)%next-2-pgl(ichan)%amps(eval_iint)%n_sing(1))
+    coupling_power=pgl(ichan)%next-2-pgl(ichan)%amps(eval_iint)%n_sing(1)
+    if (coupling_power.gt.0) then
+       if (.not.product_is_safe(4d0*pi,alphas)) then
+          call report_numerical_rejection('strong-coupling factor',ichan,eval_iint)
+          return
+       endif
+       coupling_base=4d0*pi*alphas
+       coupling_factor=1d0
+       do a=1,coupling_power
+          if (.not.product_is_safe(coupling_factor,coupling_base)) then
+             call report_numerical_rejection('strong-coupling factor',ichan,eval_iint)
+             return
+          endif
+          coupling_factor=coupling_factor*coupling_base
+       enddo
+       if (.not.product_is_safe(weight,coupling_factor)) then
+          call report_numerical_rejection('strong-coupling weight',ichan,eval_iint)
+          return
+       endif
+       weight=weight*coupling_factor
     endif
     
     ! multiply by the EW coupling
     if (pgl(ichan)%amps(eval_iint)%n_sing(1).ge.1) then
-       weight=weight*(2d0*4d0*pi*alphaEW)**pgl(ichan)%amps(eval_iint)%n_sing(1)
+       coupling_base=2d0*4d0*pi*alphaEW
+       coupling_factor=1d0
+       do a=1,pgl(ichan)%amps(eval_iint)%n_sing(1)
+          if (.not.product_is_safe(coupling_factor,coupling_base)) then
+             call report_numerical_rejection('electroweak-coupling factor',ichan,eval_iint)
+             return
+          endif
+          coupling_factor=coupling_factor*coupling_base
+       enddo
+       if (.not.product_is_safe(weight,coupling_factor)) then
+          call report_numerical_rejection('electroweak-coupling weight',ichan,eval_iint)
+          return
+       endif
+       weight=weight*coupling_factor
+    endif
+    if (.not.numerical_value_is_safe(weight)) then
+       call report_numerical_rejection('scale or common weight',ichan,eval_iint)
+       return
     endif
 
     if (keep_processes_separate) then
@@ -896,8 +1165,13 @@ contains
           ! that factor once instead of evolving the PDFs for every dipole.
           ! This path is also used by deterministic tail replay.
           allocate(real_hist_weights(pgl(ichan)%iden_iproc(eval_iint)))
+          pdf_info=0
           call physical_matrix_weight(ichan,eval_iint,1d0,weight,&
-               colour_singlet_multichannel_weight(eval_iint),real_hist_weights)
+               colour_singlet_multichannel_weight(eval_iint),real_hist_weights,pdf_info)
+          if (pdf_info.ne.0) then
+             call report_numerical_rejection('real-emission PDF',ichan,eval_iint)
+             return
+          endif
           real_hist_factor=sum(real_hist_weights)
           real_counter_scale=sum(abs(real_hist_weights))
           if (present(replay_physical_factor) .or. present(replay_counter_scale)) then
@@ -911,21 +1185,89 @@ contains
           f=amp2_integrand*real_hist_factor
           f_abs=abs(amp2_integrand)*real_counter_scale
        else
+          if (.not.product_is_safe(amp2_integrand,weight)) then
+             call report_numerical_rejection('real matrix weight',ichan,eval_iint)
+             return
+          endif
           val(1)=amp2_integrand*weight/dble(pgl(ichan)%iden(eval_iint))
+          if (.not.numerical_value_is_safe(val(1)) .or. &
+               .not.product_is_safe(val(1),colour_singlet_multichannel_weight(eval_iint))) then
+             call report_numerical_rejection('real multichannel weight',ichan,eval_iint)
+             return
+          endif
           val(1)=val(1)*colour_singlet_multichannel_weight(eval_iint)
-          allocate(hard_copy(pgl(ichan)%iden_iproc(eval_iint)))
-          hard_copy=val(1)*pgl(ichan)%idenCOandMAPfactor(&
-               1:pgl(ichan)%iden_iproc(eval_iint),eval_iint)
-          call include_PDF_and_identical_procs(val,val_abs,pgl(ichan),eval_iint)
-          f_abs=sum(val_abs(1:1))
-          f=sum(val(1:1))
+          if (has_real_process .and. integration_role.ne.1) then
+             ! P/K needs the PDF-free reduced Born copies.  integrated_beam
+             ! performs the three required table evolutions itself, so do
+             ! not evolve the two Born PDFs here only to discard them.
+             allocate(hard_copy(pgl(ichan)%iden_iproc(eval_iint)))
+             hard_copy=val(1)*pgl(ichan)%idenCOandMAPfactor(&
+                  1:pgl(ichan)%iden_iproc(eval_iint),eval_iint)
+             f=0d0
+             f_abs=0d0
+          else
+             pdf_info=0
+             call include_PDF_and_identical_procs(val,val_abs,pgl(ichan),eval_iint,pdf_info)
+             if (pdf_info.ne.0) then
+                call report_numerical_rejection('Born PDF',ichan,eval_iint)
+                return
+             endif
+             f_abs=sum(val_abs(1:1))
+             f=sum(val(1:1))
+          endif
        endif
     else
-       val(1:pgl(ichan)%nproc)=pgl(ichan)%amp2(1:pgl(ichan)%nproc)*weight/dble(pgl(ichan)%iden(1:pgl(ichan)%nproc))
+       if (.not.all(product_is_safe(pgl(ichan)%amp2(1:pgl(ichan)%nproc),weight))) then
+          call report_numerical_rejection('Born matrix weight',ichan,eval_iint)
+          return
+       endif
+       val(1:pgl(ichan)%nproc)=pgl(ichan)%amp2(1:pgl(ichan)%nproc)*weight/&
+            dble(pgl(ichan)%iden(1:pgl(ichan)%nproc))
+       if (.not.all(numerical_value_is_safe(val(1:pgl(ichan)%nproc))) .or. &
+            .not.all(product_is_safe(val(1:pgl(ichan)%nproc),&
+            colour_singlet_multichannel_weight(1:pgl(ichan)%nproc)))) then
+          call report_numerical_rejection('Born multichannel weight',ichan,eval_iint)
+          return
+       endif
        val(1:pgl(ichan)%nproc)=val(1:pgl(ichan)%nproc)*colour_singlet_multichannel_weight(1:pgl(ichan)%nproc)
-       call include_PDF_and_identical_procs(val,val_abs,pgl(ichan),-1)
+       pdf_info=0
+       call include_PDF_and_identical_procs(val,val_abs,pgl(ichan),-1,pdf_info)
+       if (pdf_info.ne.0) then
+          call report_numerical_rejection('combined PDF',ichan,eval_iint)
+          return
+       endif
        f_abs=sum(val_abs(1:pgl(ichan)%nproc))
        f=sum(val(1:pgl(ichan)%nproc))
+    endif
+    if (.not.numerical_value_is_safe(f) .or. .not.numerical_value_is_safe(f_abs)) then
+       call report_numerical_rejection('PDF-weighted integrand',ichan,eval_iint)
+       f=0d0
+       f_abs=0d0
+       return
+    endif
+    if (f_abs.lt.0d0) then
+       call report_numerical_rejection('PDF-weighted integrand',ichan,eval_iint)
+       f=0d0
+       f_abs=0d0
+       return
+    endif
+    if (allocated(hard_copy)) then
+       if (.not.all(numerical_value_is_safe(hard_copy))) then
+          call report_numerical_rejection('beam hard weight',ichan,eval_iint)
+          f=0d0
+          f_abs=0d0
+          return
+       endif
+    endif
+    if (allocated(real_hist_weights)) then
+       if (.not.all(numerical_value_is_safe(real_hist_weights)) .or. &
+            .not.numerical_value_is_safe(real_hist_factor) .or. &
+            .not.numerical_value_is_safe(real_counter_scale)) then
+          call report_numerical_rejection('real-emission physical weight',ichan,eval_iint)
+          f=0d0
+          f_abs=0d0
+          return
+       endif
     endif
     if (pgl(ichan)%is_subtracted_real) then
        full_f=f
@@ -950,6 +1292,42 @@ contains
        f_components(2)=f
        if (point_stratum.eq.real_stratum_regular .and. stratum_selected) f_components(8)=f
        if (point_stratum.eq.real_stratum_migration .and. stratum_selected) f_components(9)=f
+       analysis_weights_valid=all(numerical_value_is_safe(f_components)) .and. &
+            numerical_value_is_safe(f) .and. numerical_value_is_safe(f_abs)
+       if (histogram_active .and. stratum_selected) then
+          if (real_pass) then
+             if (analysis_distinguishes_massless_qcd_flavours) then
+                analysis_weights_valid=analysis_weights_valid .and. &
+                     all(product_is_safe(pgl(ichan)%amp2(1),real_hist_weights))
+             else
+                analysis_weights_valid=analysis_weights_valid .and. &
+                     product_is_safe(pgl(ichan)%amp2(1),real_hist_factor)
+             endif
+          endif
+          do idip=1,size(dipole_values)
+             if (.not.pgl(ichan)%dpl(eval_iint)%dl(idip)%active) cycle
+             if (analysis_distinguishes_massless_qcd_flavours) then
+                analysis_weights_valid=analysis_weights_valid .and. &
+                     all(product_is_safe(dipole_values(idip),real_hist_weights))
+             else
+                analysis_weights_valid=analysis_weights_valid .and. &
+                     product_is_safe(dipole_values(idip),real_hist_factor)
+             endif
+          enddo
+       endif
+       if (tail_tracking_enabled .and. stratum_selected) then
+          if (real_pass) analysis_weights_valid=analysis_weights_valid .and. &
+               product_is_safe(pgl(ichan)%amp2(1),real_counter_scale)
+          analysis_weights_valid=analysis_weights_valid .and. &
+               all(product_is_safe(dipole_values,real_counter_scale))
+       endif
+       if (.not.analysis_weights_valid) then
+          call report_numerical_rejection('real-emission analysis weight',ichan,eval_iint)
+          f=0d0
+          f_abs=0d0
+          f_components=0d0
+          return
+       endif
        if (histogram_active .and. stratum_selected) then
           if (real_pass) then
              if (analysis_distinguishes_massless_qcd_flavours) then
@@ -988,26 +1366,50 @@ contains
     elseif (has_real_process) then
        if (integration_role.eq.1) then
           f_components(1)=f
+          integrated_info=0
           if (keep_processes_separate) then
              if (histogram_active .and. analysis_distinguishes_massless_qcd_flavours) then
                 allocate(icoeff_copy(-2:0,pgl(ichan)%iden_iproc(eval_iint)))
                 call integrated_endpoint(ichan,eval_iint,&
                      pgl(ichan)%val_procs(1:pgl(ichan)%iden_iproc(eval_iint),eval_iint),&
-                     pgl(ichan)%ps(1)%p,scale_ren,alphas,icoeff,icoeff_copy)
+                     pgl(ichan)%ps(1)%p,scale_ren,alphas,icoeff,icoeff_copy,integrated_info)
              else
                 call integrated_endpoint(ichan,eval_iint,&
                      pgl(ichan)%val_procs(1:pgl(ichan)%iden_iproc(eval_iint),eval_iint),&
-                     pgl(ichan)%ps(1)%p,scale_ren,alphas,icoeff)
+                     pgl(ichan)%ps(1)%p,scale_ren,alphas,icoeff,status=integrated_info)
              endif
           else
              icoeff=0d0
              do iproc=1,pgl(ichan)%nproc
-                call add_endpoint_for_process(ichan,iproc,scale_ren,alphas,icoeff)
+                call add_endpoint_for_process(ichan,iproc,scale_ren,alphas,icoeff,integrated_info)
+                if (integrated_info.ne.0) exit
              enddo
+          endif
+          if (integrated_info.ne.0) then
+             call report_integrated_rejection('endpoint',ichan,eval_iint,integrated_info)
+             f=0d0
+             f_abs=0d0
+             f_components=0d0
+             return
           endif
           f_components(3:5)=icoeff(-2:0)
           f=f+icoeff(0)
           f_abs=abs(f_components(1))+abs(icoeff(0))
+          analysis_weights_valid=numerical_value_is_safe(f) .and. &
+               numerical_value_is_safe(f_abs) .and. all(numerical_value_is_safe(f_components))
+          if (allocated(icoeff_copy)) then
+             analysis_weights_valid=analysis_weights_valid .and. &
+                  all(numerical_value_is_safe(icoeff_copy)) .and. &
+                  all(numerical_value_is_safe(&
+                  pgl(ichan)%val_procs(1:size(icoeff_copy,2),eval_iint)+icoeff_copy(0,:)))
+          endif
+          if (.not.analysis_weights_valid) then
+             call report_numerical_rejection('integrated endpoint total',ichan,eval_iint)
+             f=0d0
+             f_abs=0d0
+             f_components=0d0
+             return
+          endif
           if (histogram_active) then
              if (analysis_distinguishes_massless_qcd_flavours) then
                 do icopy=1,pgl(ichan)%iden_iproc(eval_iint)
@@ -1025,21 +1427,45 @@ contains
           z=x(size(x))
           pterm=0d0
           kterm=0d0
+          integrated_info=0
           if (keep_processes_separate) then
              if (histogram_active .and. analysis_distinguishes_massless_qcd_flavours) then
                 allocate(pterm_copy(size(hard_copy)),kterm_copy(size(hard_copy)))
                 call integrated_beam(ichan,eval_iint,integration_role-1,z,hard_copy,&
                      pgl(ichan)%ps(1)%xbjrk,scale_ren,scale_fac,alphas,&
-                     pterm,kterm,pterm_copy,kterm_copy)
+                     pterm,kterm,pterm_copy,kterm_copy,integrated_info)
              else
                 call integrated_beam(ichan,eval_iint,integration_role-1,z,hard_copy,&
-                     pgl(ichan)%ps(1)%xbjrk,scale_ren,scale_fac,alphas,pterm,kterm)
+                     pgl(ichan)%ps(1)%xbjrk,scale_ren,scale_fac,alphas,pterm,kterm,&
+                     status=integrated_info)
              endif
+          endif
+          if (integrated_info.ne.0) then
+             call report_integrated_rejection('beam',ichan,eval_iint,integrated_info)
+             f=0d0
+             f_abs=0d0
+             f_components=0d0
+             return
           endif
           f_components(6)=pterm
           f_components(7)=kterm
           f=pterm+kterm
           f_abs=abs(pterm)+abs(kterm)
+          analysis_weights_valid=numerical_value_is_safe(f) .and. &
+               numerical_value_is_safe(f_abs) .and. all(numerical_value_is_safe(f_components))
+          if (allocated(pterm_copy)) then
+             analysis_weights_valid=analysis_weights_valid .and. &
+                  all(numerical_value_is_safe(pterm_copy)) .and. &
+                  all(numerical_value_is_safe(kterm_copy)) .and. &
+                  all(numerical_value_is_safe(pterm_copy+kterm_copy))
+          endif
+          if (.not.analysis_weights_valid) then
+             call report_numerical_rejection('integrated beam total',ichan,eval_iint)
+             f=0d0
+             f_abs=0d0
+             f_components=0d0
+             return
+          endif
           if (histogram_active) then
              if (analysis_distinguishes_massless_qcd_flavours) then
                 do icopy=1,pgl(ichan)%iden_iproc(eval_iint)
@@ -1077,32 +1503,85 @@ contains
     endif
   end subroutine integrand
 
-  subroutine physical_matrix_weight(ichan,iint,matrix_element,common_weight,channel_weight,result)
+  subroutine physical_matrix_weight(ichan,iint,matrix_element,common_weight,channel_weight,result,status)
     integer,intent(in) :: ichan,iint
     real(kind=8),intent(in) :: matrix_element,common_weight,channel_weight
     real(kind=8),intent(out) :: result(:)
+    integer,intent(out) :: status
     real(kind=8) :: value(1),value_abs(1)
-    value(1)=matrix_element*common_weight/dble(pgl(ichan)%iden(iint))
-    value(1)=value(1)*channel_weight
-    call include_PDF_and_identical_procs(value,value_abs,pgl(ichan),iint)
+    result=0d0
+    status=0
     if (size(result).ne.pgl(ichan)%iden_iproc(iint)) then
        write(*,*) 'ERROR: physical matrix histogram weight array has incompatible size'
        stop 1
     endif
+    if (.not.product_is_safe(matrix_element,common_weight)) then
+       status=-20
+       return
+    endif
+    value(1)=matrix_element*common_weight/dble(pgl(ichan)%iden(iint))
+    if (.not.numerical_value_is_safe(value(1)) .or. &
+         .not.product_is_safe(value(1),channel_weight)) then
+       value=0d0
+       status=-20
+       return
+    endif
+    value(1)=value(1)*channel_weight
+    call include_PDF_and_identical_procs(value,value_abs,pgl(ichan),iint,status)
+    if (status.ne.0) return
     result=pgl(ichan)%val_procs(1:pgl(ichan)%iden_iproc(iint),iint)
   end subroutine physical_matrix_weight
 
   subroutine initialize_tail_diagnostics()
     implicit none
-    integer :: max_integrals,unit
+    integer :: max_integrals,unit,diagnostic_io_status,allocation_status
+    integer(kind=8) :: leaf_count,bytes_per_leaf,workspace_bytes
+    character(len=256) :: diagnostic_io_message,allocation_message
+    if (ngroups.lt.1 .or. .not.allocated(nintegrals)) then
+       write(*,*) 'ERROR: cannot initialise tail diagnostics before integration metadata'
+       stop 1
+    endif
+    if (lbound(nintegrals,1).ne.1 .or. size(nintegrals).ne.ngroups .or. &
+         any(nintegrals.lt.1)) then
+       write(*,*) 'ERROR: invalid integral counts for tail diagnostics',nintegrals
+       stop 1
+    endif
     max_integrals=maxval(nintegrals)
-    allocate(tail_residual_records(n_tail_records,ngroups,max_integrals))
-    allocate(tail_component_records(n_tail_records,ngroups,max_integrals))
-    allocate(tail_npoints(ngroups,max_integrals))
-    allocate(tail_iteration_npoints(ngroups,max_integrals))
-    allocate(tail_residual_sum2(ngroups,max_integrals),tail_component_sum2(ngroups,max_integrals))
-    allocate(tail_iteration_residual_sum2(ngroups,max_integrals))
-    allocate(tail_iteration_max_residual2(ngroups,max_integrals))
+    leaf_count=checked_multiply8(int(ngroups,kind=8),int(max_integrals,kind=8),&
+         'tail-diagnostic leaf count')
+    bytes_per_leaf=(2_8*int(n_tail_records,kind=8)*&
+         int(storage_size(tail_record()),kind=8)+&
+         2_8*int(storage_size(0_8),kind=8)+&
+         4_8*int(storage_size(0d0),kind=8)+7_8)/8_8
+    workspace_bytes=checked_multiply8(leaf_count,bytes_per_leaf,&
+         'tail-diagnostic workspace')
+    if (workspace_bytes.gt.max_process_workspace_bytes) then
+       write(*,*) 'ERROR: tail-diagnostic workspace exceeds the supported limit',&
+            workspace_bytes,max_process_workspace_bytes
+       stop 1
+    endif
+    if (allocated(tail_residual_records)) deallocate(tail_residual_records)
+    if (allocated(tail_component_records)) deallocate(tail_component_records)
+    if (allocated(tail_npoints)) deallocate(tail_npoints)
+    if (allocated(tail_iteration_npoints)) deallocate(tail_iteration_npoints)
+    if (allocated(tail_residual_sum2)) deallocate(tail_residual_sum2)
+    if (allocated(tail_component_sum2)) deallocate(tail_component_sum2)
+    if (allocated(tail_iteration_residual_sum2)) deallocate(tail_iteration_residual_sum2)
+    if (allocated(tail_iteration_max_residual2)) deallocate(tail_iteration_max_residual2)
+    allocation_message=''
+    allocate(tail_residual_records(n_tail_records,ngroups,max_integrals),&
+         tail_component_records(n_tail_records,ngroups,max_integrals),&
+         tail_npoints(ngroups,max_integrals),&
+         tail_iteration_npoints(ngroups,max_integrals),&
+         tail_residual_sum2(ngroups,max_integrals),&
+         tail_component_sum2(ngroups,max_integrals),&
+         tail_iteration_residual_sum2(ngroups,max_integrals),&
+         tail_iteration_max_residual2(ngroups,max_integrals),&
+         stat=allocation_status,errmsg=allocation_message)
+    if (allocation_status.ne.0) then
+       write(*,*) 'ERROR: could not allocate tail diagnostics: ',trim(allocation_message)
+       stop 1
+    endif
     tail_residual_records%valid=.false.
     tail_component_records%valid=.false.
     tail_npoints=0_8
@@ -1125,10 +1604,22 @@ contains
     ! A run that terminates before accepting a real point must not leave a
     ! replay fixture from an older run with the same tag.
     if (.not.replay_tail) then
-       open(newunit=unit,file=trim(tail_replay_output),status='replace',action='write')
-       close(unit,status='delete')
-       open(newunit=unit,file=trim(tail_residual_replay_output),status='replace',action='write')
-       close(unit,status='delete')
+       diagnostic_io_message=''
+       open(newunit=unit,file=trim(tail_replay_output),status='replace',action='write',&
+            iostat=diagnostic_io_status,iomsg=diagnostic_io_message)
+       call require_diagnostic_io(diagnostic_io_status,'creating stale-replay placeholder',&
+            tail_replay_output,diagnostic_io_message)
+       close(unit,status='delete',iostat=diagnostic_io_status,iomsg=diagnostic_io_message)
+       call require_diagnostic_io(diagnostic_io_status,'deleting stale replay',tail_replay_output,&
+            diagnostic_io_message)
+       diagnostic_io_message=''
+       open(newunit=unit,file=trim(tail_residual_replay_output),status='replace',action='write',&
+            iostat=diagnostic_io_status,iomsg=diagnostic_io_message)
+       call require_diagnostic_io(diagnostic_io_status,'creating stale-replay placeholder',&
+            tail_residual_replay_output,diagnostic_io_message)
+       close(unit,status='delete',iostat=diagnostic_io_status,iomsg=diagnostic_io_message)
+       call require_diagnostic_io(diagnostic_io_status,'deleting stale replay',&
+            tail_residual_replay_output,diagnostic_io_message)
     endif
     call write_tail_diagnostics()
   end subroutine initialize_tail_diagnostics
@@ -1142,16 +1633,47 @@ contains
     real(kind=8),intent(in) :: common_weight,physical_factor,counterevent_scale,dipole_values(:)
     real(kind=8),intent(in) :: threshold_distance
     logical,intent(in) :: real_pass,stratum_selected
-    integer :: residual_slot,component_slot
-    real(kind=8) :: score,residual_score,component_score
+    integer :: residual_slot,component_slot,idip
+    real(kind=8) :: score,residual_score,component_score,component_candidate
+    real(kind=8) :: residual_square,component_square
 
+    if (.not.all(numerical_value_is_safe(x)) .or. &
+         .not.numerical_value_is_safe(vol) .or. &
+         .not.numerical_value_is_safe(f_point) .or. &
+         .not.numerical_value_is_safe(f_abs_point) .or. &
+         .not.numerical_value_is_safe(matrix_real) .or. &
+         .not.numerical_value_is_safe(dipole_sum) .or. &
+         .not.numerical_value_is_safe(matrix_residual) .or. &
+         .not.numerical_value_is_safe(common_weight) .or. &
+         .not.numerical_value_is_safe(physical_factor) .or. &
+         .not.numerical_value_is_safe(counterevent_scale) .or. &
+         .not.all(numerical_value_is_safe(dipole_values)) .or. &
+         .not.numerical_value_is_safe(threshold_distance)) then
+       write(*,*) 'ERROR: invalid input to subtracted-real tail diagnostics',ichan,iint
+       stop 1
+    endif
+    if (f_abs_point.lt.0d0 .or. counterevent_scale.lt.0d0) then
+       write(*,*) 'ERROR: negative magnitude in subtracted-real tail diagnostics',ichan,iint
+       stop 1
+    endif
     residual_score=abs(f_point)
     component_score=0d0
     if (stratum_selected) then
-       if (real_pass) component_score=abs(matrix_real)*counterevent_scale
-       if (size(dipole_values).gt.0) then
-          component_score=max(component_score,maxval(abs(dipole_values))*counterevent_scale)
+       if (real_pass) then
+          if (.not.product_is_safe(matrix_real,counterevent_scale)) then
+             write(*,*) 'ERROR: unsafe real component in tail diagnostics',ichan,iint
+             stop 1
+          endif
+          component_score=abs(matrix_real)*counterevent_scale
        endif
+       do idip=1,size(dipole_values)
+          if (.not.product_is_safe(dipole_values(idip),counterevent_scale)) then
+             write(*,*) 'ERROR: unsafe dipole component in tail diagnostics',ichan,iint,idip
+             stop 1
+          endif
+          component_candidate=abs(dipole_values(idip))*counterevent_scale
+          component_score=max(component_score,component_candidate)
+       enddo
     endif
     score=max(residual_score,component_score)
     if (.not.ieee_is_finite(score)) then
@@ -1160,10 +1682,24 @@ contains
        stop 1
     endif
 
-    tail_residual_sum2(ichan,iint)=tail_residual_sum2(ichan,iint)+f_point*f_point
-    tail_component_sum2(ichan,iint)=tail_component_sum2(ichan,iint)+component_score*component_score
-    tail_iteration_residual_sum2(ichan,iint)=tail_iteration_residual_sum2(ichan,iint)+f_point*f_point
-    tail_iteration_max_residual2(ichan,iint)=max(tail_iteration_max_residual2(ichan,iint),f_point*f_point)
+    call checked_diagnostic_square(f_point,residual_square,'tail residual square')
+    call checked_diagnostic_square(component_score,component_square,'tail component square')
+    call checked_diagnostic_accumulate(tail_residual_sum2(ichan,iint),&
+         residual_square,'tail residual sum')
+    call checked_diagnostic_accumulate(tail_component_sum2(ichan,iint),&
+         component_square,'tail component sum')
+    call checked_diagnostic_accumulate(tail_iteration_residual_sum2(ichan,iint),&
+         residual_square,'tail iteration residual sum')
+    if (.not.ieee_is_finite(tail_iteration_max_residual2(ichan,iint))) then
+       write(*,*) 'ERROR: invalid tail maximum accumulator',ichan,iint
+       stop 1
+    endif
+    if (tail_iteration_max_residual2(ichan,iint).lt.0d0) then
+       write(*,*) 'ERROR: invalid tail maximum accumulator',ichan,iint
+       stop 1
+    endif
+    tail_iteration_max_residual2(ichan,iint)=max(&
+         tail_iteration_max_residual2(ichan,iint),residual_square)
     if (score.le.0d0) return
 
     residual_slot=find_tail_record_slot(tail_residual_records(:,ichan,iint),residual_score,.true.)
@@ -1211,7 +1747,7 @@ contains
     real(kind=8),intent(out) :: fraction,total_proxy,max_proxy
     integer :: ichan_local,iint_local,stratum_local
     integer(kind=8) :: npoints_local
-    real(kind=8) :: normalization
+    real(kind=8) :: normalization,proxy_contribution
 
     total_proxy=0d0
     max_proxy=0d0
@@ -1223,8 +1759,21 @@ contains
           npoints_local=tail_iteration_npoints(ichan_local,iint_local)
           if (npoints_local.le.0_8) cycle
           normalization=dble(npoints_local)**2
-          total_proxy=total_proxy+tail_iteration_residual_sum2(ichan_local,iint_local)/normalization
-          max_proxy=max(max_proxy,tail_iteration_max_residual2(ichan_local,iint_local)/normalization)
+          if (.not.ieee_is_finite(tail_iteration_residual_sum2(ichan_local,iint_local)) .or. &
+               .not.ieee_is_finite(tail_iteration_max_residual2(ichan_local,iint_local))) then
+             write(*,*) 'ERROR: invalid migration-tail accumulator',ichan_local,iint_local
+             stop 1
+          endif
+          if (tail_iteration_residual_sum2(ichan_local,iint_local).lt.0d0 .or. &
+               tail_iteration_max_residual2(ichan_local,iint_local).lt.0d0) then
+             write(*,*) 'ERROR: negative migration-tail accumulator',ichan_local,iint_local
+             stop 1
+          endif
+          proxy_contribution=tail_iteration_residual_sum2(ichan_local,iint_local)/normalization
+          call checked_diagnostic_accumulate(total_proxy,proxy_contribution,&
+               'migration-tail variance proxy')
+          proxy_contribution=tail_iteration_max_residual2(ichan_local,iint_local)/normalization
+          max_proxy=max(max_proxy,proxy_contribution)
        enddo
     enddo
     if (total_proxy.gt.0d0) then
@@ -1309,7 +1858,8 @@ contains
     real(kind=8),intent(in) :: residual_score,component_score,score
     real(kind=8),intent(in) :: threshold_distance
     logical,intent(in) :: real_pass
-    integer :: idip,ndip
+    integer :: idip,ndip,allocation_status
+    character(len=256) :: allocation_message
 
     record%valid=.true.
     record%real_pass=real_pass
@@ -1317,7 +1867,7 @@ contains
     record%iint=iint
     record%physical_iint=physical_iint
     record%stratum=stratum
-    record%iteration=tail_iteration+1
+    record%iteration=checked_add(tail_iteration,1,'tail-record iteration')
     record%point=timing_point
     record%score=score
     record%residual_score=residual_score
@@ -1335,11 +1885,10 @@ contains
     record%renormalization_scale=scale_ren
     record%alpha_s_value=alphas
     record%threshold_distance=threshold_distance
-    record%x=x
-    record%momenta=pgl(ichan)%ps(1)%p
-    record%process=pgl(ichan)%processes(:,physical_iint)
-
     ndip=size(dipole_values)
+    if (allocated(record%x)) deallocate(record%x)
+    if (allocated(record%momenta)) deallocate(record%momenta)
+    if (allocated(record%process)) deallocate(record%process)
     if (allocated(record%dipole_values)) deallocate(record%dipole_values)
     if (allocated(record%alpha_variables)) deallocate(record%alpha_variables)
     if (allocated(record%dipole_ijk)) deallocate(record%dipole_ijk)
@@ -1347,8 +1896,23 @@ contains
     if (allocated(record%alpha_active)) deallocate(record%alpha_active)
     if (allocated(record%active)) deallocate(record%active)
     if (allocated(record%passes_cuts)) deallocate(record%passes_cuts)
-    allocate(record%dipole_values(ndip),record%alpha_variables(ndip),record%dipole_ijk(3,ndip))
-    allocate(record%dipole_topology(ndip),record%alpha_active(ndip),record%active(ndip),record%passes_cuts(ndip))
+    allocation_message=''
+    allocate(record%x(lbound(x,1):ubound(x,1)),&
+         record%momenta(lbound(pgl(ichan)%ps(1)%p,1):ubound(pgl(ichan)%ps(1)%p,1),&
+         lbound(pgl(ichan)%ps(1)%p,2):ubound(pgl(ichan)%ps(1)%p,2)),&
+         record%process(lbound(pgl(ichan)%processes,1):ubound(pgl(ichan)%processes,1)),&
+         record%dipole_values(ndip),record%alpha_variables(ndip),&
+         record%dipole_ijk(3,ndip),record%dipole_topology(ndip),&
+         record%alpha_active(ndip),record%active(ndip),record%passes_cuts(ndip),&
+         stat=allocation_status,errmsg=allocation_message)
+    if (allocation_status.ne.0) then
+       write(*,*) 'ERROR: could not allocate a tail-diagnostic record: ',&
+            trim(allocation_message)
+       stop 1
+    endif
+    record%x=x
+    record%momenta=pgl(ichan)%ps(1)%p
+    record%process=pgl(ichan)%processes(:,physical_iint)
     record%dipole_values=dipole_values
     do idip=1,ndip
        record%alpha_variables(idip)=pgl(ichan)%dpl(physical_iint)%dl(idip)%alpha_variable
@@ -1366,47 +1930,75 @@ contains
     character(len=*),intent(in) :: output_file
     integer,intent(in) :: ichan,iint
     real(kind=8),intent(in) :: x(:),vol,f_point,f_abs_point,score,physical_factor,counterevent_scale
-    integer :: unit
-    open(newunit=unit,file=trim(output_file),status='replace',action='write')
-    write(unit,'(a)') '# AmpliCol tail replay v3'
-    write(unit,*) ichan,iint,size(x),PS_choice,tail_iteration+1,timing_point
-    write(unit,'(*(es25.16,1x))') vol,f_point,f_abs_point,score,physical_factor,counterevent_scale
-    write(unit,'(*(es25.16,1x))') alpha_dipole
-    write(unit,'(*(es25.16,1x))') x
-    close(unit)
+    integer :: unit,replay_io_status,replay_iteration_out
+    character(len=256) :: replay_io_message
+    replay_iteration_out=checked_add(tail_iteration,1,'tail-replay iteration')
+    replay_io_message=''
+    open(newunit=unit,file=trim(output_file),status='replace',action='write',&
+         iostat=replay_io_status,iomsg=replay_io_message)
+    call require_diagnostic_io(replay_io_status,'opening replay output',output_file,replay_io_message)
+    write(unit,'(a)',iostat=replay_io_status,iomsg=replay_io_message) '# AmpliCol tail replay v3'
+    call require_diagnostic_io(replay_io_status,'writing replay header',output_file,replay_io_message)
+    write(unit,*,iostat=replay_io_status,iomsg=replay_io_message) &
+         ichan,iint,size(x),PS_choice,replay_iteration_out,timing_point
+    call require_diagnostic_io(replay_io_status,'writing replay metadata',output_file,replay_io_message)
+    write(unit,'(*(es25.16,1x))',iostat=replay_io_status,iomsg=replay_io_message) &
+         vol,f_point,f_abs_point,score,physical_factor,counterevent_scale
+    call require_diagnostic_io(replay_io_status,'writing replay weights',output_file,replay_io_message)
+    write(unit,'(*(es25.16,1x))',iostat=replay_io_status,iomsg=replay_io_message) alpha_dipole
+    call require_diagnostic_io(replay_io_status,'writing replay alpha values',output_file,replay_io_message)
+    write(unit,'(*(es25.16,1x))',iostat=replay_io_status,iomsg=replay_io_message) x
+    call require_diagnostic_io(replay_io_status,'writing replay coordinates',output_file,replay_io_message)
+    close(unit,iostat=replay_io_status,iomsg=replay_io_message)
+    call require_diagnostic_io(replay_io_status,'closing replay output',output_file,replay_io_message)
   end subroutine write_tail_replay_point
 
   subroutine replay_saved_tail_point()
     implicit none
     character(len=256) :: header
-    integer :: unit,replay_ichan,replay_iint,nrandom,replay_ps,replay_iteration
+    character(len=256) :: io_message
+    integer :: unit,replay_ichan,replay_iint,nrandom,replay_ps,replay_iteration,io_status
     integer :: replay_physical_iint,replay_stratum
     integer(kind=8) :: replay_point
     real(kind=8) :: replay_vol,expected_f,expected_f_abs,expected_score,replay_alpha(4),tolerance
+    real(kind=8) :: comparison_scale,comparison_residual
     real(kind=8) :: replay_physical_factor,replay_counter_scale
     real(kind=8),allocatable :: replay_x(:)
     logical :: replay_v2
     character(len=9),parameter :: stratum_name(2)=[character(len=9) :: 'regular','migration']
 
-    open(newunit=unit,file=trim(tail_replay_file),status='old',action='read')
-    read(unit,'(a)') header
+    io_message=''
+    open(newunit=unit,file=trim(tail_replay_file),status='old',action='read',&
+         iostat=io_status,iomsg=io_message)
+    call require_tail_replay_io(io_status,'opening',io_message)
+    read(unit,'(a)',iostat=io_status,iomsg=io_message) header
+    call require_tail_replay_io(io_status,'reading the header from',io_message)
     replay_v2=trim(header).eq.'# AmpliCol tail replay v2'
     if (.not.replay_v2 .and. trim(header).ne.'# AmpliCol tail replay v3') then
        write(*,*) 'ERROR: unsupported tail replay file: ',trim(header)
        stop 1
     endif
-    read(unit,*) replay_ichan,replay_iint,nrandom,replay_ps,replay_iteration,replay_point
-    read(unit,*) replay_vol,expected_f,expected_f_abs,expected_score,replay_physical_factor,replay_counter_scale
-    read(unit,*) replay_alpha
-    allocate(replay_x(nrandom))
-    read(unit,*) replay_x
-    close(unit)
+    read(unit,*,iostat=io_status,iomsg=io_message) &
+         replay_ichan,replay_iint,nrandom,replay_ps,replay_iteration,replay_point
+    call require_tail_replay_io(io_status,'reading metadata from',io_message)
+    read(unit,*,iostat=io_status,iomsg=io_message) &
+         replay_vol,expected_f,expected_f_abs,expected_score,replay_physical_factor,replay_counter_scale
+    call require_tail_replay_io(io_status,'reading weights from',io_message)
+    read(unit,*,iostat=io_status,iomsg=io_message) replay_alpha
+    call require_tail_replay_io(io_status,'reading alpha values from',io_message)
 
     if (replay_ps.ne.PS_choice) then
        write(*,*) 'ERROR: tail replay phase-space choice differs:',replay_ps,PS_choice
        stop 1
     endif
-    if (maxval(abs(replay_alpha-alpha_dipole)).gt.1d-14) then
+    if (.not.all(numerical_value_is_safe(replay_alpha))) then
+       write(*,*) 'ERROR: tail replay contains invalid alpha values:',replay_alpha
+       stop 1
+    endif
+    comparison_scale=max(1d0,maxval(abs(replay_alpha)),maxval(abs(alpha_dipole)))
+    comparison_residual=maxval(abs(replay_alpha/comparison_scale-&
+         alpha_dipole/comparison_scale))
+    if (comparison_residual.gt.1d-14/comparison_scale) then
        write(*,*) 'ERROR: tail replay alpha values differ:'
        write(*,*) ' saved:',replay_alpha
        write(*,*) ' active:',alpha_dipole
@@ -1418,6 +2010,10 @@ contains
     endif
     if (.not.pgl(replay_ichan)%is_subtracted_real) then
        write(*,*) 'ERROR: tail replay channel is not subtracted real:',replay_ichan
+       stop 1
+    endif
+    if (nrandom.lt.1) then
+       write(*,*) 'ERROR: tail replay random-coordinate count is invalid:',nrandom
        stop 1
     endif
     if (replay_v2) then
@@ -1435,6 +2031,38 @@ contains
        write(*,*) 'ERROR: tail replay random-coordinate count differs:',nrandom,size(pgl(replay_ichan)%ps(1)%x)
        stop 1
     endif
+    if (replay_iteration.lt.1 .or. replay_point.lt.1_8) then
+       write(*,*) 'ERROR: tail replay iteration/point metadata is invalid:',&
+            replay_iteration,replay_point
+       stop 1
+    endif
+    if (.not.numerical_value_is_safe(replay_vol) .or. &
+         .not.numerical_value_is_safe(expected_f) .or. &
+         .not.numerical_value_is_safe(expected_f_abs) .or. &
+         .not.numerical_value_is_safe(expected_score) .or. &
+         .not.numerical_value_is_safe(replay_physical_factor) .or. &
+         .not.numerical_value_is_safe(replay_counter_scale)) then
+       write(*,*) 'ERROR: tail replay contains invalid saved weights'
+       stop 1
+    endif
+    if (replay_vol.le.0d0 .or. expected_f_abs.lt.0d0 .or. expected_score.lt.0d0 .or. &
+         replay_counter_scale.lt.0d0) then
+       write(*,*) 'ERROR: tail replay contains invalid saved weights'
+       stop 1
+    endif
+    allocate(replay_x(nrandom))
+    read(unit,*,iostat=io_status,iomsg=io_message) replay_x
+    call require_tail_replay_io(io_status,'reading coordinates from',io_message)
+    close(unit,iostat=io_status,iomsg=io_message)
+    call require_tail_replay_io(io_status,'closing',io_message)
+    if (.not.all(numerical_value_is_safe(replay_x))) then
+       write(*,*) 'ERROR: tail replay contains invalid random coordinates'
+       stop 1
+    endif
+    if (any(replay_x.lt.0d0) .or. any(replay_x.gt.1d0)) then
+       write(*,*) 'ERROR: tail replay contains invalid random coordinates'
+       stop 1
+    endif
 
     if (replay_v2) then
        call integrand(replay_ichan,replay_iint,replay_x,replay_vol,f(1),f_abs(1),f_aux(:,1),&
@@ -1443,7 +2071,9 @@ contains
        call integrand(replay_ichan,replay_iint,replay_x,replay_vol,f(1),f_abs(1),f_aux(:,1),&
             replay_physical_factor,replay_counter_scale)
     endif
-    tolerance=5d-11*max(1d0,abs(expected_f),abs(f(1)))
+    comparison_scale=max(1d0,abs(expected_f),abs(f(1)))
+    tolerance=5d-11*comparison_scale
+    comparison_residual=abs(f(1)/comparison_scale-expected_f/comparison_scale)
     write(*,'(a,2(i0,1x),a,i0,a,i0)') 'Tail replay channel/integral ',replay_ichan,replay_iint,&
          ' original iteration ',replay_iteration,' point ',replay_point
     if (.not.replay_v2) then
@@ -1456,7 +2086,7 @@ contains
     write(*,'(a,es24.16)') 'Replayed signed weight:',f(1)
     write(*,'(a,es24.16)') 'Saved absolute weight: ',expected_f_abs
     write(*,'(a,es24.16)') 'Saved tail score:      ',expected_score
-    if (abs(f(1)-expected_f).gt.tolerance) then
+    if (comparison_residual.gt.5d-11) then
        write(*,'(a,es12.4)') 'Tail replay: FAIL, tolerance ',tolerance
        stop 1
     endif
@@ -1464,14 +2094,41 @@ contains
     deallocate(replay_x)
   end subroutine replay_saved_tail_point
 
+  subroutine require_tail_replay_io(io_status,operation,io_message)
+    implicit none
+    integer,intent(in) :: io_status
+    character(len=*),intent(in) :: operation,io_message
+    if (io_status.ne.0) then
+       write(*,*) 'ERROR: failed while ',trim(operation),' tail replay file ',&
+            trim(tail_replay_file),': ',trim(io_message)
+       stop 1
+    endif
+  end subroutine require_tail_replay_io
+
+  subroutine require_diagnostic_io(io_status,operation,output_file,io_message)
+    implicit none
+    integer,intent(in) :: io_status
+    character(len=*),intent(in) :: operation,output_file,io_message
+    if (io_status.ne.0) then
+       write(*,*) 'ERROR: failed while ',trim(operation),' ',trim(output_file),': ',trim(io_message)
+       stop 1
+    endif
+  end subroutine require_diagnostic_io
+
   subroutine write_tail_diagnostics()
     implicit none
     integer :: unit,ichan_local,iint_local,irecord,nvalid_residual,nvalid_component
+    integer :: diagnostic_io_status
     integer :: physical_iint_local,stratum_local
-    real(kind=8) :: residual_top2,component_top2
+    real(kind=8) :: residual_top2,component_top2,record_square
+    character(len=256) :: diagnostic_io_message
     character(len=9),parameter :: stratum_name(2)=[character(len=9) :: 'regular','migration']
 
-    open(newunit=unit,file=trim(tail_logfile),status='replace',action='write')
+    diagnostic_io_message=''
+    open(newunit=unit,file=trim(tail_logfile),status='replace',action='write',&
+         iostat=diagnostic_io_status,iomsg=diagnostic_io_message)
+    call require_diagnostic_io(diagnostic_io_status,'opening tail diagnostics',tail_logfile,&
+         diagnostic_io_message)
     write(unit,'(a)') '# AmpliCol subtracted-real tail diagnostics v2'
     write(unit,'(a,i0)') '# retained records per channel/integral: ',n_tail_records
     write(unit,'(a,4(1x,es16.8))') '# alpha FF FI IF II:',alpha_dipole
@@ -1495,11 +2152,18 @@ contains
           component_top2=0d0
           do irecord=1,n_tail_records
              if (tail_residual_records(irecord,ichan_local,iint_local)%valid) then
-                residual_top2=residual_top2+tail_residual_records(irecord,ichan_local,iint_local)%f**2
+                call checked_diagnostic_square(&
+                     tail_residual_records(irecord,ichan_local,iint_local)%f,&
+                     record_square,'retained tail residual square')
+                call checked_diagnostic_accumulate(residual_top2,record_square,&
+                     'retained tail residual sum')
              endif
              if (tail_component_records(irecord,ichan_local,iint_local)%valid) then
-                component_top2=component_top2+&
-                     tail_component_records(irecord,ichan_local,iint_local)%component_score**2
+                call checked_diagnostic_square(&
+                     tail_component_records(irecord,ichan_local,iint_local)%component_score,&
+                     record_square,'retained tail component square')
+                call checked_diagnostic_accumulate(component_top2,record_square,&
+                     'retained tail component sum')
              endif
           enddo
           physical_iint_local=(iint_local-1)/n_real_strata+1
@@ -1517,7 +2181,9 @@ contains
           call write_tail_record_set(unit,tail_component_records(:,ichan_local,iint_local),.false.)
        enddo
     enddo
-    close(unit)
+    close(unit,iostat=diagnostic_io_status,iomsg=diagnostic_io_message)
+    call require_diagnostic_io(diagnostic_io_status,'closing tail diagnostics',tail_logfile,&
+         diagnostic_io_message)
   end subroutine write_tail_diagnostics
 
   subroutine write_tail_record_set(unit,records,use_residual)
@@ -1590,29 +2256,50 @@ contains
   real(kind=8) function safe_fraction(numerator,denominator)
     implicit none
     real(kind=8),intent(in) :: numerator,denominator
-    if (denominator.gt.0d0) then
-       safe_fraction=numerator/denominator
-    else
-       safe_fraction=0d0
+    real(kind=8) :: scale
+    safe_fraction=huge(1d0)
+    if (.not.ieee_is_finite(numerator) .or. &
+         .not.ieee_is_finite(denominator)) return
+    if (numerator.lt.0d0 .or. denominator.lt.0d0) return
+    if (denominator.eq.0d0) then
+       if (numerator.eq.0d0) safe_fraction=0d0
+       return
     endif
+    scale=max(numerator,denominator)
+    if (numerator/scale.gt.denominator/scale+1d-12) return
+    safe_fraction=numerator/denominator
   end function safe_fraction
 
   subroutine make_identical_reduced_process(base_real,copy_real,base_reduced,copy_reduced)
     integer,intent(in) :: base_real(:),copy_real(:),base_reduced(:)
     integer,intent(out) :: copy_reduced(:)
     integer :: generic,ileg,target_flavour
+    if (size(copy_real).ne.size(base_real) .or. &
+         size(copy_reduced).ne.size(base_reduced)) then
+       write (*,*) 'Incompatible identical-process remapping dimensions'
+       stop 1
+    endif
     copy_reduced=base_reduced
     do generic=1,2
        target_flavour=0
        do ileg=1,size(base_real)
-          if (abs(base_real(ileg)).eq.generic) then
-             target_flavour=abs(copy_real(ileg))
+          if (base_real(ileg).eq.generic .or. base_real(ileg).eq.-generic) then
+             if (copy_real(ileg).ge.1 .and. copy_real(ileg).le.6) then
+                target_flavour=copy_real(ileg)
+             elseif (copy_real(ileg).le.-1 .and. copy_real(ileg).ge.-6) then
+                target_flavour=-copy_real(ileg)
+             else
+                write (*,*) 'Invalid identical-process target flavour:',&
+                     ileg,copy_real(ileg)
+                stop 1
+             endif
              exit
           endif
        enddo
        if (target_flavour.eq.0) cycle
        do ileg=1,size(base_reduced)
-          if (abs(base_reduced(ileg)).eq.generic) then
+          if (base_reduced(ileg).eq.generic .or. &
+               base_reduced(ileg).eq.-generic) then
              copy_reduced(ileg)=sign(target_flavour,base_reduced(ileg))
           endif
        enddo
@@ -1628,10 +2315,12 @@ contains
     logical :: report
 
     if (trim(stage).eq.'invariant') then
-       invariant_rejections=invariant_rejections+1_8
+       invariant_rejections=checked_add8(invariant_rejections,1_8,&
+            'subtraction invariant rejection counter')
        count=invariant_rejections
     else
-       kernel_rejections=kernel_rejections+1_8
+       kernel_rejections=checked_add8(kernel_rejections,1_8,&
+            'subtraction kernel rejection counter')
        count=kernel_rejections
     endif
     report=(count.le.10_8 .or. mod(count,1000_8).eq.0_8)
@@ -1652,14 +2341,119 @@ contains
     endif
   end subroutine report_subtraction_rejection
 
-  subroutine add_endpoint_for_process(igroup,iproc,mu_ren,alpha_s,total)
+  elemental logical function numerical_value_is_safe(value)
+    real(kind=8),intent(in) :: value
+    numerical_value_is_safe=.false.
+    if (.not.ieee_is_finite(value)) return
+    if (abs(value).gt.integration_value_limit) return
+    if (value.ne.0d0 .and. abs(value).lt.integration_value_floor) return
+    numerical_value_is_safe=.true.
+  end function numerical_value_is_safe
+
+  elemental logical function product_is_safe(first,second)
+    real(kind=8),intent(in) :: first,second
+    product_is_safe=.false.
+    if (.not.numerical_value_is_safe(first) .or. .not.numerical_value_is_safe(second)) return
+    if (first.eq.0d0 .or. second.eq.0d0) then
+       product_is_safe=.true.
+    else
+       if (abs(first).gt.integration_value_limit/abs(second)) return
+       if (abs(second).lt.1d0) then
+          if (abs(first).lt.integration_value_floor/abs(second)) return
+       elseif (abs(first).lt.1d0) then
+          if (abs(second).lt.integration_value_floor/abs(first)) return
+       endif
+       product_is_safe=.true.
+    endif
+  end function product_is_safe
+
+  subroutine checked_diagnostic_square(value,square,context)
+    real(kind=8),intent(in) :: value
+    real(kind=8),intent(out) :: square
+    character(len=*),intent(in) :: context
+    square=0d0
+    if (.not.ieee_is_finite(value)) then
+       write(*,*) 'ERROR: non-finite value in ',trim(context),value
+       stop 1
+    endif
+    if (abs(value).gt.sqrt(huge(1d0))) then
+       write(*,*) 'ERROR: overflow in ',trim(context),value
+       stop 1
+    endif
+    square=value*value
+    if (.not.ieee_is_finite(square)) then
+       write(*,*) 'ERROR: non-finite result in ',trim(context),value
+       stop 1
+    endif
+  end subroutine checked_diagnostic_square
+
+  subroutine checked_diagnostic_accumulate(total,increment,context)
+    real(kind=8),intent(inout) :: total
+    real(kind=8),intent(in) :: increment
+    character(len=*),intent(in) :: context
+    if (.not.ieee_is_finite(total) .or. .not.ieee_is_finite(increment)) then
+       write(*,*) 'ERROR: non-finite accumulator in ',trim(context),total,increment
+       stop 1
+    endif
+    if (total.lt.0d0 .or. increment.lt.0d0) then
+       write(*,*) 'ERROR: negative accumulator in ',trim(context),total,increment
+       stop 1
+    endif
+    if (increment.gt.huge(total)-total) then
+       write(*,*) 'ERROR: accumulator overflow in ',trim(context),total,increment
+       stop 1
+    endif
+    total=total+increment
+  end subroutine checked_diagnostic_accumulate
+
+  subroutine report_numerical_rejection(stage,ichan,iint)
+    character(len=*),intent(in) :: stage
+    integer,intent(in) :: ichan,iint
+    integer(kind=8),save :: rejection_count=0_8
+
+    rejection_count=checked_add8(rejection_count,1_8,&
+         'numerical rejection counter')
+    if (rejection_count.le.10_8 .or. mod(rejection_count,1000_8).eq.0_8) then
+       write(*,'(a,a,a,i0,a,2(i0,1x))') 'INFO: rejected invalid numerical point (',&
+            trim(stage),'), count=',rejection_count,' channel/process=',ichan,iint
+       write(99,'(a,a,a,i0,a,2(i0,1x))') 'INFO: rejected invalid numerical point (',&
+            trim(stage),'), count=',rejection_count,' channel/process=',ichan,iint
+    elseif (rejection_count.eq.11_8) then
+       write(*,'(a)') 'INFO: further invalid-numerical-point messages suppressed'
+       write(99,'(a)') 'INFO: further invalid-numerical-point messages suppressed'
+    endif
+  end subroutine report_numerical_rejection
+
+  subroutine report_integrated_rejection(stage,ichan,iint,status)
+    character(len=*),intent(in) :: stage
+    integer,intent(in) :: ichan,iint,status
+    integer(kind=8),save :: rejection_count=0_8
+
+    rejection_count=checked_add8(rejection_count,1_8,&
+         'integrated rejection counter')
+    if (rejection_count.le.10_8 .or. mod(rejection_count,1000_8).eq.0_8) then
+       write(*,'(a,a,a,i0,a,3(i0,1x))') 'INFO: rejected numerical integrated ',&
+            trim(stage),' point, count=',rejection_count,&
+            ' channel/process/status=',ichan,iint,status
+       write(99,'(a,a,a,i0,a,3(i0,1x))') 'INFO: rejected numerical integrated ',&
+            trim(stage),' point, count=',rejection_count,&
+            ' channel/process/status=',ichan,iint,status
+    elseif (rejection_count.eq.11_8) then
+       write(*,'(a)') 'INFO: further integrated numerical-rejection messages suppressed'
+       write(99,'(a)') 'INFO: further integrated numerical-rejection messages suppressed'
+    endif
+  end subroutine report_integrated_rejection
+
+  subroutine add_endpoint_for_process(igroup,iproc,mu_ren,alpha_s,total,status)
     integer,intent(in) :: igroup,iproc
     real(kind=8),intent(in) :: mu_ren,alpha_s
     real(kind=8),intent(inout) :: total(-2:0)
+    integer,intent(out) :: status
     real(kind=8) :: one(-2:0)
     call integrated_endpoint(igroup,iproc,&
          pgl(igroup)%val_procs(1:pgl(igroup)%iden_iproc(iproc),iproc),&
-         pgl(igroup)%ps(1)%p,mu_ren,alpha_s,one)
+         pgl(igroup)%ps(1)%p,mu_ren,alpha_s,one,status=status)
+    if (status.ne.0) return
     total=total+one
   end subroutine add_endpoint_for_process
 
@@ -1765,7 +2559,8 @@ contains
     character(len=*),intent(in) :: stage
     real(kind=8),intent(in) :: reference(:),value(:)
     integer,intent(in) :: ichan,iint
-    real(kind=8) :: scale(size(reference)),difference(size(reference))
+    real(kind=8) :: scale(size(reference)),difference(size(reference)),&
+         baseline(size(reference))
     if (size(reference).ne.size(value)) then
        write (*,*) 'Amplitude optimisation changed matrix-element shape during ',trim(stage)
        stop 1
@@ -1775,13 +2570,14 @@ contains
        write (*,*) 'Non-finite matrix element encountered during ',trim(stage),ichan,iint
        stop 1
     endif
-    difference=abs(reference-value)
     scale=max(abs(reference),abs(value),tiny(1d0))
-    if (any(difference.gt.1d-9*scale)) then
+    difference=abs(reference/scale-value/scale)
+    baseline=max(abs(reference/scale),abs(value/scale),tiny(1d0)/scale)
+    if (any(difference.gt.1d-9*baseline)) then
        write (*,*) 'Amplitude optimisation changed matrix element during ',trim(stage),ichan,iint
        write (*,*) 'reference:',reference
        write (*,*) 'optimised:',value
-       write (*,*) 'relative difference:',difference/scale
+       write (*,*) 'relative difference:',difference/baseline
        stop 1
     endif
   end subroutine check_optimised_matrix_element
@@ -1791,7 +2587,8 @@ contains
     character(len=*),intent(in) :: stage
     complex(kind=8),intent(in) :: reference(:),value(:)
     integer,intent(in) :: ichan,iint
-    real(kind=8) :: scale(size(reference)),difference(size(reference))
+    real(kind=8) :: scale(size(reference)),difference(size(reference)),&
+         baseline(size(reference))
     if (size(reference).ne.size(value)) then
        write (*,*) 'Amplitude optimisation changed amplitude shape during ',trim(stage)
        stop 1
@@ -1801,11 +2598,13 @@ contains
        write (*,*) 'Non-finite complex amplitude encountered during ',trim(stage),ichan,iint
        stop 1
     endif
-    difference=abs(reference-value)
-    scale=max(abs(reference),abs(value),tiny(1d0))
-    if (any(difference.gt.1d-9*scale)) then
+    scale=max(abs(real(reference,kind=8)),abs(aimag(reference)),&
+         abs(real(value,kind=8)),abs(aimag(value)),tiny(1d0))
+    difference=abs(reference/scale-value/scale)
+    baseline=max(abs(reference/scale),abs(value/scale),tiny(1d0)/scale)
+    if (any(difference.gt.1d-9*baseline)) then
        write (*,*) 'Amplitude optimisation changed a complex amplitude during ',&
-            trim(stage),ichan,iint,maxval(difference/scale)
+            trim(stage),ichan,iint,maxval(difference/baseline)
        stop 1
     endif
   end subroutine check_optimised_complex_amplitudes
@@ -1815,7 +2614,8 @@ contains
     character(len=*),intent(in) :: stage
     real(kind=8),intent(in) :: reference(:),value(:)
     integer,intent(in) :: ichan,iint
-    real(kind=8) :: scale(size(reference)),difference(size(reference))
+    real(kind=8) :: scale(size(reference)),difference(size(reference)),&
+         baseline(size(reference))
     if (size(reference).ne.size(value)) then
        write (*,*) 'Amplitude optimisation changed real-amplitude shape during ',trim(stage)
        stop 1
@@ -1825,11 +2625,12 @@ contains
        write (*,*) 'Non-finite real amplitude encountered during ',trim(stage),ichan,iint
        stop 1
     endif
-    difference=abs(reference-value)
     scale=max(abs(reference),abs(value),tiny(1d0))
-    if (any(difference.gt.1d-9*scale)) then
+    difference=abs(reference/scale-value/scale)
+    baseline=max(abs(reference/scale),abs(value/scale),tiny(1d0)/scale)
+    if (any(difference.gt.1d-9*baseline)) then
        write (*,*) 'Amplitude optimisation changed a real amplitude during ',&
-            trim(stage),ichan,iint,maxval(difference/scale)
+            trim(stage),ichan,iint,maxval(difference/baseline)
        stop 1
     endif
   end subroutine check_optimised_real_amplitudes
@@ -1862,11 +2663,9 @@ contains
     do old_hel=1,size(filter)
        if (filter(old_hel).le.0) cycle
        new_hel=new_hel+1
-       expected=reference(old_hel)
        nmembers=1
        do member=old_hel+1,size(filter)
           if (filter(member).eq.-old_hel) then
-             expected=expected+reference(member)
              nmembers=nmembers+1
           endif
        enddo
@@ -1875,10 +2674,16 @@ contains
                ichan,iint,old_hel,nmembers,filter(old_hel)
           stop 1
        endif
-       scale=max(abs(expected),abs(value(new_hel)),tiny(1d0))
-       if (abs(expected-value(new_hel)).gt.1d-9*scale) then
+       scale=max(maxval(abs(reference)),abs(value(new_hel)),tiny(1d0))
+       expected=reference(old_hel)/scale
+       do member=old_hel+1,size(filter)
+          if (filter(member).eq.-old_hel) &
+               expected=expected+reference(member)/scale
+       enddo
+       if (abs(expected-value(new_hel)/scale).gt.&
+            1d-9*max(abs(expected),abs(value(new_hel)/scale),tiny(1d0)/scale)) then
           write (*,*) 'Helicity filtering changed a grouped helicity weight',&
-               ichan,iint,old_hel,expected,value(new_hel)
+               ichan,iint,old_hel,expected,value(new_hel)/scale
           stop 1
        endif
     enddo
@@ -1889,7 +2694,7 @@ contains
     integer,intent(in) :: filter(:),ichan,iint
     complex(kind=8),intent(in) :: reference(:),value(:)
     integer :: old_hel,new_hel
-    real(kind=8) :: scale
+    real(kind=8) :: scale,baseline,difference
     if (size(filter).ne.size(reference) .or. count(filter.gt.0).ne.size(value)) then
        write (*,*) 'Complex helicity-filter validation has inconsistent dimensions',ichan,iint
        stop 1
@@ -1903,8 +2708,13 @@ contains
     do old_hel=1,size(filter)
        if (filter(old_hel).le.0) cycle
        new_hel=new_hel+1
-       scale=max(abs(reference(old_hel)),abs(value(new_hel)),tiny(1d0))
-       if (abs(reference(old_hel)-value(new_hel)).gt.1d-9*scale) then
+       scale=max(abs(real(reference(old_hel),kind=8)),&
+            abs(aimag(reference(old_hel))),abs(real(value(new_hel),kind=8)),&
+            abs(aimag(value(new_hel))),tiny(1d0))
+       difference=abs(reference(old_hel)/scale-value(new_hel)/scale)
+       baseline=max(abs(reference(old_hel)/scale),abs(value(new_hel)/scale),&
+            tiny(1d0)/scale)
+       if (difference.gt.1d-9*baseline) then
           write (*,*) 'Helicity filtering changed a retained complex amplitude',&
                ichan,iint,old_hel,new_hel
           stop 1
@@ -1917,7 +2727,7 @@ contains
     integer,intent(in) :: filter(:),ichan,iint
     real(kind=8),intent(in) :: reference(:),value(:)
     integer :: old_hel,new_hel
-    real(kind=8) :: scale
+    real(kind=8) :: scale,baseline,difference
     if (size(filter).ne.size(reference) .or. count(filter.gt.0).ne.size(value)) then
        write (*,*) 'Real helicity-filter validation has inconsistent dimensions',ichan,iint
        stop 1
@@ -1932,7 +2742,10 @@ contains
        if (filter(old_hel).le.0) cycle
        new_hel=new_hel+1
        scale=max(abs(reference(old_hel)),abs(value(new_hel)),tiny(1d0))
-       if (abs(reference(old_hel)-value(new_hel)).gt.1d-9*scale) then
+       difference=abs(reference(old_hel)/scale-value(new_hel)/scale)
+       baseline=max(abs(reference(old_hel)/scale),abs(value(new_hel)/scale),&
+            tiny(1d0)/scale)
+       if (difference.gt.1d-9*baseline) then
           write (*,*) 'Helicity filtering changed a retained real amplitude',&
                ichan,iint,old_hel,new_hel
           stop 1
@@ -1952,32 +2765,107 @@ contains
     implicit none
     type(phase_space_order_group),intent(inout) :: pgl
     integer,dimension(:),allocatable,intent(out),optional :: original_filter
-    integer :: ih1,iint
+    integer :: i,ih1,iint,current_index,target_index,link_value,chain_steps,&
+         allocation_status
+    character(len=256) :: allocation_message
+    if (iint.lt.1 .or. iint.gt.pgl%nproc .or. pgl%nproc.lt.1 .or. &
+         .not.allocated(pgl%nhel) .or. .not.allocated(pgl%amps)) then
+       write (*,*) 'Invalid process state for helicity filtering',iint,pgl%nproc
+       stop 1
+    endif
+    if (size(pgl%nhel).lt.pgl%nproc .or. size(pgl%amps).lt.iint) then
+       write (*,*) 'Incomplete amplitude arrays for helicity filtering',&
+            iint,size(pgl%nhel),pgl%nproc,size(pgl%amps)
+       stop 1
+    endif
+    if (any(pgl%nhel(1:pgl%nproc).lt.1)) then
+       write (*,*) 'Invalid stored helicity counts for filtering',&
+            pgl%nhel(1:pgl%nproc)
+       stop 1
+    endif
+    if (pgl%nhel(iint).ne.pgl%amps(iint)%n_amps) then
+       write (*,*) 'Inconsistent amplitude dimensions for helicity filtering',&
+            iint,pgl%nhel(iint),pgl%amps(iint)%n_amps
+       stop 1
+    endif
     if (.not.allocated(pgl%include_hel)) then
-       allocate(pgl%include_hel(maxval(pgl%nhel),pgl%nproc))
+       allocate(pgl%include_hel(maxval(pgl%nhel(1:pgl%nproc)),pgl%nproc),&
+            stat=allocation_status,errmsg=allocation_message)
+       if (allocation_status.ne.0) then
+          write (*,*) 'Could not allocate helicity filter: ',trim(allocation_message)
+          stop 1
+       endif
        pgl%include_hel=0
+    elseif (size(pgl%include_hel,1).lt.maxval(pgl%nhel(1:pgl%nproc)) .or. &
+         size(pgl%include_hel,2).lt.pgl%nproc) then
+       write (*,*) 'Stored helicity-filter workspace has incompatible dimensions'
+       stop 1
     endif
     if (.not.allocated(pgl%amp2_hel_samples)) then
        write (*,*) 'Missing helicity warm-up samples',iint
+       stop 1
+    endif
+    if (.not.allocated(pgl%hel_fac) .or. &
+         .not.allocated(pgl%amps(iint)%same_flavour_sum) .or. &
+         .not.allocated(pgl%amps(iint)%same_flavour_sum_operation)) then
+       write (*,*) 'Incomplete helicity-filter warm-up state',iint
+       stop 1
+    endif
+    if (size(pgl%amp2_hel_samples,1).lt.pgl%nhel(iint) .or. &
+         size(pgl%amp2_hel_samples,2).lt.iint .or. &
+         size(pgl%amp2_hel_samples,3).lt.n_amplitude_optimisation_samples .or. &
+         size(pgl%hel_fac,1).lt.pgl%nhel(iint) .or. &
+         size(pgl%hel_fac,2).lt.iint .or. &
+         size(pgl%amps(iint)%same_flavour_sum,1).lt.pgl%nhel(iint) .or. &
+         size(pgl%amps(iint)%same_flavour_sum,2).ne.2 .or. &
+         size(pgl%amps(iint)%same_flavour_sum_operation,1).lt.pgl%nhel(iint) .or. &
+         size(pgl%amps(iint)%same_flavour_sum_operation,2).ne.2) then
+       write (*,*) 'Incomplete helicity-filter warm-up state',iint
        stop 1
     endif
     call build_helicity_filter(pgl%amps(iint),&
          pgl%amp2_hel_samples(1:pgl%nhel(iint),iint,1:n_amplitude_optimisation_samples),&
          pgl%include_hel(1:pgl%nhel(iint),iint),keep_processes_separate)
     if (present(original_filter)) then
-       allocate(original_filter(pgl%nhel(iint)))
+       allocate(original_filter(pgl%nhel(iint)),stat=allocation_status,&
+            errmsg=allocation_message)
+       if (allocation_status.ne.0) then
+          write (*,*) 'Could not preserve the original helicity filter: ',&
+               trim(allocation_message)
+          stop 1
+       endif
        original_filter=pgl%include_hel(1:pgl%nhel(iint),iint)
     endif
 
     do i=1,2
        do ih1=1,pgl%nhel(iint)
-          if (pgl%amps(iint)%same_flavour_sum(ih1,i).le.0) cycle
+          current_index=pgl%amps(iint)%same_flavour_sum(ih1,i)
+          if (current_index.le.0) cycle
           pgl%amps(iint)%same_flavour_sum_operation(ih1,i)=0
-          do while (pgl%include_hel(pgl%amps(iint)%same_flavour_sum(ih1,i),iint).lt.0)
+          chain_steps=0
+          do
+             if (current_index.lt.1 .or. current_index.gt.pgl%nhel(iint)) then
+                write (*,*) 'Invalid same-flavour helicity index',ih1,i,current_index
+                stop 1
+             endif
+             link_value=pgl%include_hel(current_index,iint)
+             if (link_value.ge.0) exit
+             if (link_value.lt.-pgl%nhel(iint)) then
+                write (*,*) 'Invalid helicity-filter representative',current_index,link_value
+                stop 1
+             endif
+             target_index=-link_value
+             chain_steps=chain_steps+1
+             if (chain_steps.gt.pgl%nhel(iint)) then
+                write (*,*) 'Cyclic helicity-filter representative chain',ih1,i
+                stop 1
+             endif
              pgl%amps(iint)%same_flavour_sum_operation(ih1,i)= &
-                  ieor(pgl%amps(iint)%same_flavour_sum_operation(ih1,i),find_operation(pgl,iint,ih1,i))
-             pgl%amps(iint)%same_flavour_sum(ih1,i)=-pgl%include_hel(pgl%amps(iint)%same_flavour_sum(ih1,i),iint)
+                  ieor(pgl%amps(iint)%same_flavour_sum_operation(ih1,i),&
+                  find_operation(pgl,iint,current_index,target_index))
+             current_index=target_index
           enddo
+          pgl%amps(iint)%same_flavour_sum(ih1,i)=current_index
        enddo
     enddo
 
@@ -1986,19 +2874,51 @@ contains
     pgl%hel_fac(1:pgl%nhel(iint),iint)=pgl%include_hel(1:pgl%nhel(iint),iint)
   end subroutine setup_helicity_filter
 
-  integer function find_operation(pgl,iint,iamp,idau)
+  integer function find_operation(pgl,iint,first_index,second_index)
     implicit none
     type(phase_space_order_group),intent(in) :: pgl
-    integer,intent(in) :: iamp,idau,iint
+    integer,intent(in) :: first_index,second_index,iint
     complex(kind=8) :: amp1,amp2
+    real(kind=8) :: scale,direct_distance,swapped_distance
     if (use_real_gluons) then
        write (*,*) 'Find operation for same flavour sum only for complex amplitudes'
        stop 1
     endif
-    amp1=pgl%amps(iint)%amps(pgl%amps(iint)%same_flavour_sum(iamp,idau))
-    amp2=pgl%amps(iint)%amps(-pgl%include_hel(pgl%amps(iint)%same_flavour_sum(iamp,idau),iint))
+    if (iint.lt.1 .or. .not.allocated(pgl%amps)) then
+       write (*,*) 'Invalid amplitude state while determining a helicity operation'
+       stop 1
+    endif
+    if (iint.gt.size(pgl%amps)) then
+       write (*,*) 'Invalid amplitude state while determining a helicity operation'
+       stop 1
+    endif
+    if (.not.allocated(pgl%amps(iint)%amps)) then
+       write (*,*) 'Missing amplitudes while determining a helicity operation'
+       stop 1
+    endif
+    if (first_index.lt.1 .or. second_index.lt.1 .or. &
+         first_index.gt.size(pgl%amps(iint)%amps) .or. &
+         second_index.gt.size(pgl%amps(iint)%amps)) then
+       write (*,*) 'Invalid amplitude index while determining a helicity operation',&
+            first_index,second_index
+       stop 1
+    endif
+    amp1=pgl%amps(iint)%amps(first_index)
+    amp2=pgl%amps(iint)%amps(second_index)
+    if (.not.ieee_is_finite(real(amp1,kind=8)) .or. &
+         .not.ieee_is_finite(aimag(amp1)) .or. &
+         .not.ieee_is_finite(real(amp2,kind=8)) .or. &
+         .not.ieee_is_finite(aimag(amp2))) then
+       write(*,*) 'Cannot determine a same-flavour operation from non-finite amplitudes'
+       stop 1
+    endif
+    scale=max(1d0,abs(real(amp1,kind=8)),abs(aimag(amp1)),&
+         abs(real(amp2,kind=8)),abs(aimag(amp2)))
+    direct_distance=abs(abs(real(amp1,kind=8))/scale-&
+         abs(real(amp2,kind=8))/scale)
+    swapped_distance=abs(abs(real(amp1,kind=8))/scale-abs(aimag(amp2))/scale)
     find_operation=0
-    if (abs((abs(dble(amp1))-abs(dble(amp2)))).lt.abs((abs(dble(amp1))-abs(aimag(amp2))))) then
+    if (direct_distance.lt.swapped_distance) then
        ! real==real and iamag==iamag
        if (sign(1d0,dble(amp1)).ne.sign(1d0,dble(amp2))) find_operation=find_operation+1
        if (sign(1d0,aimag(amp1)).ne.sign(1d0,aimag(amp2))) find_operation=find_operation+2
@@ -2013,9 +2933,6 @@ contains
   subroutine get_run_arguments()
     use argument_parser
     implicit none
-    integer :: argc
-    integer :: i
-    character(len=256) :: argv
     character(len=80) :: library,timing_arg
     integer :: timing_sample_arg
     integer(kind=8) iseed
@@ -2026,10 +2943,22 @@ contains
          tail_replay_file,replay_tail,migration_tail_fraction_limit)
 
     logfile="Outputs/"//trim(adjustl(tag))//"log_file.txt"
-    open(unit=99,file=logfile,status='unknown')
+    io_message=''
+    open(unit=99,file=trim(logfile),status='replace',action='write',&
+         iostat=io_status,iomsg=io_message)
+    if (io_status.ne.0) then
+       write (*,*) 'Could not create run log ',trim(logfile),': ',trim(io_message)
+       stop 1
+    endif
     if (limit_test) then
        limit_logfile="Outputs/"//trim(adjustl(tag))//"limit_test_failures.log"
-       open(unit=100,file=limit_logfile,action='write',status='replace')
+       open(unit=100,file=trim(limit_logfile),action='write',status='replace',&
+            iostat=io_status,iomsg=io_message)
+       if (io_status.ne.0) then
+          write (*,*) 'Could not create limit-test log ',trim(limit_logfile),': ',&
+               trim(io_message)
+          stop 1
+       endif
        write (100,'(a)') '# Failed Catani-Seymour limit diagnostic records'
        write (100,'(a)') '# For boundedness checks, dipole and ratio are zero and residual is -1.'
        write (100,'(a,4(es12.4,1x))') '# alpha FF FI IF II: ',alpha_dipole
@@ -2099,9 +3028,29 @@ contains
     elseif (library.eq.'use') then
        create_amplitude_library=.false.
        use_amplitude_library=.true.
-       return
     else
        write (*,*) 'library must be none, create or use: ',trim(library)
+       stop 1
+    endif
+
+    if (limit_test .and. read_momenta) then
+       write (*,*) '--limit_test and --me_test are mutually exclusive diagnostics'
+       stop 1
+    endif
+    if (read_momenta .and. accuracy.gt.0d0) then
+       write (*,*) '--me_test cannot be combined with --accuracy'
+       stop 1
+    endif
+    if (create_amplitude_library .and. (limit_test .or. read_momenta)) then
+       write (*,*) '--library=create cannot be combined with --limit_test or --me_test'
+       stop 1
+    endif
+    if (use_amplitude_library .and. limit_test) then
+       write (*,*) '--limit_test requires direct amplitudes; use --library=none'
+       stop 1
+    endif
+    if (read_momenta .and. .not.keep_processes_separate) then
+       write (*,*) '--me_test requires keep_processes_separate=true'
        stop 1
     endif
 

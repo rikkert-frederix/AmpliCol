@@ -1,5 +1,6 @@
 program test_real_subtraction_strata
   use real_subtraction_strata
+  use, intrinsic :: ieee_arithmetic, only: ieee_value,ieee_quiet_nan
   implicit none
   logical :: alpha_active(3),mapped_pass(3)
   real(kind=8) :: regular,migration,distance
@@ -37,6 +38,14 @@ program test_real_subtraction_strata
   mapped_pass=[.true.,.true.,.false.]
   distance=migration_pt_distance(-0.40d0,mapped_margins,.true.,alpha_active,mapped_pass)
   call require(distance.lt.0d0,'regular point received a migration threshold distance')
+
+  distance=migration_pt_distance(ieee_value(0d0,ieee_quiet_nan),&
+       mapped_margins,.true.,alpha_active,mapped_pass)
+  call require(distance.lt.0d0,'NaN real margin received a threshold distance')
+  mapped_pass=[.true.,.false.,.false.]
+  mapped_margins(2)=ieee_value(0d0,ieee_quiet_nan)
+  distance=migration_pt_distance(-0.40d0,mapped_margins,.true.,alpha_active,mapped_pass)
+  call require(distance.lt.0d0,'NaN mapped margin received a threshold distance')
 
   write(*,'(a)') 'real subtraction strata: PASS'
 

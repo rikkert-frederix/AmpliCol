@@ -22,6 +22,7 @@ REPLAY_LOG = ROOT / "Outputs" / f"{REPLAY_TAG}_log_file.txt"
 RESIDUAL_REPLAY_LOG = ROOT / "Outputs" / f"{RESIDUAL_REPLAY_TAG}_log_file.txt"
 REPLAY_TAIL_LOG = ROOT / "Outputs" / f"{REPLAY_TAG}_tail_diagnostics.log"
 REPLAY_TAIL_REPLAY = ROOT / "Outputs" / f"{REPLAY_TAG}_tail_replay.dat"
+INVALID_CUT_TAGS = ("integration_invalid_nlo_pt", "integration_invalid_nlo_radius")
 TEST_BORN_PROCESS = ROOT / "tests_nf_born_processes.txt"
 TEST_REAL_PROCESS = ROOT / "tests_nf_real_processes.txt"
 WJ_MIGRATION_REPLAY = ROOT / "tests" / "wj_migration_tail_replay.dat"
@@ -101,6 +102,9 @@ def main() -> None:
         real_migration = result_line(output, "Real - local dipoles, migration")
         nlo_hwu = hwu_curve(hwu, "NLO")
         lo_hwu = hwu_curve(hwu, "LO")
+
+        if real_total == (0.0, 0.0):
+            raise AssertionError("all sampled real-subtraction points were lost")
 
         close(nlo_hwu[0], signed[0], 5e-6, "inclusive NLO central value")
         close(nlo_hwu[1], signed[1], 5e-5, "inclusive NLO uncertainty")
@@ -182,6 +186,28 @@ def main() -> None:
 
         generate_process("p p > w+ 1j", TEST_BORN_PROCESS)
         generate_process("p p > w+ 2j", TEST_REAL_PROCESS)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            for tag, setting in zip(INVALID_CUT_TAGS, ("pTj_min=0d0", "DRjj_min=0d0")):
+                invalid_card = pathlib.Path(tmpdir) / f"{tag}.dat"
+                invalid_card.write_text(f"&amplicol\n  {setting}\n/\n", encoding="utf-8")
+                invalid = subprocess.run(
+                    [
+                        str(ROOT / "amplicol_generate"),
+                        f"--process={TEST_BORN_PROCESS.name}",
+                        f"--real-process={TEST_REAL_PROCESS.name}",
+                        "--accuracy=0.9",
+                        "--itmax=1",
+                        f"--input={invalid_card}",
+                        f"--tag={tag}",
+                    ],
+                    cwd=ROOT,
+                    check=False,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                )
+                if invalid.returncode == 0 or "requires positive pTj_min and DRjj_min" not in invalid.stdout:
+                    raise AssertionError(f"unsafe NLO jet cuts were accepted: {setting}")
         for replay_file in (WJ_MIGRATION_REPLAY, WJ_AUXILIARY_VECTOR_REPLAY):
             migration_replay = subprocess.run(
                 [
@@ -231,6 +257,8 @@ def main() -> None:
         RESIDUAL_REPLAY_LOG.unlink(missing_ok=True)
         REPLAY_TAIL_LOG.unlink(missing_ok=True)
         REPLAY_TAIL_REPLAY.unlink(missing_ok=True)
+        for tag in INVALID_CUT_TAGS:
+            (ROOT / "Outputs" / f"{tag}_log_file.txt").unlink(missing_ok=True)
         TEST_BORN_PROCESS.unlink(missing_ok=True)
         TEST_REAL_PROCESS.unlink(missing_ok=True)
 

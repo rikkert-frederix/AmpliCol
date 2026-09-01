@@ -1,5 +1,6 @@
 program test_integration_histograms
   use integration_histograms
+  use, intrinsic :: ieee_arithmetic, only: ieee_value,ieee_quiet_nan,ieee_is_finite
   implicit none
   integer :: nintegrals(2)
   real(kind=8) :: value,error
@@ -70,6 +71,22 @@ program test_integration_histograms
   call histogram_get_bin(1,1,.false.,value,error)
   call assert_close(value,11d0/3d0,1d-12,'combined-iteration Born mean')
   call assert_close(error,sqrt(14d0/27d0),1d-12,'combined-iteration Born uncertainty')
+
+  ! One invalid fill discards the complete correlated point, including valid
+  ! counterevents that were staged before the failure.
+  call histogram_initialize([1],.true.,'tests/integration_histograms.HwU')
+  call histogram_book(1,'invalid-point guard [pb/bin]',1,0d0,1d0)
+  call histogram_begin_point(1,1)
+  call histogram_fill(1,0.5d0,7d0,3d0)
+  call histogram_fill(1,0.5d0,ieee_value(0d0,ieee_quiet_nan),0d0)
+  call histogram_commit_point()
+  call histogram_finalize_iteration()
+  call histogram_get_bin(1,1,.true.,value,error)
+  call assert_close(value,0d0,1d-12,'invalid point is discarded atomically')
+  if (.not.ieee_is_finite(error)) then
+     write(*,*) 'FAIL: invalid histogram point contaminated uncertainty'
+     stop 1
+  endif
 
   write(*,*) 'integration histogram tests passed'
 

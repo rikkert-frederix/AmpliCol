@@ -238,17 +238,20 @@ contains
 
   logical function is_charged_lepton(ipdg)
     integer,intent(in) :: ipdg
-    is_charged_lepton=abs(ipdg).eq.11 .or. abs(ipdg).eq.13 .or. abs(ipdg).eq.15
+    is_charged_lepton=ipdg.eq.11 .or. ipdg.eq.-11 .or. &
+         ipdg.eq.13 .or. ipdg.eq.-13 .or. ipdg.eq.15 .or. ipdg.eq.-15
   end function is_charged_lepton
 
   logical function is_neutrino(ipdg)
     integer,intent(in) :: ipdg
-    is_neutrino=abs(ipdg).eq.12 .or. abs(ipdg).eq.14 .or. abs(ipdg).eq.16
+    is_neutrino=ipdg.eq.12 .or. ipdg.eq.-12 .or. &
+         ipdg.eq.14 .or. ipdg.eq.-14 .or. ipdg.eq.16 .or. ipdg.eq.-16
   end function is_neutrino
 
   logical function is_heavy_sm_object(ipdg)
     integer,intent(in) :: ipdg
-    is_heavy_sm_object=abs(ipdg).eq.6 .or. ipdg.eq.23 .or. abs(ipdg).eq.24 .or. ipdg.eq.25
+    is_heavy_sm_object=ipdg.eq.6 .or. ipdg.eq.-6 .or. ipdg.eq.23 .or. &
+         ipdg.eq.24 .or. ipdg.eq.-24 .or. ipdg.eq.25
   end function is_heavy_sm_object
 
 end module integration_analysis

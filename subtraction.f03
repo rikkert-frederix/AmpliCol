@@ -1,68 +1,221 @@
 module subtraction
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use handling_processes
   use particles
   use amplitude_QCD_mod, only: use_real_gluons
   use run_parameters, only: alpha_dipole
+  use random_number_interface, only: ran2
   use cs_dipole_mappings, only: dot4,cs_dot4_scale,cs_roundoff_tolerance,&
        cs_value_is_resolved
   implicit none
   integer :: n
   integer,parameter :: alpha_status_excluded=-100
   real(kind=8),parameter :: alpha_cut_tolerance=1d-12
+  real(kind=8),parameter :: amplitude_value_limit=0.25d0*huge(1d0)**0.25d0
   private
   public :: initialise_subtraction, test_limits_integrand, generate_limit_phase_space_point
   public :: print_limit_failure_fractions, compute_the_amps, square_the_amps
   public :: evaluate_real_dipoles,check_real_subtraction_resolution
 contains
   subroutine initialise_subtraction(igroup,iamp)
+    use math_functions, only: checked_multiply8
     implicit none
     integer,intent(in) :: iamp,igroup
     integer :: ipart,is_dipole,ipart_l,ipart_r,idip,ichan,ichannel,nchannels,ncandidates,max_candidates
+    integer :: channel_group,compact_channel,label,allocation_status
+    integer(kind=8) :: max_candidates8,candidate_bytes,candidate_bytes_per
     integer,allocatable :: candidate_dipoles(:,:)
     logical,allocatable :: candidate_reverse(:)
+    character(len=256) :: allocation_message
+    if (.not.allocated(pgl)) then
+       write (*,*) 'Cannot initialise subtraction before process setup'
+       stop 1
+    endif
+    if (igroup.lt.1 .or. igroup.gt.size(pgl)) then
+       write (*,*) 'Invalid process group in subtraction initialisation',igroup,size(pgl)
+       stop 1
+    endif
+    if (pgl(igroup)%next.lt.4 .or. &
+         pgl(igroup)%next.gt.max_amplitude_external_particles .or. &
+         pgl(igroup)%nproc.lt.1 .or. pgl(igroup)%nproc.gt.max_process_records) then
+       write (*,*) 'Invalid process dimensions in subtraction initialisation',&
+            pgl(igroup)%next,pgl(igroup)%nproc
+       stop 1
+    endif
+    if (iamp.lt.1 .or. iamp.gt.pgl(igroup)%nproc) then
+       write (*,*) 'Invalid process in subtraction initialisation',iamp,pgl(igroup)%nproc
+       stop 1
+    endif
+    if (.not.allocated(pgl(igroup)%processes) .or. &
+         .not.allocated(pgl(igroup)%color_orders) .or. &
+         .not.allocated(pgl(igroup)%spin)) then
+       write (*,*) 'Incomplete process data in subtraction initialisation'
+       stop 1
+    endif
+    if (lbound(pgl(igroup)%processes,1).ne.1 .or. &
+         lbound(pgl(igroup)%processes,2).ne.1 .or. &
+         size(pgl(igroup)%processes,1).ne.pgl(igroup)%next .or. &
+         size(pgl(igroup)%processes,2).ne.pgl(igroup)%nproc .or. &
+         lbound(pgl(igroup)%color_orders,1).ne.1 .or. &
+         lbound(pgl(igroup)%color_orders,2).ne.1 .or. &
+         size(pgl(igroup)%color_orders,1).ne.pgl(igroup)%next .or. &
+         size(pgl(igroup)%color_orders,2).ne.pgl(igroup)%nproc .or. &
+         lbound(pgl(igroup)%spin,1).ne.0 .or. &
+         ubound(pgl(igroup)%spin,1).lt.3 .or. &
+         lbound(pgl(igroup)%spin,2).ne.1 .or. &
+         size(pgl(igroup)%spin,2).ne.pgl(igroup)%next) then
+       write (*,*) 'Incompatible process arrays in subtraction initialisation'
+       stop 1
+    endif
+    do label=1,pgl(igroup)%next
+       if (count(pgl(igroup)%color_orders(:,iamp).eq.label).ne.1) then
+          write (*,*) 'Invalid colour permutation in subtraction initialisation',iamp
+          stop 1
+       endif
+    enddo
+    if (.not.allocated(pgl(igroup)%multichan%map_proc_to_channelgroup) .or. &
+         .not.allocated(pgl(igroup)%multichan%unique_channelgroup_list) .or. &
+         .not.allocated(pgl(igroup)%multichan%unique_channel_list)) then
+       write (*,*) 'Missing multichannel metadata in subtraction initialisation'
+       stop 1
+    endif
+    if (lbound(pgl(igroup)%multichan%map_proc_to_channelgroup,1).ne.1 .or. &
+         size(pgl(igroup)%multichan%map_proc_to_channelgroup).ne.pgl(igroup)%nproc .or. &
+         lbound(pgl(igroup)%multichan%unique_channelgroup_list,1).ne.0 .or. &
+         lbound(pgl(igroup)%multichan%unique_channelgroup_list,2).ne.1 .or. &
+         lbound(pgl(igroup)%multichan%unique_channel_list,1).ne.1) then
+       write (*,*) 'Incompatible multichannel metadata in subtraction initialisation'
+       stop 1
+    endif
+    channel_group=pgl(igroup)%multichan%map_proc_to_channelgroup(iamp)
+    if (channel_group.lt.1 .or. &
+         channel_group.gt.size(pgl(igroup)%multichan%unique_channelgroup_list,2)) then
+       write (*,*) 'Invalid channel group in subtraction initialisation',channel_group
+       stop 1
+    endif
     n=pgl(igroup)%next
-    if (.not.allocated(pgl(igroup)%dpl)) allocate(pgl(igroup)%dpl(pgl(igroup)%nproc))
+    if (.not.allocated(pgl(igroup)%dpl)) then
+       allocation_message=''
+       allocate(pgl(igroup)%dpl(pgl(igroup)%nproc),stat=allocation_status,&
+            errmsg=allocation_message)
+       if (allocation_status.ne.0) then
+          write (*,*) 'Could not allocate subtraction process storage: ',&
+               trim(allocation_message)
+          stop 1
+       endif
+    elseif (lbound(pgl(igroup)%dpl,1).ne.1 .or. &
+         size(pgl(igroup)%dpl).ne.pgl(igroup)%nproc) then
+       write (*,*) 'Incompatible existing subtraction process storage'
+       stop 1
+    endif
     if (allocated(pgl(igroup)%dpl(iamp)%dl)) then
        call finalize_dipole_set(pgl(igroup)%dpl(iamp))
     endif
     ! A matrix element can be integrated by several phase-space channels when
     ! colour singlets are permuted.  Its dipoles must cover the union of the
     ! colour-adjacent limits of all those channels, not just igroup's order.
-    nchannels=pgl(igroup)%multichan%unique_channelgroup_list(0, &
-         pgl(igroup)%multichan%map_proc_to_channelgroup(iamp))
-    max_candidates=2*(pgl(igroup)%next-2)*nchannels
-    allocate(candidate_dipoles(3,max_candidates),candidate_reverse(max_candidates))
+    nchannels=pgl(igroup)%multichan%unique_channelgroup_list(0,channel_group)
+    if (nchannels.lt.1 .or. &
+         nchannels.gt.ubound(pgl(igroup)%multichan%unique_channelgroup_list,1)) then
+       write (*,*) 'Invalid channel count in subtraction initialisation',nchannels
+       stop 1
+    endif
+    do ichannel=1,nchannels
+       compact_channel=pgl(igroup)%multichan%unique_channelgroup_list(ichannel,channel_group)
+       if (compact_channel.lt.1 .or. &
+            compact_channel.gt.size(pgl(igroup)%multichan%unique_channel_list)) then
+          write (*,*) 'Invalid compact channel in subtraction initialisation',compact_channel
+          stop 1
+       endif
+       ichan=pgl(igroup)%multichan%unique_channel_list(compact_channel)
+       if (ichan.lt.1 .or. ichan.gt.size(pgl)) then
+          write (*,*) 'Invalid partner channel in subtraction initialisation',ichan,size(pgl)
+          stop 1
+       endif
+       if (pgl(ichan)%next.ne.n .or. .not.allocated(pgl(ichan)%phase_space_orders)) then
+          write (*,*) 'Incompatible partner channel in subtraction initialisation',ichan
+          stop 1
+       endif
+       if (lbound(pgl(ichan)%phase_space_orders,1).ne.1 .or. &
+            size(pgl(ichan)%phase_space_orders).ne.n) then
+          write (*,*) 'Invalid partner phase-space order in subtraction initialisation',ichan
+          stop 1
+       endif
+       do label=1,n
+          if (count(pgl(ichan)%phase_space_orders.eq.label).ne.1) then
+             write (*,*) 'Invalid partner phase-space permutation in subtraction initialisation',ichan
+             stop 1
+          endif
+       enddo
+    enddo
+    max_candidates8=checked_multiply8(2_8,int(n-2,kind=8),&
+         'subtraction candidate count')
+    max_candidates8=checked_multiply8(max_candidates8,int(nchannels,kind=8),&
+         'subtraction candidate count')
+    if (max_candidates8.lt.1_8 .or. max_candidates8.gt.huge(max_candidates)) then
+       write (*,*) 'Unsupported subtraction candidate count',max_candidates8
+       stop 1
+    endif
+    candidate_bytes_per=(3_8*int(storage_size(0),kind=8)+&
+         int(storage_size(.false.),kind=8)+7_8)/8_8
+    candidate_bytes=checked_multiply8(max_candidates8,candidate_bytes_per,&
+         'subtraction candidate workspace')
+    if (candidate_bytes.gt.max_process_workspace_bytes) then
+       write (*,*) 'Subtraction candidate workspace exceeds the supported limit',&
+            candidate_bytes,max_process_workspace_bytes
+       stop 1
+    endif
+    max_candidates=int(max_candidates8)
+    allocation_message=''
+    allocate(candidate_dipoles(3,max_candidates),candidate_reverse(max_candidates),&
+         stat=allocation_status,errmsg=allocation_message)
+    if (allocation_status.ne.0) then
+       write (*,*) 'Could not allocate subtraction candidates: ',trim(allocation_message)
+       stop 1
+    endif
     ncandidates=0
     do ichannel=1,nchannels
-       ichan=pgl(igroup)%multichan%unique_channel_list( &
-            pgl(igroup)%multichan%unique_channelgroup_list(ichannel, &
-            pgl(igroup)%multichan%map_proc_to_channelgroup(iamp)))
+       compact_channel=pgl(igroup)%multichan%unique_channelgroup_list(ichannel,channel_group)
+       ichan=pgl(igroup)%multichan%unique_channel_list(compact_channel)
        do ipart=3,pgl(igroup)%next
           call is_valid_dipole(ipart,pgl(igroup)%processes(:,iamp),pgl(ichan)%phase_space_orders(:), &
                is_dipole,ipart_l,ipart_r)
           if (btest(is_dipole,0)) then
              if (dipole_has_valid_born(igroup,iamp,ipart_l,ipart,ipart_r,.true.)) then
-                call add_dipole_candidate(ipart_l,ipart,ipart_r,.true., &
-                     candidate_dipoles,candidate_reverse,ncandidates)
+                call add_dipole_candidate(pgl(igroup)%processes(:,iamp), &
+                     ipart_l,ipart,ipart_r,.true.,candidate_dipoles,candidate_reverse,ncandidates)
              endif
           endif
           if (btest(is_dipole,1)) then
              if (dipole_has_valid_born(igroup,iamp,ipart_r,ipart,ipart_l,.false.)) then
-                call add_dipole_candidate(ipart_r,ipart,ipart_l,.false., &
-                     candidate_dipoles,candidate_reverse,ncandidates)
+                call add_dipole_candidate(pgl(igroup)%processes(:,iamp), &
+                     ipart_r,ipart,ipart_l,.false.,candidate_dipoles,candidate_reverse,ncandidates)
              endif
           endif
        enddo
     enddo
     pgl(igroup)%dpl(iamp)%ndip=ncandidates
-    allocate(pgl(igroup)%dpl(iamp)%dl(pgl(igroup)%dpl(iamp)%ndip))
+    allocation_message=''
+    allocate(pgl(igroup)%dpl(iamp)%dl(pgl(igroup)%dpl(iamp)%ndip),&
+         stat=allocation_status,errmsg=allocation_message)
+    if (allocation_status.ne.0) then
+       write (*,*) 'Could not allocate subtraction dipoles: ',trim(allocation_message)
+       stop 1
+    endif
 
     do idip=1,pgl(igroup)%dpl(iamp)%ndip
        call fill_dipole(pgl(igroup)%dpl(iamp)%dl(idip),pgl(igroup)%processes(1:n,iamp), &
             candidate_dipoles(1,idip),candidate_dipoles(2,idip),candidate_dipoles(3,idip),candidate_reverse(idip))
     enddo
     do idip=1,pgl(igroup)%dpl(iamp)%ndip
-       allocate(pgl(igroup)%dpl(iamp)%dl(idip)%reduced_color_order(n-1))
+       allocation_message=''
+       allocate(pgl(igroup)%dpl(iamp)%dl(idip)%reduced_color_order(n-1),&
+            stat=allocation_status,errmsg=allocation_message)
+       if (allocation_status.ne.0) then
+          write (*,*) 'Could not allocate a reduced subtraction colour order: ',&
+               trim(allocation_message)
+          stop 1
+       endif
        call build_reduced_color_order(pgl(igroup)%color_orders(1:n,iamp), &
             pgl(igroup)%dpl(iamp)%dl(idip)%dip_ijk(2),pgl(igroup)%dpl(iamp)%dl(idip)%process_r, &
             pgl(igroup)%dpl(iamp)%dl(idip)%reduced_color_order)
@@ -76,16 +229,24 @@ contains
 !!$    call print_dipoles(pgl(igroup)%processes(:,iamp),pgl(igroup)%color_orders(:,iamp),pgl(igroup)%dpl(iamp)%dl)
   end subroutine initialise_subtraction
 
-  subroutine add_dipole_candidate(dip_i,dip_j,dip_k,reverse,candidates,reverses,ncandidates)
+  subroutine add_dipole_candidate(process,dip_i,dip_j,dip_k,reverse,candidates,reverses,ncandidates)
     implicit none
+    integer,intent(in) :: process(:)
     integer,intent(in) :: dip_i,dip_j,dip_k
     logical,intent(in) :: reverse
     integer,intent(inout) :: candidates(:,:),ncandidates
     logical,intent(inout) :: reverses(:)
-    integer :: i
+    integer :: i,parent_type,stored_parent_type
+    parent_type=clustered_parent_type(process,dip_i,dip_j,reverse)
     do i=1,ncandidates
-       if (all(candidates(:,i).eq.[dip_i,dip_j,dip_k])) return
+       if (.not.all(candidates(:,i).eq.[dip_i,dip_j,dip_k])) cycle
+       stored_parent_type=clustered_parent_type(process,candidates(1,i),candidates(2,i),reverses(i))
+       if (stored_parent_type.eq.parent_type) return
     enddo
+    if (ncandidates.ge.size(candidates,2)) then
+       write (*,*) 'ERROR: internal dipole-candidate capacity exceeded'
+       stop 1
+    endif
     ncandidates=ncandidates+1
     candidates(:,ncandidates)=[dip_i,dip_j,dip_k]
     reverses(ncandidates)=reverse
@@ -195,9 +356,7 @@ contains
     else
        dip%dip_r_ijk(2)=dip_k
     endif
-    if (phys_model%is_gluon(process(dip_j))) then
-       dip%dip_r_ijk_f(1)=dip%dip_ijk_f(1)
-    elseif (phys_model%is_gluon(process(dip_i))) then
+    if (phys_model%is_gluon(process(dip_i)) .and. .not.phys_model%is_gluon(process(dip_j))) then
        if (btest(dip%dipole_type,0)) then
           write (*,*) 'error in dipoles: emitter is a final-state gluon and '// &
                'emitted is a quark'
@@ -206,10 +365,8 @@ contains
           write (*,*) dip%dip_ijk_f
           stop 1
        endif
-       dip%dip_r_ijk_f(1)=phys_model%get_antipart(dip%dip_ijk_f(2))
-    else
-       dip%dip_r_ijk_f(1)=combined_gluon_type(dip_i,process(dip_i),dip_j,process(dip_j),reverse)
     endif
+    dip%dip_r_ijk_f(1)=clustered_parent_type(process(1:n),dip_i,dip_j,reverse)
     if (dip%dip_r_ijk_f(1).eq.21 .or. dip%dip_r_ijk_f(1).eq.99) dip%lc_weight=0.5d0
     dip%dip_r_ijk_f(2)=dip%dip_ijk_f(3)
     allocate(dip%process_r(n-1))
@@ -228,7 +385,23 @@ contains
        endif
     enddo
   end subroutine fill_dipole
+
+  integer function clustered_parent_type(process,dip_i,dip_j,reverse)
+    implicit none
+    integer,intent(in) :: process(:)
+    integer,intent(in) :: dip_i,dip_j
+    logical,intent(in) :: reverse
+    if (phys_model%is_gluon(process(dip_j))) then
+       clustered_parent_type=process(dip_i)
+    elseif (phys_model%is_gluon(process(dip_i))) then
+       clustered_parent_type=phys_model%get_antipart(process(dip_j))
+    else
+       clustered_parent_type=combined_gluon_type(dip_i,process(dip_i),dip_j,process(dip_j),reverse)
+    endif
+  end function clustered_parent_type
+
   integer function lc_colour_factor(process)
+    use math_functions, only: checked_integer_power
     implicit none
     integer,dimension(:),intent(in) :: process
     integer :: i,ifac
@@ -246,7 +419,7 @@ contains
        write (*,*) 'There is some issue with the reduced LC colour factor computation: ',ifac,fac
        stop 1
     endif
-    lc_colour_factor=3**ifac
+    lc_colour_factor=checked_integer_power(3,ifac,'reduced leading-colour factor')
   end function lc_colour_factor
 
   integer function combined_gluon_type(dip_i,part_i,dip_j,part_j,reverse)
@@ -439,7 +612,11 @@ contains
           real_pass=pass_real_subtracted_cuts(pgl(ichan),iint)
           if (.not.real_pass) amp_values(k+1)=0d0
           if (is_gluon) then
-             call compute_the_dipole_amps(iint,ichan)
+             call compute_the_dipole_amps(iint,ichan,kernel_status,failed_dipole)
+             if (kernel_status.ne.0) then
+                mapping_status(k+1)=kernel_status
+                cycle
+             endif
              call square_the_dipole_amps(iint,ichan,amp2_dip,i,nselected=nselected,nmatched=nmatched,&
                   nalpha_selected=nalpha_selected,kernel_status=kernel_status,failed_dipole=failed_dipole)
              if (kernel_status.ne.0) then
@@ -529,7 +706,11 @@ contains
              real_pass=pass_real_subtracted_cuts(pgl(ichan),iint)
              if (.not.real_pass) amp_values(k+1)=0d0
              if (.not.no_dipoles) then
-                call compute_the_dipole_amps(iint,ichan)
+                call compute_the_dipole_amps(iint,ichan,kernel_status,failed_dipole)
+                if (kernel_status.ne.0) then
+                   mapping_status(k+1)=kernel_status
+                   cycle
+                endif
                 call square_the_dipole_amps(iint,ichan,amp2_dip,icol1=i,icol2=j,&
                      nselected=nselected,nmatched=nmatched,nalpha_selected=nalpha_selected,&
                      kernel_status=kernel_status,failed_dipole=failed_dipole)
@@ -589,7 +770,6 @@ contains
     implicit none
     integer,intent(in) :: ichan
     integer :: ix
-    real(kind=8),external :: ran2
     do
        do ix=1,size(pgl(ichan)%ps(1)%x)
           pgl(ichan)%ps(1)%x(ix)=ran2()
@@ -612,11 +792,16 @@ contains
     residual=-1d0
     if (.not.ieee_is_finite(amp2) .or. .not.ieee_is_finite(amp2_dip)) return
     scale=max(abs(amp2),abs(amp2_dip))
-    if (scale.eq.0d0 .or. .not.ieee_is_finite(scale)) return
+    if (.not.ieee_is_finite(scale)) return
+    if (scale.eq.0d0) return
     norm_amp2=amp2/scale
     norm_dip=amp2_dip/scale
     residual=abs(norm_amp2-norm_dip)
-    if (abs(norm_dip).lt.sqrt(tiny(1d0)) .or. .not.ieee_is_finite(residual)) then
+    if (.not.ieee_is_finite(residual)) then
+       residual=-1d0
+       return
+    endif
+    if (abs(norm_dip).lt.sqrt(tiny(1d0))) then
        residual=-1d0
        return
     endif
@@ -673,6 +858,31 @@ contains
     real(kind=8) :: fraction
     character(len=4) :: result
     all_ok=.true.
+    if (failure_threshold.lt.1) then
+       write (*,*) 'Limit-failure threshold must be positive:',failure_threshold
+       stop 1
+    endif
+    if (.not.allocated(pgl) .or. ngroups.lt.1) then
+       write (*,*) 'Limit-failure summary requested before process initialisation'
+       stop 1
+    endif
+    if (size(pgl).lt.ngroups) then
+       write (*,*) 'Limit-failure process table is too short:',size(pgl),ngroups
+       stop 1
+    endif
+    if (any(shape(soft_fail).ne.shape(soft_tested)) .or. &
+         any(shape(collinear_fail).ne.shape(collinear_tested)) .or. &
+         size(soft_fail,1).lt.ngroups .or. &
+         size(collinear_fail,1).lt.ngroups .or. &
+         size(soft_fail,2).lt.maxval(pgl(1:ngroups)%nproc) .or. &
+         size(collinear_fail,2).lt.maxval(pgl(1:ngroups)%nproc) .or. &
+         size(soft_fail,3).lt.maxval(pgl(1:ngroups)%next) .or. &
+         size(collinear_fail,3).lt.maxval(pgl(1:ngroups)%next) .or. &
+         size(collinear_fail,4).lt.maxval(pgl(1:ngroups)%next)) then
+       write (*,*) 'Limit-failure summary arrays have incompatible shapes:',&
+            shape(soft_fail),shape(collinear_fail)
+       stop 1
+    endif
     write (*,'(a)') 'Limit failure fractions:'
     write (99,'(a)') 'Limit failure fractions:'
     do ichan=1,ngroups
@@ -683,26 +893,40 @@ contains
                 write (99,'(2x,"channel ",i0," integral ",i0," soft leg ",i0,": SKIP (massive)")') ichan,iint,i
                 cycle
              endif
-             fraction=100d0*dble(soft_fail(ichan,iint,i))/dble(soft_tested(ichan,iint,i))
-             if (soft_fail(ichan,iint,i).ge.failure_threshold) then
+             if (soft_tested(ichan,iint,i).le.0 .or. &
+                  soft_fail(ichan,iint,i).lt.0 .or. &
+                  soft_fail(ichan,iint,i).gt.soft_tested(ichan,iint,i)) then
+                fraction=100d0
                 result='FAIL'
                 all_ok=.false.
              else
+                fraction=100d0*dble(soft_fail(ichan,iint,i))/&
+                     dble(soft_tested(ichan,iint,i))
+             endif
+             if (soft_tested(ichan,iint,i).gt.0 .and. &
+                  soft_fail(ichan,iint,i).ge.0 .and. &
+                  soft_fail(ichan,iint,i).le.soft_tested(ichan,iint,i) .and. &
+                  soft_fail(ichan,iint,i).ge.failure_threshold) then
+                result='FAIL'
+                all_ok=.false.
+             elseif (soft_tested(ichan,iint,i).gt.0 .and. &
+                  soft_fail(ichan,iint,i).ge.0 .and. &
+                  soft_fail(ichan,iint,i).le.soft_tested(ichan,iint,i)) then
                 result='PASS'
              endif
              if (phys_model%is_gluon(pgl(ichan)%processes(i,iint))) then
                 write (*,'(2x,"channel ",i0," integral ",i0," soft leg ",i0,": ",i0,"/",i0, &
-                     " failed (",f5.1,"%)",t86,a4)') ichan,iint,i,soft_fail(ichan,iint,i), &
+                     &" failed (",f5.1,"%)",t86,a4)') ichan,iint,i,soft_fail(ichan,iint,i), &
                      soft_tested(ichan,iint,i),fraction,result
                 write (99,'(2x,"channel ",i0," integral ",i0," soft leg ",i0,": ",i0,"/",i0, &
-                     " failed (",f5.1,"%)",t86,a4)') ichan,iint,i,soft_fail(ichan,iint,i), &
+                     &" failed (",f5.1,"%)",t86,a4)') ichan,iint,i,soft_fail(ichan,iint,i), &
                      soft_tested(ichan,iint,i),fraction,result
              else
                 write (*,'(2x,"channel ",i0," integral ",i0," soft leg ",i0," (integrable): ",i0,"/",i0, &
-                     " failed (",f5.1,"%)",t86,a4)') ichan,iint,i,soft_fail(ichan,iint,i), &
+                     &" failed (",f5.1,"%)",t86,a4)') ichan,iint,i,soft_fail(ichan,iint,i), &
                      soft_tested(ichan,iint,i),fraction,result
                 write (99,'(2x,"channel ",i0," integral ",i0," soft leg ",i0," (integrable): ",i0,"/",i0, &
-                     " failed (",f5.1,"%)",t86,a4)') ichan,iint,i,soft_fail(ichan,iint,i), &
+                     &" failed (",f5.1,"%)",t86,a4)') ichan,iint,i,soft_fail(ichan,iint,i), &
                      soft_tested(ichan,iint,i),fraction,result
              endif
           enddo
@@ -711,32 +935,48 @@ contains
                 if (phys_model%get_mass(pgl(ichan)%processes(i,iint)).gt.0d0 .or. &
                      phys_model%get_mass(pgl(ichan)%processes(j,iint)).gt.0d0) then
                    write (*,'(2x,"channel ",i0," integral ",i0," collinear legs ",i0,"/",i0, &
-                        ": SKIP (massive)")') ichan,iint,i,j
+                        &": SKIP (massive)")') ichan,iint,i,j
                    write (99,'(2x,"channel ",i0," integral ",i0," collinear legs ",i0,"/",i0, &
-                        ": SKIP (massive)")') ichan,iint,i,j
+                        &": SKIP (massive)")') ichan,iint,i,j
                    cycle
                 endif
-                fraction=100d0*dble(collinear_fail(ichan,iint,i,j))/&
-                     dble(collinear_tested(ichan,iint,i,j))
-                if (collinear_fail(ichan,iint,i,j).ge.failure_threshold) then
+                if (collinear_tested(ichan,iint,i,j).le.0 .or. &
+                     collinear_fail(ichan,iint,i,j).lt.0 .or. &
+                     collinear_fail(ichan,iint,i,j).gt.&
+                     collinear_tested(ichan,iint,i,j)) then
+                   fraction=100d0
                    result='FAIL'
                    all_ok=.false.
                 else
+                   fraction=100d0*dble(collinear_fail(ichan,iint,i,j))/&
+                        dble(collinear_tested(ichan,iint,i,j))
+                endif
+                if (collinear_tested(ichan,iint,i,j).gt.0 .and. &
+                     collinear_fail(ichan,iint,i,j).ge.0 .and. &
+                     collinear_fail(ichan,iint,i,j).le.&
+                     collinear_tested(ichan,iint,i,j) .and. &
+                     collinear_fail(ichan,iint,i,j).ge.failure_threshold) then
+                   result='FAIL'
+                   all_ok=.false.
+                elseif (collinear_tested(ichan,iint,i,j).gt.0 .and. &
+                     collinear_fail(ichan,iint,i,j).ge.0 .and. &
+                     collinear_fail(ichan,iint,i,j).le.&
+                     collinear_tested(ichan,iint,i,j)) then
                    result='PASS'
                 endif
                 if (has_collinear_dipoles(iint,ichan,i,j)) then
                    write (*,'(2x,"channel ",i0," integral ",i0," collinear legs ",i0,"/",i0,": ", &
-                        i0,"/",i0," failed (",f5.1,"%)",t86,a4)') ichan,iint,i,j, &
+                        &i0,"/",i0," failed (",f5.1,"%)",t86,a4)') ichan,iint,i,j, &
                         collinear_fail(ichan,iint,i,j),collinear_tested(ichan,iint,i,j),fraction,result
                    write (99,'(2x,"channel ",i0," integral ",i0," collinear legs ",i0,"/",i0,": ", &
-                        i0,"/",i0," failed (",f5.1,"%)",t86,a4)') ichan,iint,i,j, &
+                        &i0,"/",i0," failed (",f5.1,"%)",t86,a4)') ichan,iint,i,j, &
                         collinear_fail(ichan,iint,i,j),collinear_tested(ichan,iint,i,j),fraction,result
                 else
                    write (*,'(2x,"channel ",i0," integral ",i0," collinear legs ",i0,"/",i0," (finite): ", &
-                        i0,"/",i0," failed (",f5.1,"%)",t86,a4)') ichan,iint,i,j, &
+                        &i0,"/",i0," failed (",f5.1,"%)",t86,a4)') ichan,iint,i,j, &
                         collinear_fail(ichan,iint,i,j),collinear_tested(ichan,iint,i,j),fraction,result
                    write (99,'(2x,"channel ",i0," integral ",i0," collinear legs ",i0,"/",i0," (finite): ", &
-                        i0,"/",i0," failed (",f5.1,"%)",t86,a4)') ichan,iint,i,j, &
+                        &i0,"/",i0," failed (",f5.1,"%)",t86,a4)') ichan,iint,i,j, &
                         collinear_fail(ichan,iint,i,j),collinear_tested(ichan,iint,i,j),fraction,result
                 endif
              enddo
@@ -795,14 +1035,18 @@ contains
     logical,intent(in) :: valid_values(nsteps)
     logical,intent(out) :: passed
     integer :: k
-    real(kind=8) :: previous_scale
+    real(kind=8) :: previous_scale,comparison_scale
     passed=.false.
+    if (.not.ieee_is_finite(growth_tolerance)) return
+    if (growth_tolerance.lt.0d0 .or. growth_tolerance.gt.1d0) return
     do k=1,nsteps-2
        if (.not.all(valid_values(k:k+2))) cycle
        previous_scale=max(abs(amp_values(k)),abs(amp_values(k+1)),tiny(1d0))
        ! A nonsingular matrix element must level off as lambda decreases.
        ! A small tolerance avoids rejecting harmless phase-space variation.
-       if (abs(amp_values(k+2)).le.(1d0+growth_tolerance)*previous_scale) then
+       comparison_scale=max(abs(amp_values(k+2)),previous_scale)
+       if (abs(amp_values(k+2))/comparison_scale.le.&
+            (1d0+growth_tolerance)*(previous_scale/comparison_scale)) then
           passed=.true.
        endif
     enddo
@@ -815,32 +1059,49 @@ contains
     logical,intent(in) :: valid_values(nsteps)
     logical,intent(out) :: passed
     integer :: k
-    real(kind=8) :: scaled_values(nsteps),previous_scale
-    scaled_values=lambdas*abs(amp_values)
+    real(kind=8) :: scaled_values(nsteps),previous_scale,comparison_scale
     passed=.false.
+    if (.not.ieee_is_finite(growth_tolerance)) return
+    if (growth_tolerance.lt.0d0 .or. growth_tolerance.gt.1d0) return
+    scaled_values=0d0
+    do k=1,nsteps
+       if (.not.valid_values(k)) cycle
+       if (.not.ieee_is_finite(lambdas(k)) .or. &
+            .not.ieee_is_finite(amp_values(k))) return
+       if (lambdas(k).lt.0d0) return
+       if (lambdas(k).gt.1d0) then
+          if (abs(amp_values(k)).gt.huge(1d0)/abs(lambdas(k))) return
+       endif
+       scaled_values(k)=lambdas(k)*abs(amp_values(k))
+    enddo
     do k=1,nsteps-2
        if (.not.all(valid_values(k:k+2))) cycle
        previous_scale=max(scaled_values(k),scaled_values(k+1),tiny(1d0))
        ! Soft-fermion amplitudes may grow as 1/lambda while remaining
        ! integrable.  Test the phase-space-weighted matrix element instead.
-       if (scaled_values(k+2).le.(1d0+growth_tolerance)*previous_scale) then
+       comparison_scale=max(scaled_values(k+2),previous_scale)
+       if (scaled_values(k+2)/comparison_scale.le.&
+            (1d0+growth_tolerance)*(previous_scale/comparison_scale)) then
           passed=.true.
        endif
     enddo
   end subroutine assess_integrable_soft_limit_sequence
 
-  subroutine compute_the_dipole_amps(iint,ichan)
+  subroutine compute_the_dipole_amps(iint,ichan,mapping_status,failed_dipole)
     use cs_dipole_mappings
     use run_parameters, only: alpha_dipole
     use cuts, only: pass_mapped_dipole_cuts
     implicit none
     integer,intent(in) :: iint,ichan
+    integer,intent(out) :: mapping_status,failed_dipole
     integer :: idip,info,cut_info,topology
     real(kind=8) :: cut_variable
     real(kind=8),dimension(0:3,pgl(ichan)%next-1) :: ps_mapped
     real(kind=8),dimension(pgl(ichan)%next) :: mass_real
     integer,dimension(pgl(ichan)%next-1) :: hel_mapped
     integer :: ipart
+    mapping_status=0
+    failed_dipole=0
     do ipart=1,pgl(ichan)%next
        mass_real(ipart)=phys_model%get_mass(pgl(ichan)%processes(ipart,iint))
     enddo
@@ -852,8 +1113,9 @@ contains
        call cs_dipole_cut_variable(pgl(ichan)%ps(1)%p,pgl(ichan)%dpl(iint)%dl(idip)%dip_ijk,&
             mass_real,phys_model%get_mass(pgl(ichan)%dpl(iint)%dl(idip)%dip_r_ijk_f(1)),cut_variable,cut_info)
        if (cut_info.ne.0) then
-          write (*,*) 'error computing cs alpha variable',cut_info
-          stop 1
+          mapping_status=cut_info
+          failed_dipole=idip
+          return
        endif
        pgl(ichan)%dpl(iint)%dl(idip)%alpha_variable=cut_variable
        topology=cs_dipole_topology(pgl(ichan)%dpl(iint)%dl(idip)%dip_ijk)
@@ -862,23 +1124,28 @@ contains
        call cs_map(pgl(ichan)%ps(1)%p,pgl(ichan)%dpl(iint)%dl(idip)%dip_ijk,ps_mapped,info, &
             mass_real=mass_real, &
             mass_parent=phys_model%get_mass(pgl(ichan)%dpl(iint)%dl(idip)%dip_r_ijk_f(1)))
+       if (info.ne.0) then
+          mapping_status=info
+          failed_dipole=idip
+          return
+       endif
        if (.not.allocated(pgl(ichan)%dpl(iint)%dl(idip)%p_mapped)) then
           allocate(pgl(ichan)%dpl(iint)%dl(idip)%p_mapped(0:3,pgl(ichan)%next-1))
        endif
        pgl(ichan)%dpl(iint)%dl(idip)%p_mapped=ps_mapped
        pgl(ichan)%dpl(iint)%dl(idip)%p_mapped_ij(0:3)= &
             ps_mapped(0:3,pgl(ichan)%dpl(iint)%dl(idip)%dip_r_ijk(1))
-       if (info.ne.0) then
-          write (*,*) 'error in cs momentum mapping',info
-          stop 1
-       endif
        pgl(ichan)%dpl(iint)%dl(idip)%passes_cuts=pass_mapped_dipole_cuts(ps_mapped,&
             pgl(ichan)%dpl(iint)%dl(idip)%process_r)
        if (.not.pgl(ichan)%dpl(iint)%dl(idip)%passes_cuts) cycle
        pgl(ichan)%dpl(iint)%dl(idip)%active=.true.
        hel_mapped=pgl(ichan)%hel(pgl(ichan)%dpl(iint)%dl(idip)%dip_map(1:pgl(ichan)%next-1))
        call pgl(ichan)%dpl(iint)%dl(idip)%amp%evaluate(pgl(ichan)%next-1,ps_mapped,&
-            hel_mapped,read_proc_from_file,phys_model)
+            hel_mapped,read_proc_from_file,phys_model,mapping_status)
+       if (mapping_status.ne.0) then
+          failed_dipole=idip
+          return
+       endif
     enddo
   end subroutine compute_the_dipole_amps
 
@@ -936,7 +1203,12 @@ contains
     integer,intent(out) :: info,failed_dipole
     real(kind=8),intent(out),optional :: dipole_values(:)
 
-    call compute_the_dipole_amps(iint,ichan)
+    amp2_dip=0d0
+    info=0
+    failed_dipole=0
+    if (present(dipole_values)) dipole_values=0d0
+    call compute_the_dipole_amps(iint,ichan,info,failed_dipole)
+    if (info.ne.0) return
     call square_the_dipole_amps(iint,ichan,amp2_dip,kernel_status=info,&
          failed_dipole=failed_dipole,dipole_values=dipole_values)
   end subroutine evaluate_real_dipoles
@@ -999,16 +1271,19 @@ contains
        if (present(nselected)) nselected=nselected+1
        ij=pgl(ichan)%dpl(iint)%dl(idip)%dip_r_ijk(1)
        call create_rho(iint,ichan,idip,rho)
-       if (ij.gt.2) then
-          call ext_massless_vector_cmplx(pgl(ichan)%dpl(iint)%dl(idip)%p_mapped_ij,-1, 1, eps_parent(0:3,1))
-          call ext_massless_vector_cmplx(pgl(ichan)%dpl(iint)%dl(idip)%p_mapped_ij, 1, 1, eps_parent(0:3,2))
-       else
-          call ext_massless_vector_cmplx(-pgl(ichan)%dpl(iint)%dl(idip)%p_mapped_ij,-1, 1, eps_parent(0:3,1))
-          call ext_massless_vector_cmplx(-pgl(ichan)%dpl(iint)%dl(idip)%p_mapped_ij, 1, 1, eps_parent(0:3,2))
+       eps_parent=(0d0,0d0)
+       if (phys_model%is_colour_flow_vector(pgl(ichan)%dpl(iint)%dl(idip)%dip_r_ijk_f(1))) then
+          if (ij.gt.2) then
+             call ext_massless_vector_cmplx(pgl(ichan)%dpl(iint)%dl(idip)%p_mapped_ij,-1, 1, eps_parent(0:3,1))
+             call ext_massless_vector_cmplx(pgl(ichan)%dpl(iint)%dl(idip)%p_mapped_ij, 1, 1, eps_parent(0:3,2))
+          else
+             call ext_massless_vector_cmplx(-pgl(ichan)%dpl(iint)%dl(idip)%p_mapped_ij,-1, 1, eps_parent(0:3,1))
+             call ext_massless_vector_cmplx(-pgl(ichan)%dpl(iint)%dl(idip)%p_mapped_ij, 1, 1, eps_parent(0:3,2))
+          endif
+          ! HELAS returns the external gluon wavefunction epsilon^*.  The CS
+          ! helicity projection expects the physical polarization epsilon.
+          eps_parent=conjg(eps_parent)
        endif
-       ! HELAS returns the external gluon wavefunction epsilon^*.  The CS
-       ! helicity projection expects the physical polarization epsilon.
-       eps_parent=conjg(eps_parent)
        call cs_lc_dipole_spinrho(pgl(ichan)%ps(1)%p,pgl(ichan)%processes(:,iint), &
             pgl(ichan)%dpl(iint)%dl(idip)%process_r,pgl(ichan)%dpl(iint)%dl(idip)%dip_ijk,1d0/(4d0*pi), &
             rho,eps_parent,dip,info=dipole_info,lc_weight=pgl(ichan)%dpl(iint)%dl(idip)%lc_weight, &
@@ -1127,18 +1402,51 @@ contains
     call move_alloc(keep_ih2,dip%rho_lookup_ih2)
   end subroutine compact_rho_lookup
 
-  subroutine compute_the_amps(iint,ichan,use_amplitude_library)
+  subroutine compute_the_amps(iint,ichan,use_amplitude_library,status)
     use amp_lib
+    use FeynmanRules, only: reset_feynman_numerical_status,feynman_numerical_status_ok
     implicit none
     integer,intent(in) :: iint,ichan
     logical,intent(in) :: use_amplitude_library
+    integer,intent(out),optional :: status
+    integer :: evaluation_status
+    evaluation_status=0
     if (.not. use_amplitude_library) then
        call pgl(ichan)%amps(iint)%evaluate(pgl(ichan)%next,pgl(ichan)%ps(1)%p,&
-            pgl(ichan)%hel,read_proc_from_file,phys_model)
+            pgl(ichan)%hel,read_proc_from_file,phys_model,evaluation_status)
     else
+       call reset_feynman_numerical_status()
        call evaluate_amp(ichan,iint,pgl(ichan)%ps(1)%p,pgl(ichan)%amps(iint)%amps)
+       if (.not.feynman_numerical_status_ok()) evaluation_status=-20
     endif
+    if (evaluation_status.eq.0 .and. allocated(pgl(ichan)%amps(iint)%amps)) then
+       if (.not.all(complex_amplitude_is_safe(pgl(ichan)%amps(iint)%amps))) &
+            evaluation_status=-20
+    endif
+    if (evaluation_status.eq.0 .and. allocated(pgl(ichan)%amps(iint)%amps_r)) then
+       if (.not.all(ieee_is_finite(pgl(ichan)%amps(iint)%amps_r))) then
+          evaluation_status=-20
+       else if (any(abs(pgl(ichan)%amps(iint)%amps_r).gt.amplitude_value_limit)) then
+          evaluation_status=-20
+       endif
+    endif
+    if (evaluation_status.ne.0) then
+       if (allocated(pgl(ichan)%amps(iint)%amps)) pgl(ichan)%amps(iint)%amps=(0d0,0d0)
+       if (allocated(pgl(ichan)%amps(iint)%amps_r)) pgl(ichan)%amps(iint)%amps_r=0d0
+    endif
+    if (present(status)) status=evaluation_status
   end subroutine compute_the_amps
+
+  elemental logical function complex_amplitude_is_safe(value)
+    implicit none
+    complex(kind=8),intent(in) :: value
+    complex_amplitude_is_safe=.false.
+    if (.not.ieee_is_finite(real(value,kind=8)) .or. &
+         .not.ieee_is_finite(aimag(value))) return
+    if (abs(real(value,kind=8)).gt.amplitude_value_limit .or. &
+         abs(aimag(value)).gt.amplitude_value_limit) return
+    complex_amplitude_is_safe=.true.
+  end function complex_amplitude_is_safe
 
   subroutine square_the_amps(iint,ichan)
     implicit none

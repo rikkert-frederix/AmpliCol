@@ -1,7 +1,80 @@
 module FeynmanRules
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
 ! Generic rules are named for their Lorentz fields.  Rules with explicit
 ! quark/gluon names below are the fixed-normalization QCD colour-flow kernels.
+  logical,save :: feynman_numerical_status=.true.
+  real(kind=8),parameter :: feynman_value_limit=0.25d0*huge(1d0)**0.25d0
+  real(kind=8),parameter :: feynman_momentum_limit=0.125d0*huge(1d0)**(1d0/12d0)
+  private :: feynman_numerical_status,feynman_value_limit,feynman_momentum_limit
+  private :: massless_propagator_denominator,massive_propagator_denominator
+  private :: complex_value_is_safe,complex_scaling_is_safe,real_scaling_is_safe
+  private :: external_momentum_is_safe,external_mass_is_safe
 contains
+  subroutine reset_feynman_numerical_status()
+    implicit none
+    feynman_numerical_status=.true.
+  end subroutine reset_feynman_numerical_status
+
+  logical function feynman_numerical_status_ok()
+    implicit none
+    feynman_numerical_status_ok=feynman_numerical_status
+  end function feynman_numerical_status_ok
+
+  subroutine invalidate_feynman_point()
+    implicit none
+    feynman_numerical_status=.false.
+  end subroutine invalidate_feynman_point
+
+  subroutine validate_feynman_momenta(p)
+    implicit none
+    real(kind=8),intent(in) :: p(0:,:)
+    if (.not.all(ieee_is_finite(p))) then
+       call invalidate_feynman_point()
+       return
+    endif
+    if (maxval(abs(p)).gt.feynman_momentum_limit) &
+         call invalidate_feynman_point()
+  end subroutine validate_feynman_momenta
+
+  logical function external_momentum_is_safe(p)
+    implicit none
+    real(kind=8),intent(in) :: p(0:3)
+    external_momentum_is_safe=.false.
+    if (.not.all(ieee_is_finite(p))) return
+    if (maxval(abs(p)).gt.feynman_momentum_limit) return
+    external_momentum_is_safe=.true.
+  end function external_momentum_is_safe
+
+  logical function external_mass_is_safe(mass)
+    implicit none
+    real(kind=8),intent(in) :: mass
+    external_mass_is_safe=.false.
+    if (.not.ieee_is_finite(mass)) return
+    if (abs(mass).gt.feynman_momentum_limit) return
+    external_mass_is_safe=.true.
+  end function external_mass_is_safe
+
+  subroutine validate_complex_wavefunction(wf)
+    implicit none
+    complex(kind=8),intent(inout) :: wf(:)
+    if (.not.all(complex_value_is_safe(wf))) then
+       wf=(0d0,0d0)
+       call invalidate_feynman_point()
+    endif
+  end subroutine validate_complex_wavefunction
+
+  subroutine validate_real_wavefunction(wf)
+    implicit none
+    real(kind=8),intent(inout) :: wf(:)
+    if (.not.all(ieee_is_finite(wf))) then
+       wf=0d0
+       call invalidate_feynman_point()
+    elseif (maxval(abs(wf)).gt.feynman_value_limit) then
+       wf=0d0
+       call invalidate_feynman_point()
+    endif
+  end subroutine validate_real_wavefunction
+
   subroutine ext_massless_vector_real(p,ihel,ifinal,wf)
     implicit none
     integer ihel,ifinal
@@ -10,12 +83,25 @@ contains
     complex(kind=8),dimension(4) :: wf0,wf1
     complex(kind=8),parameter :: cImag=(0d0,1d0)
     real(kind=8),parameter :: sqh=sqrt(0.5d0)
+    wf=0d0
+    if (.not.external_momentum_is_safe(p) .or. abs(ihel).ne.1) then
+       call invalidate_feynman_point()
+       return
+    endif
     call ext_massless_vector_cmplx(p, 1,ifinal,wf1)
     call ext_massless_vector_cmplx(p,-1,ifinal,wf0)
+    if (.not.feynman_numerical_status_ok()) return
     if (ihel.eq.1) then
        wf(1:4)=dble(cImag*(wf1(1:4)+wf0(1:4)))*sqh
     elseif (ihel.eq.-1) then
        wf(1:4)=-dble(wf1(1:4)-wf0(1:4))*sqh
+    endif
+    if (.not.all(ieee_is_finite(wf))) then
+       wf=0d0
+       call invalidate_feynman_point()
+    elseif (maxval(abs(wf)).gt.feynman_value_limit) then
+       wf=0d0
+       call invalidate_feynman_point()
     endif
   end subroutine ext_massless_vector_real
   subroutine ext_massless_vector_cmplx(p,ihel,idum,wf)
@@ -26,39 +112,50 @@ contains
     complex(kind=8), dimension(4) :: wf
     real(kind=8),parameter :: rZero=0d0,sqh=sqrt(0.5d0)
     complex(kind=8),parameter :: cZero=(0d0,0d0)
-    real(kind=8) :: hel,pp,pt,pzpt
+    real(kind=8) :: hel,pp,pt,pz_over_pp
+    wf=cZero
+    if (.not.external_momentum_is_safe(p) .or. abs(ihel).ne.1) then
+       call invalidate_feynman_point()
+       return
+    endif
     if (p(0).eq.0d0) then
-       write (*,*) 'Cannot generate an external massless vector with zero energy'
-       write (*,*) p
-       stop 1
-    elseif (p(0).gt.0d0) then
+       call invalidate_feynman_point()
+       return
+    endif
+    pp=abs(p(0))
+    pt=hypot(p(1),p(2))
+    if (pt.gt.feynman_value_limit*pp .or. &
+         abs(p(3)).gt.feynman_value_limit*pp) then
+       call invalidate_feynman_point()
+       return
+    endif
+    pz_over_pp=p(3)/pp
+    if (p(0).gt.0d0) then
        hel = dble(ihel)
-       pp = p(0)
-       pt = sqrt(p(1)**2+p(2)**2)
        wf(1) = cZero
-       wf(4) = dcmplx( hel*pt/pp*sqh )
+       wf(4) = dcmplx( hel*(pt/pp)*sqh )
        if ( pt.ne.rZero ) then
-          pzpt = p(3)/(pp*pt)*sqh*hel
-          wf(2) = dcmplx( -p(1)*pzpt , -p(2)/pt*sqh )
-          wf(3) = dcmplx( -p(2)*pzpt ,  p(1)/pt*sqh )
+          wf(2) = dcmplx( -(p(1)/pt)*pz_over_pp*sqh*hel , -(p(2)/pt)*sqh )
+          wf(3) = dcmplx( -(p(2)/pt)*pz_over_pp*sqh*hel ,  (p(1)/pt)*sqh )
        else
           wf(2) = dcmplx( -hel*sqh )
           wf(3) = dcmplx( rZero , sign(sqh,p(3)) )
        endif
     else
        hel = dble(-ihel)
-       pp = -p(0)
-       pt = sqrt(p(1)**2+p(2)**2)
        wf(1) = cZero
-       wf(4) = dcmplx( hel*pt/pp*sqh )
+       wf(4) = dcmplx( hel*(pt/pp)*sqh )
        if ( pt.ne.rZero ) then
-          pzpt = -p(3)/(pp*pt)*sqh*hel
-          wf(2) = dcmplx( p(1)*pzpt ,  p(2)/pt*sqh )
-          wf(3) = dcmplx( p(2)*pzpt , -p(1)/pt*sqh )
+          wf(2) = dcmplx( -(p(1)/pt)*pz_over_pp*sqh*hel ,  (p(2)/pt)*sqh )
+          wf(3) = dcmplx( -(p(2)/pt)*pz_over_pp*sqh*hel , -(p(1)/pt)*sqh )
        else
           wf(2) = dcmplx( -hel*sqh )
           wf(3) = dcmplx( rZero , -sign(sqh,p(3)) )
        endif
+    endif
+    if (.not.all(complex_value_is_safe(wf))) then
+       wf=cZero
+       call invalidate_feynman_point()
     endif
   end subroutine ext_massless_vector_cmplx
 
@@ -67,48 +164,72 @@ contains
     implicit none
     real(kind=8),dimension(0:3) :: p(0:3)
     complex(kind=8),dimension(4) :: wf
-    real(kind=8) :: vmass,hel,hel0,pt,pt2,pp,pzpt,emp,sqh
+    real(kind=8) :: vmass,hel,hel0,pt,pp,sqh,energy_over_mass
+    real(kind=8) :: pz_over_pp,px_over_pp,py_over_pp
     integer nhel,nsv,nsvahl
     real(kind=8),parameter :: rZero=0d0, rHalf=0.5d0, rOne=1d0, rTwo=2d0
+    wf=(0d0,0d0)
+    if (.not.external_momentum_is_safe(p) .or. .not.external_mass_is_safe(vmass)) then
+       call invalidate_feynman_point()
+       return
+    endif
+    if (vmass.lt.rZero .or. abs(nsv).ne.1 .or. abs(nhel).gt.1) then
+       call invalidate_feynman_point()
+       return
+    endif
+    if (vmass.eq.rZero) then
+       if (abs(nhel).ne.1) then
+          call invalidate_feynman_point()
+          return
+       endif
+       call ext_massless_vector_cmplx(p,nhel,nsv,wf)
+       return
+    endif
+    if (p(0).le.rZero) then
+       call invalidate_feynman_point()
+       return
+    endif
     sqh = dsqrt(rHalf)
     hel = dble(nhel)
     nsvahl = nsv*abs(nhel)
-    pt2 = p(1)**2+p(2)**2
-    pp = min(p(0),dsqrt(pt2+p(3)**2))
-    pt = min(pp,dsqrt(pt2))
-    if ( vmass.ne.rZero ) then
-       hel0 = rOne-dabs(hel)
-       if ( pp.eq.rZero ) then
-          wf(1) = dcmplx( rZero )
-          wf(2) = dcmplx(-hel*sqh )
-          wf(3) = dcmplx( rZero , nsvahl*sqh )
-          wf(4) = dcmplx( hel0 )
-       else
-          emp = p(0)/(vmass*pp)
-          wf(1) = dcmplx( hel0*pp/vmass )
-          wf(4) = dcmplx( hel0*p(3)*emp+hel*pt/pp*sqh )
-          if ( pt.ne.rZero ) then
-             pzpt = p(3)/(pp*pt)*sqh*hel
-             wf(2) = dcmplx( hel0*p(1)*emp-p(1)*pzpt , -nsvahl*p(2)/pt*sqh       )
-             wf(3) = dcmplx( hel0*p(2)*emp-p(2)*pzpt ,  nsvahl*p(1)/pt*sqh       )
-          else
-             wf(2) = dcmplx( -hel*sqh )
-             wf(3) = dcmplx( rZero , nsvahl*sign(sqh,p(3)) )
+    pt = hypot(p(1),p(2))
+    pp = min(p(0),hypot(pt,p(3)))
+    hel0 = rOne-dabs(hel)
+    if (pp.eq.rZero) then
+       wf(1) = dcmplx(rZero)
+       wf(2) = dcmplx(-hel*sqh)
+       wf(3) = dcmplx(rZero,nsvahl*sqh)
+       wf(4) = dcmplx(hel0)
+    else
+       if (vmass.lt.rOne) then
+          if (p(0).gt.feynman_value_limit*vmass) then
+             call invalidate_feynman_point()
+             return
           endif
        endif
-    else
-       pp = p(0)
-       pt = sqrt(p(1)**2+p(2)**2)
-       wf(1) = dcmplx( rZero )
-       wf(4) = dcmplx( hel*pt/pp*sqh )
-       if ( pt.ne.rZero ) then
-          pzpt = p(3)/(pp*pt)*sqh*hel
-          wf(2) = dcmplx( -p(1)*pzpt , -nsv*p(2)/pt*sqh )
-          wf(3) = dcmplx( -p(2)*pzpt ,  nsv*p(1)/pt*sqh )
-       else
-          wf(2) = dcmplx( -hel*sqh )
-          wf(3) = dcmplx( rZero , nsv*sign(sqh,p(3)) )
+       if (max(abs(p(1)),abs(p(2)),abs(p(3))).gt.feynman_value_limit*pp) then
+          call invalidate_feynman_point()
+          return
        endif
+       energy_over_mass=p(0)/vmass
+       pz_over_pp=p(3)/pp
+       px_over_pp=p(1)/pp
+       py_over_pp=p(2)/pp
+       wf(1)=dcmplx(hel0*(pp/vmass))
+       wf(4)=dcmplx(hel0*energy_over_mass*pz_over_pp+hel*(pt/pp)*sqh)
+       if (pt.ne.rZero) then
+          wf(2)=dcmplx(hel0*energy_over_mass*px_over_pp-&
+               (p(1)/pt)*pz_over_pp*sqh*hel,-nsvahl*(p(2)/pt)*sqh)
+          wf(3)=dcmplx(hel0*energy_over_mass*py_over_pp-&
+               (p(2)/pt)*pz_over_pp*sqh*hel,nsvahl*(p(1)/pt)*sqh)
+       else
+          wf(2)=dcmplx(-hel*sqh)
+          wf(3)=dcmplx(rZero,nsvahl*sign(sqh,p(3)))
+       endif
+    endif
+    if (.not.all(complex_value_is_safe(wf))) then
+       wf=(0d0,0d0)
+       call invalidate_feynman_point()
     endif
   end subroutine ext_massive_vector
 
@@ -123,16 +244,24 @@ contains
     real(kind=8),parameter :: rzero=0d0,rTwo=2d0
     complex(kind=8),parameter :: cZero=(0d0,0d0)
     real(kind=8) :: sqp0p3
-    real(kind=8), parameter :: tiny=1d-8
-    real(kind=8) :: fmass, pp,pp3,lim
+    real(kind=8) :: fmass, pp,pp3,sqm(0:1)
     real(kind=8) :: omega(2),sfomeg(2),sf(2)
     integer :: im,ip,nsf,nh
 
-    lim=tiny
+    wf=cZero
+    if (.not.external_momentum_is_safe(p) .or. .not.external_mass_is_safe(fmass) .or. &
+         abs(nhel).ne.1) then
+       call invalidate_feynman_point()
+       return
+    endif
+    if (p(0).eq.rzero) then
+       call invalidate_feynman_point()
+       return
+    endif
 
     if (p(0).gt.0d0) then
        ! outgoing final state momenta
-       if (abs(fmass).lt.lim) then
+       if (fmass.eq.0d0) then
           if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).lt.0d0) then
              sqp0p3 = 0d0
           else
@@ -159,29 +288,45 @@ contains
           nsf=+1
           nh=nsf*nhel
           pp = abs(dsqrt(p(1)**2+p(2)**2+p(3)**2))
-          sf(1) = dble(1+nsf+(1-nsf)*nh)*0.5d0
-          sf(2) = dble(1+nsf-(1-nsf)*nh)*0.5d0
-          omega(1) = dsqrt(p(0)+pp)
-          omega(2) = fmass/omega(1)
-          ip = (3+nh)/2
-          im = (3-nh)/2
-          sfomeg(1) = sf(1)*omega(ip)
-          sfomeg(2) = sf(2)*omega(im)
-          pp3 = max(pp+p(3),rZero)
-          chi(1) = dcmplx( dsqrt(pp3*0.5d0/pp) )
-          if ( pp3.eq.rZero ) then
-             chi(2) = dcmplx(-nh )
+          if (pp.eq.rZero) then
+             sqm(0)=dsqrt(abs(fmass))
+             sqm(1)=sign(sqm(0),fmass)
+             ip=-((1+nh)/2)
+             im=(1-nh)/2
+             wf(1)=im*sqm(im)
+             wf(2)=ip*nsf*sqm(im)
+             wf(3)=im*nsf*sqm(-ip)
+             wf(4)=ip*sqm(-ip)
           else
-             chi(2) = dcmplx( nh*p(1) , -p(2) )/dsqrt(rTwo*pp*pp3)
+             sf(1) = dble(1+nsf+(1-nsf)*nh)*0.5d0
+             sf(2) = dble(1+nsf-(1-nsf)*nh)*0.5d0
+             omega(1) = dsqrt(p(0)+pp)
+             omega(2) = fmass/omega(1)
+             ip = (3+nh)/2
+             im = (3-nh)/2
+             sfomeg(1) = sf(1)*omega(ip)
+             sfomeg(2) = sf(2)*omega(im)
+             pp3 = max(pp+p(3),rZero)
+             chi(1) = dcmplx( dsqrt(pp3*0.5d0/pp) )
+             if ( pp3.eq.rZero ) then
+                chi(2) = dcmplx(-nh )
+             else
+                if (pp3.lt.tiny(1d0)/(rTwo*pp)) then
+                   wf=cZero
+                   call invalidate_feynman_point()
+                   return
+                endif
+                chi(2) = dcmplx( nh*p(1) , -p(2) )/dsqrt(rTwo*pp*pp3)
+             endif
+             wf(1) = sfomeg(2)*chi(im)
+             wf(2) = sfomeg(2)*chi(ip)
+             wf(3) = sfomeg(1)*chi(im)
+             wf(4) = sfomeg(1)*chi(ip)
           endif
-          wf(1) = sfomeg(2)*chi(im)
-          wf(2) = sfomeg(2)*chi(ip)
-          wf(3) = sfomeg(1)*chi(im)
-          wf(4) = sfomeg(1)*chi(ip)
        endif
     else
        ! "outgoing" initial state momenta
-       if (abs(fmass).lt.lim) then
+       if (fmass.eq.0d0) then
           if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).gt.0d0) then
              sqp0p3 = 0d0
           else
@@ -208,27 +353,44 @@ contains
           nsf=-1
           nh=nsf*nhel
           pp = abs(dsqrt(p(1)**2+p(2)**2+p(3)**2))
-          sf(1) = dble(1+nsf+(1-nsf)*nh)*0.5d0
-          sf(2) = dble(1+nsf-(1-nsf)*nh)*0.5d0
-          omega(1) = dsqrt(abs(p(0))+pp)
-          omega(2) = fmass/omega(1)
-          ip = (3+nh)/2
-          im = (3-nh)/2
-          sfomeg(1) = sf(1)*omega(ip)
-          sfomeg(2) = sf(2)*omega(im)
-          pp3 = max(pp+(-p(3)),rZero)
-          chi(1) = dcmplx( dsqrt(pp3*0.5d0/pp) )
-          if ( pp3.eq.rZero ) then
-             chi(2) = dcmplx(-nh )
+          if (pp.eq.rZero) then
+             sqm(0)=dsqrt(abs(fmass))
+             sqm(1)=sign(sqm(0),fmass)
+             ip=-((1+nh)/2)
+             im=(1-nh)/2
+             wf(1)=im*sqm(im)
+             wf(2)=ip*nsf*sqm(im)
+             wf(3)=im*nsf*sqm(-ip)
+             wf(4)=ip*sqm(-ip)
           else
-             chi(2) = dcmplx( nh*(-p(1)) , -(-p(2)) )/dsqrt(rTwo*pp*pp3)
+             sf(1) = dble(1+nsf+(1-nsf)*nh)*0.5d0
+             sf(2) = dble(1+nsf-(1-nsf)*nh)*0.5d0
+             omega(1) = dsqrt(abs(p(0))+pp)
+             omega(2) = fmass/omega(1)
+             ip = (3+nh)/2
+             im = (3-nh)/2
+             sfomeg(1) = sf(1)*omega(ip)
+             sfomeg(2) = sf(2)*omega(im)
+             pp3 = max(pp+(-p(3)),rZero)
+             chi(1) = dcmplx( dsqrt(pp3*0.5d0/pp) )
+             if ( pp3.eq.rZero ) then
+                chi(2) = dcmplx(-nh )
+             else
+                if (pp3.lt.tiny(1d0)/(rTwo*pp)) then
+                   wf=cZero
+                   call invalidate_feynman_point()
+                   return
+                endif
+                chi(2) = dcmplx( nh*(-p(1)) , -(-p(2)) )/dsqrt(rTwo*pp*pp3)
+             endif
+             wf(1) = sfomeg(2)*chi(im)
+             wf(2) = sfomeg(2)*chi(ip)
+             wf(3) = sfomeg(1)*chi(im)
+             wf(4) = sfomeg(1)*chi(ip)
           endif
-          wf(1) = sfomeg(2)*chi(im)
-          wf(2) = sfomeg(2)*chi(ip)
-          wf(3) = sfomeg(1)*chi(im)
-          wf(4) = sfomeg(1)*chi(ip)
        endif
     endif
+    call validate_complex_wavefunction(wf)
   end subroutine ext_fermion_outflow
 
 
@@ -243,16 +405,24 @@ contains
     real(kind=8),parameter :: rzero=0d0,rTwo=2d0
     complex(kind=8),parameter :: cZero=(0d0,0d0)
     real(kind=8) :: sqp0p3
-    real(kind=8), parameter :: tiny=1d-8
-    real(kind=8) :: fmass, pp,pp3,lim
+    real(kind=8) :: fmass, pp,pp3,sqm(0:1)
     real(kind=8) :: omega(2),sfomeg(2),sf(2)
     integer :: im,ip,nsf,nh
 
-    lim=tiny
+    wf=cZero
+    if (.not.external_momentum_is_safe(p) .or. .not.external_mass_is_safe(fmass) .or. &
+         abs(nhel).ne.1) then
+       call invalidate_feynman_point()
+       return
+    endif
+    if (p(0).eq.rzero) then
+       call invalidate_feynman_point()
+       return
+    endif
 
     if(p(0).gt.0d0) then
        ! outgoing final state momenta
-       if (abs(fmass).lt.lim) then
+       if (fmass.eq.0d0) then
           if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).lt.0d0) then
              sqp0p3 = 0d0
           else
@@ -279,29 +449,45 @@ contains
           nsf=-1
           nh=nsf*nhel
           pp = abs(dsqrt(p(1)**2+p(2)**2+p(3)**2))
-          sf(1) = dble(1+nsf+(1-nsf)*nh)*0.5d0
-          sf(2) = dble(1+nsf-(1-nsf)*nh)*0.5d0
-          omega(1) = dsqrt(p(0)+pp)
-          omega(2) = fmass/omega(1)
-          ip = (3+nh)/2
-          im = (3-nh)/2
-          sfomeg(1) = sf(1)*omega(ip)
-          sfomeg(2) = sf(2)*omega(im)
-          pp3 = max(pp+p(3),rZero)
-          chi(1) = dcmplx( dsqrt(pp3*0.5d0/pp) )
-          if ( pp3.eq.rZero ) then
-             chi(2) = dcmplx(-nh )
+          if (pp.eq.rZero) then
+             sqm(0)=dsqrt(abs(fmass))
+             sqm(1)=sign(sqm(0),fmass)
+             ip=(1+nh)/2
+             im=(1-nh)/2
+             wf(1)=ip*sqm(ip)
+             wf(2)=im*nsf*sqm(ip)
+             wf(3)=ip*nsf*sqm(im)
+             wf(4)=im*sqm(im)
           else
-             chi(2) = dcmplx( nh*p(1) , p(2) )/dsqrt(rTwo*pp*pp3)
+             sf(1) = dble(1+nsf+(1-nsf)*nh)*0.5d0
+             sf(2) = dble(1+nsf-(1-nsf)*nh)*0.5d0
+             omega(1) = dsqrt(p(0)+pp)
+             omega(2) = fmass/omega(1)
+             ip = (3+nh)/2
+             im = (3-nh)/2
+             sfomeg(1) = sf(1)*omega(ip)
+             sfomeg(2) = sf(2)*omega(im)
+             pp3 = max(pp+p(3),rZero)
+             chi(1) = dcmplx( dsqrt(pp3*0.5d0/pp) )
+             if ( pp3.eq.rZero ) then
+                chi(2) = dcmplx(-nh )
+             else
+                if (pp3.lt.tiny(1d0)/(rTwo*pp)) then
+                   wf=cZero
+                   call invalidate_feynman_point()
+                   return
+                endif
+                chi(2) = dcmplx( nh*p(1) , p(2) )/dsqrt(rTwo*pp*pp3)
+             endif
+             wf(1) = sfomeg(1)*chi(im)
+             wf(2) = sfomeg(1)*chi(ip)
+             wf(3) = sfomeg(2)*chi(im)
+             wf(4) = sfomeg(2)*chi(ip)
           endif
-          wf(1) = sfomeg(1)*chi(im)
-          wf(2) = sfomeg(1)*chi(ip)
-          wf(3) = sfomeg(2)*chi(im)
-          wf(4) = sfomeg(2)*chi(ip)
        endif
     else
        ! "outgoing" initial state momenta
-       if (abs(fmass).lt.lim) then
+       if (fmass.eq.0d0) then
           if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).gt.0d0) then
              sqp0p3 = 0d0
           else
@@ -328,27 +514,44 @@ contains
           nsf=+1
           nh=nsf*nhel
           pp = abs(dsqrt(p(1)**2+p(2)**2+p(3)**2))
-          sf(1) = dble(1+nsf+(1-nsf)*nh)*0.5d0
-          sf(2) = dble(1+nsf-(1-nsf)*nh)*0.5d0
-          omega(1) = dsqrt(abs(p(0))+pp)
-          omega(2) = fmass/omega(1)
-          ip = (3+nh)/2
-          im = (3-nh)/2
-          sfomeg(1) = sf(1)*omega(ip)
-          sfomeg(2) = sf(2)*omega(im)
-          pp3 = max(pp+(-p(3)),rZero)
-          chi(1) = dcmplx( dsqrt(pp3*0.5d0/pp) )
-          if ( pp3.eq.rZero ) then
-             chi(2) = dcmplx(-nh )
+          if (pp.eq.rZero) then
+             sqm(0)=dsqrt(abs(fmass))
+             sqm(1)=sign(sqm(0),fmass)
+             ip=(1+nh)/2
+             im=(1-nh)/2
+             wf(1)=ip*sqm(ip)
+             wf(2)=im*nsf*sqm(ip)
+             wf(3)=ip*nsf*sqm(im)
+             wf(4)=im*sqm(im)
           else
-             chi(2) = dcmplx( nh*(-p(1)) , (-p(2)) )/dsqrt(rTwo*pp*pp3)
+             sf(1) = dble(1+nsf+(1-nsf)*nh)*0.5d0
+             sf(2) = dble(1+nsf-(1-nsf)*nh)*0.5d0
+             omega(1) = dsqrt(abs(p(0))+pp)
+             omega(2) = fmass/omega(1)
+             ip = (3+nh)/2
+             im = (3-nh)/2
+             sfomeg(1) = sf(1)*omega(ip)
+             sfomeg(2) = sf(2)*omega(im)
+             pp3 = max(pp+(-p(3)),rZero)
+             chi(1) = dcmplx( dsqrt(pp3*0.5d0/pp) )
+             if ( pp3.eq.rZero ) then
+                chi(2) = dcmplx(-nh )
+             else
+                if (pp3.lt.tiny(1d0)/(rTwo*pp)) then
+                   wf=cZero
+                   call invalidate_feynman_point()
+                   return
+                endif
+                chi(2) = dcmplx( nh*(-p(1)) , (-p(2)) )/dsqrt(rTwo*pp*pp3)
+             endif
+             wf(1) = sfomeg(1)*chi(im)
+             wf(2) = sfomeg(1)*chi(ip)
+             wf(3) = sfomeg(2)*chi(im)
+             wf(4) = sfomeg(2)*chi(ip)
           endif
-          wf(1) = sfomeg(1)*chi(im)
-          wf(2) = sfomeg(1)*chi(ip)
-          wf(3) = sfomeg(2)*chi(im)
-          wf(4) = sfomeg(2)*chi(ip)
        endif
     endif
+    call validate_complex_wavefunction(wf)
   end subroutine ext_fermion_inflow
 
   subroutine ext_fermion_outflow_weyl(p,nhel,idum,wf,chirality)
@@ -361,6 +564,15 @@ contains
     real(kind=8) :: sqp0p3
 
     wf(1:2)=(0d0,0d0)
+    if (.not.external_momentum_is_safe(p) .or. abs(nhel).ne.1 .or. &
+         abs(chirality).ne.1) then
+       call invalidate_feynman_point()
+       return
+    endif
+    if (p(0).eq.rzero) then
+       call invalidate_feynman_point()
+       return
+    endif
     if (p(0).gt.0d0) then
        if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).lt.0d0) then
           sqp0p3 = 0d0
@@ -398,6 +610,7 @@ contains
           wf(2)=chi(1)
        endif
     endif
+    call validate_complex_wavefunction(wf)
   end subroutine ext_fermion_outflow_weyl
 
   subroutine ext_fermion_inflow_weyl(p,nhel,idum,wf,chirality)
@@ -410,6 +623,15 @@ contains
     real(kind=8) :: sqp0p3
 
     wf(1:2)=(0d0,0d0)
+    if (.not.external_momentum_is_safe(p) .or. abs(nhel).ne.1 .or. &
+         abs(chirality).ne.1) then
+       call invalidate_feynman_point()
+       return
+    endif
+    if (p(0).eq.rzero) then
+       call invalidate_feynman_point()
+       return
+    endif
     if(p(0).gt.0d0) then
        if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).lt.0d0) then
           sqp0p3 = 0d0
@@ -447,6 +669,7 @@ contains
           wf(1:2)=chi(1:2)
        endif
     endif
+    call validate_complex_wavefunction(wf)
   end subroutine ext_fermion_inflow_weyl
 
   subroutine ext_scalar(p,idum,wf)
@@ -455,6 +678,11 @@ contains
     real(kind=8), dimension(0:3) :: p
     complex(kind=8), dimension(1) :: wf
     real(kind=8),parameter :: rOne=1d0
+    wf=(0d0,0d0)
+    if (.not.external_momentum_is_safe(p)) then
+       call invalidate_feynman_point()
+       return
+    endif
     wf(1)=(rOne,0d0)
   end subroutine ext_scalar
 
@@ -677,6 +905,23 @@ contains
     wfq(4)=prefact*(TMP2*wfq1(2)+TMP3*wfq1(1)) !sl2
   end subroutine AntiquarkColourFlowVectorToAntiquark
 
+  subroutine AntiquarkColourFlowVectorToAntiquark_real(wfq1,wfg2,wfq)
+    implicit none
+    complex(kind=8),dimension(4) :: wfq1,wfq
+    real(kind=8),dimension(4) :: wfg2
+    complex(kind=8), parameter :: prefact=(0d0,1d0)/sqrt(2d0)
+    real(kind=8) :: TMP1,TMP2
+    complex(kind=8) :: TMP3,TMP4
+    TMP1=wfg2(1)+wfg2(4)
+    TMP2=wfg2(1)-wfg2(4)
+    TMP3=cmplx(wfg2(2),wfg2(3),kind=8)
+    TMP4=cmplx(wfg2(2),-wfg2(3),kind=8)
+    wfq(1)=prefact*(TMP2*wfq1(3)-TMP4*wfq1(4))
+    wfq(2)=prefact*(TMP1*wfq1(4)-TMP3*wfq1(3))
+    wfq(3)=prefact*(TMP1*wfq1(1)+TMP4*wfq1(2))
+    wfq(4)=prefact*(TMP2*wfq1(2)+TMP3*wfq1(1))
+  end subroutine AntiquarkColourFlowVectorToAntiquark_real
+
   subroutine ColourFlowVectorAntiquarkToAntiquark(wfg1,wfq2,wfq)
     implicit none
     complex(kind=8),dimension(4) :: wfg1,wfq2,wfq
@@ -691,6 +936,23 @@ contains
     wfq(3)=prefact*(TMP1*wfq2(1)+TMP4*wfq2(2)) !sl1
     wfq(4)=prefact*(TMP2*wfq2(2)+TMP3*wfq2(1)) !sl2
   end subroutine ColourFlowVectorAntiquarkToAntiquark
+
+  subroutine ColourFlowVectorAntiquarkToAntiquark_real(wfg1,wfq2,wfq)
+    implicit none
+    real(kind=8),dimension(4) :: wfg1
+    complex(kind=8),dimension(4) :: wfq2,wfq
+    complex(kind=8), parameter :: prefact=(0d0,1d0)/sqrt(2d0)
+    real(kind=8) :: TMP1,TMP2
+    complex(kind=8) :: TMP3,TMP4
+    TMP1=wfg1(1)+wfg1(4)
+    TMP2=wfg1(1)-wfg1(4)
+    TMP3=cmplx(wfg1(2),wfg1(3),kind=8)
+    TMP4=cmplx(wfg1(2),-wfg1(3),kind=8)
+    wfq(1)=prefact*(TMP2*wfq2(3)-TMP4*wfq2(4))
+    wfq(2)=prefact*(TMP1*wfq2(4)-TMP3*wfq2(3))
+    wfq(3)=prefact*(TMP1*wfq2(1)+TMP4*wfq2(2))
+    wfq(4)=prefact*(TMP2*wfq2(2)+TMP3*wfq2(1))
+  end subroutine ColourFlowVectorAntiquarkToAntiquark_real
 
   subroutine QuarkAntiquarkToColourFlowU1Vector(wfq1,wfq2,wfg,coupl)
     implicit none
@@ -1045,6 +1307,34 @@ contains
     integer,intent(in) :: chirality_terminal,chirality_external
     complex(kind=8),dimension(*),intent(in) :: wf_terminal,wf_external
 
+    ContractFermionCurrents=(0d0,0d0)
+    if (abs(chirality_terminal).gt.1 .or. abs(chirality_external).gt.1) then
+       call invalidate_feynman_point()
+       return
+    endif
+    if (chirality_terminal.eq.0) then
+       if (.not.all(complex_value_is_safe(wf_terminal(1:4)))) then
+          call invalidate_feynman_point()
+          return
+       endif
+    else
+       if (.not.all(complex_value_is_safe(wf_terminal(1:2)))) then
+          call invalidate_feynman_point()
+          return
+       endif
+    endif
+    if (chirality_external.eq.0) then
+       if (.not.all(complex_value_is_safe(wf_external(1:4)))) then
+          call invalidate_feynman_point()
+          return
+       endif
+    else
+       if (.not.all(complex_value_is_safe(wf_external(1:2)))) then
+          call invalidate_feynman_point()
+          return
+       endif
+    endif
+
     if (chirality_terminal.ne.0 .and. chirality_external.ne.0) then
        ContractFermionCurrents=sum(wf_terminal(1:2)*wf_external(1:2))
     elseif (chirality_terminal.eq.0 .and. chirality_external.eq.0) then
@@ -1055,8 +1345,8 @@ contains
        elseif (chirality_external.eq.-1) then
           ContractFermionCurrents=sum(wf_terminal(3:4)*wf_external(1:2))
        else
-          write (*,*) 'Invalid external chirality in ContractFermionCurrents',chirality_external
-          stop 1
+          call invalidate_feynman_point()
+          return
        endif
     else
        if (chirality_terminal.eq.1) then
@@ -1064,9 +1354,13 @@ contains
        elseif (chirality_terminal.eq.-1) then
           ContractFermionCurrents=sum(wf_terminal(1:2)*wf_external(1:2))
        else
-          write (*,*) 'Invalid terminal chirality in ContractFermionCurrents',chirality_terminal
-          stop 1
+          call invalidate_feynman_point()
+          return
        endif
+    endif
+    if (.not.complex_value_is_safe(ContractFermionCurrents)) then
+       ContractFermionCurrents=(0d0,0d0)
+       call invalidate_feynman_point()
     endif
   end function ContractFermionCurrents
 
@@ -1415,14 +1709,90 @@ contains
 
     denominator=0d0
     valid=.false.
+    if (.not.all(ieee_is_finite(p))) return
     scale=maxval(abs(p))
-    if (scale .le. sqrt(tiny(1d0))) return
+    if (.not.ieee_is_finite(scale)) return
+    if (scale.le.sqrt(tiny(1d0)) .or. scale.gt.0.25d0*sqrt(huge(1d0))) return
     q2_scaled=(p(0)/scale)**2-(p(1)/scale)**2-(p(2)/scale)**2-(p(3)/scale)**2
-    if (abs(q2_scaled) .le. sqrt(tiny(1d0))) return
+    if (.not.ieee_is_finite(q2_scaled)) return
+    if (abs(q2_scaled).le.sqrt(tiny(1d0))) return
     denominator=scale*scale*q2_scaled
+    if (.not.ieee_is_finite(denominator)) return
     if (abs(denominator).le.tiny(1d0)) return
     valid=.true.
   end subroutine massless_propagator_denominator
+
+  subroutine massive_propagator_denominator(p,mass,width,denominator,valid)
+    implicit none
+    real(kind=8),dimension(0:3),intent(in) :: p
+    real(kind=8),intent(in) :: mass,width
+    complex(kind=8),intent(out) :: denominator
+    logical,intent(out) :: valid
+    real(kind=8) :: scale,scale2,real_scaled,imag_scaled,width_scale
+
+    denominator=(0d0,0d0)
+    valid=.false.
+    if (.not.all(ieee_is_finite(p)) .or. .not.ieee_is_finite(mass) .or. &
+         .not.ieee_is_finite(width)) return
+    width_scale=sqrt(abs(mass))*sqrt(abs(width))
+    scale=max(maxval(abs(p)),abs(mass),width_scale)
+    if (.not.ieee_is_finite(scale)) return
+    if (scale.le.sqrt(tiny(1d0)) .or. scale.gt.0.25d0*sqrt(huge(1d0))) return
+    real_scaled=(p(0)/scale)**2-(p(1)/scale)**2-(p(2)/scale)**2-&
+         (p(3)/scale)**2-(mass/scale)**2
+    imag_scaled=(mass/scale)*(width/scale)
+    if (.not.ieee_is_finite(real_scaled) .or. .not.ieee_is_finite(imag_scaled)) return
+    if (max(abs(real_scaled),abs(imag_scaled)).le.sqrt(tiny(1d0))) return
+    scale2=scale*scale
+    denominator=cmplx(scale2*real_scaled,scale2*imag_scaled,kind=8)
+    if (.not.complex_value_is_safe(denominator)) return
+    if (max(abs(real(denominator,kind=8)),abs(aimag(denominator))).le.tiny(1d0)) return
+    valid=.true.
+  end subroutine massive_propagator_denominator
+
+  elemental logical function complex_value_is_safe(value)
+    implicit none
+    complex(kind=8),intent(in) :: value
+    complex_value_is_safe=.false.
+    if (.not.ieee_is_finite(real(value,kind=8)) .or. &
+         .not.ieee_is_finite(aimag(value))) return
+    if (abs(real(value,kind=8)).gt.feynman_value_limit .or. &
+         abs(aimag(value)).gt.feynman_value_limit) return
+    complex_value_is_safe=.true.
+  end function complex_value_is_safe
+
+  logical function complex_scaling_is_safe(values,factor)
+    implicit none
+    complex(kind=8),intent(in) :: values(:),factor
+    real(kind=8) :: value_scale,factor_scale
+    complex_scaling_is_safe=.false.
+    if (.not.all(complex_value_is_safe(values)) .or. .not.complex_value_is_safe(factor)) return
+    value_scale=max(maxval(abs(real(values,kind=8))),maxval(abs(aimag(values))))
+    factor_scale=max(abs(real(factor,kind=8)),abs(aimag(factor)))
+    if (value_scale.eq.0d0 .or. factor_scale.eq.0d0) then
+       complex_scaling_is_safe=.true.
+    elseif (factor_scale.le.0.25d0) then
+       complex_scaling_is_safe=.true.
+    else
+       complex_scaling_is_safe=value_scale.le.0.25d0*feynman_value_limit/factor_scale
+    endif
+  end function complex_scaling_is_safe
+
+  logical function real_scaling_is_safe(values,factor)
+    implicit none
+    real(kind=8),intent(in) :: values(:),factor
+    real(kind=8) :: value_scale
+    real_scaling_is_safe=.false.
+    if (.not.all(ieee_is_finite(values)) .or. .not.ieee_is_finite(factor)) return
+    if (any(abs(values).gt.feynman_value_limit) .or. &
+         abs(factor).gt.feynman_value_limit) return
+    value_scale=maxval(abs(values))
+    if (value_scale.eq.0d0 .or. abs(factor).le.1d0) then
+       real_scaling_is_safe=.true.
+    else
+       real_scaling_is_safe=value_scale.le.feynman_value_limit/abs(factor)
+    endif
+  end function real_scaling_is_safe
 
   subroutine MasslessVectorPropagator(wfg,p)
     implicit none
@@ -1434,10 +1804,16 @@ contains
     logical :: valid
     call massless_propagator_denominator(p,denominator,valid)
     if (.not.valid) then
+       call invalidate_feynman_point()
        wfg=0d0
        return
     endif
     propagator=-cImag/denominator
+    if (.not.complex_scaling_is_safe(wfg,propagator)) then
+       call invalidate_feynman_point()
+       wfg=0d0
+       return
+    endif
     wfg(1:4)=wfg(1:4)*propagator
   end subroutine MasslessVectorPropagator
 
@@ -1449,10 +1825,16 @@ contains
     logical :: valid
     call massless_propagator_denominator(p,denominator,valid)
     if (.not.valid) then
+       call invalidate_feynman_point()
        wfg=0d0
        return
     endif
     propagator=1d0/denominator
+    if (.not.real_scaling_is_safe(wfg,propagator)) then
+       call invalidate_feynman_point()
+       wfg=0d0
+       return
+    endif
     wfg(1:4)=wfg(1:4)*propagator
   end subroutine MasslessVectorPropagator_real
 
@@ -1460,16 +1842,54 @@ contains
     implicit none
     complex(kind=8),dimension(1:4),intent(inout) :: wfg
     real(kind=8),dimension(0:3),intent(in) :: p
-    complex(kind=8) :: propagator
+    complex(kind=8) :: propagator,denominator,numerator
     complex(kind=8),parameter :: cImag=(0d0,1d0)
-    real(kind=8) :: vm,vw
-    complex(kind=8) :: TMP
-    propagator=-cImag/(p(0)**2-p(1)**2-p(2)**2-p(3)**2-vm**2+cImag*vm*vw)
-    TMP=(p(0)*wfg(1)-p(1)*wfg(2)-p(2)*wfg(3)-p(3)*wfg(4))/vm**2
-    wfg(1)=(wfg(1)-p(0)*TMP)*propagator
-    wfg(2)=(wfg(2)-p(1)*TMP)*propagator
-    wfg(3)=(wfg(3)-p(2)*TMP)*propagator
-    wfg(4)=(wfg(4)-p(3)*TMP)*propagator
+    real(kind=8) :: vm,vw,mass2,numerator_scale
+    complex(kind=8) :: TMP,projected(4)
+    logical :: valid
+    if (.not.all(ieee_is_finite(p)) .or. .not.all(complex_value_is_safe(wfg)) .or. &
+         .not.ieee_is_finite(vm)) then
+       call invalidate_feynman_point()
+       wfg=0d0
+       return
+    endif
+    if (any(abs(p).gt.feynman_value_limit) .or. vm.eq.0d0 .or. &
+         abs(vm).gt.sqrt(feynman_value_limit)) then
+       call invalidate_feynman_point()
+       wfg=0d0
+       return
+    endif
+    call massive_propagator_denominator(p,vm,vw,denominator,valid)
+    if (.not.valid) then
+       call invalidate_feynman_point()
+       wfg=0d0
+       return
+    endif
+    propagator=-cImag/denominator
+    mass2=vm*vm
+    numerator=p(0)*wfg(1)-p(1)*wfg(2)-p(2)*wfg(3)-p(3)*wfg(4)
+    numerator_scale=max(abs(real(numerator,kind=8)),abs(aimag(numerator)))
+    if (.not.ieee_is_finite(numerator_scale)) then
+       call invalidate_feynman_point()
+       wfg=0d0
+       return
+    endif
+    if (mass2.le.tiny(1d0) .or. numerator_scale.gt.feynman_value_limit*mass2) then
+       call invalidate_feynman_point()
+       wfg=0d0
+       return
+    endif
+    TMP=numerator/mass2
+    projected(1)=wfg(1)-p(0)*TMP
+    projected(2)=wfg(2)-p(1)*TMP
+    projected(3)=wfg(3)-p(2)*TMP
+    projected(4)=wfg(4)-p(3)*TMP
+    if (.not.complex_scaling_is_safe(projected,propagator)) then
+       call invalidate_feynman_point()
+       wfg=0d0
+       return
+    endif
+    wfg=projected*propagator
   end subroutine MassiveVectorPropagator
 
   subroutine FermionPropagator(wfq,p,fm,fw)
@@ -1477,30 +1897,56 @@ contains
     complex(kind=8),dimension(1:4),intent(inout) :: wfq
     real(kind=8),dimension(0:3),intent(in) :: p
     complex(kind=8) :: prefact
-    complex(kind=8),dimension(1:4) :: tmp_p,tmp_val
+    complex(kind=8),dimension(1:4) :: tmp_p,tmp_val,numerator
     complex(kind=8),parameter :: cImag=(0d0,1d0)
     real(kind=8) :: fm,fw
     real(kind=8) :: denominator
+    complex(kind=8) :: massive_denominator
     logical :: valid
+    if (.not.all(ieee_is_finite(p)) .or. .not.all(complex_value_is_safe(wfq)) .or. &
+         .not.ieee_is_finite(fm)) then
+       call invalidate_feynman_point()
+       wfq=0d0
+       return
+    endif
+    if (any(abs(p).gt.feynman_value_limit) .or. &
+         abs(fm).gt.sqrt(feynman_value_limit)) then
+       call invalidate_feynman_point()
+       wfq=0d0
+       return
+    endif
     if (fm.eq.0d0 .and. fw.eq.0d0) then
        call massless_propagator_denominator(p,denominator,valid)
        if (.not.valid) then
+          call invalidate_feynman_point()
           wfq=0d0
           return
        endif
        prefact=cImag/denominator
     else
-       prefact=cImag/(p(0)**2-p(1)**2-p(2)**2-p(3)**2-fm**2+cImag*fm*fw)
+       call massive_propagator_denominator(p,fm,fw,massive_denominator,valid)
+       if (.not.valid) then
+          call invalidate_feynman_point()
+          wfq=0d0
+          return
+       endif
+       prefact=cImag/massive_denominator
     endif
     tmp_val(1:4)=wfq(1:4)
     tmp_p(1)=(p(0)+p(3))
     tmp_p(2)=(p(0)-p(3))
     tmp_p(3)=(p(1)+cImag*p(2))
     tmp_p(4)=(p(1)-cImag*p(2))
-    wfq(1)=(tmp_p(1)*tmp_val(3)+tmp_p(3)*tmp_val(4)+fm*tmp_val(1))*prefact
-    wfq(2)=(tmp_p(2)*tmp_val(4)+tmp_p(4)*tmp_val(3)+fm*tmp_val(2))*prefact
-    wfq(3)=(tmp_p(2)*tmp_val(1)-tmp_p(3)*tmp_val(2)+fm*tmp_val(3))*prefact
-    wfq(4)=(tmp_p(1)*tmp_val(2)-tmp_p(4)*tmp_val(1)+fm*tmp_val(4))*prefact
+    numerator(1)=tmp_p(1)*tmp_val(3)+tmp_p(3)*tmp_val(4)+fm*tmp_val(1)
+    numerator(2)=tmp_p(2)*tmp_val(4)+tmp_p(4)*tmp_val(3)+fm*tmp_val(2)
+    numerator(3)=tmp_p(2)*tmp_val(1)-tmp_p(3)*tmp_val(2)+fm*tmp_val(3)
+    numerator(4)=tmp_p(1)*tmp_val(2)-tmp_p(4)*tmp_val(1)+fm*tmp_val(4)
+    if (.not.complex_scaling_is_safe(numerator,prefact)) then
+       call invalidate_feynman_point()
+       wfq=0d0
+       return
+    endif
+    wfq=numerator*prefact
   end subroutine FermionPropagator
 
   subroutine FermionPropagator_weyl(wfq,p,chirality)
@@ -1508,12 +1954,24 @@ contains
     integer,intent(in) :: chirality
     complex(kind=8),dimension(*) :: wfq
     real(kind=8),dimension(0:3),intent(in) :: p
-    complex(kind=8) :: prefact,tmp1,tmp2,tmp3,tmp4,val1,val2
+    complex(kind=8) :: prefact,tmp1,tmp2,tmp3,tmp4,val1,val2,numerator(2)
     complex(kind=8),parameter :: cImag=(0d0,1d0)
     real(kind=8) :: denominator
     logical :: valid
+    if (.not.all(ieee_is_finite(p)) .or. &
+         .not.all(complex_value_is_safe(wfq(1:2)))) then
+       call invalidate_feynman_point()
+       wfq(1:2)=0d0
+       return
+    endif
+    if (any(abs(p).gt.feynman_value_limit)) then
+       call invalidate_feynman_point()
+       wfq(1:2)=0d0
+       return
+    endif
     call massless_propagator_denominator(p,denominator,valid)
     if (.not.valid) then
+       call invalidate_feynman_point()
        wfq(1:2)=0d0
        return
     endif
@@ -1525,15 +1983,21 @@ contains
     val1=wfq(1)
     val2=wfq(2)
     if (chirality.eq.1) then
-       wfq(1)=(tmp1*val1+tmp3*val2)*prefact
-       wfq(2)=(tmp2*val2+tmp4*val1)*prefact
+       numerator(1)=tmp1*val1+tmp3*val2
+       numerator(2)=tmp2*val2+tmp4*val1
     elseif (chirality.eq.-1) then
-       wfq(1)=(tmp2*val1-tmp3*val2)*prefact
-       wfq(2)=(tmp1*val2-tmp4*val1)*prefact
+       numerator(1)=tmp2*val1-tmp3*val2
+       numerator(2)=tmp1*val2-tmp4*val1
     else
        write (*,*) 'FermionPropagator_weyl called with zero chirality'
        stop 1
     endif
+    if (.not.complex_scaling_is_safe(numerator,prefact)) then
+       call invalidate_feynman_point()
+       wfq(1:2)=0d0
+       return
+    endif
+    wfq(1:2)=numerator*prefact
   end subroutine FermionPropagator_weyl
 
   subroutine AntifermionPropagator(wfq,p,fm,fw)
@@ -1541,30 +2005,56 @@ contains
     complex(kind=8),dimension(1:4),intent(inout) :: wfq
     real(kind=8),dimension(0:3),intent(in) :: p
     complex(kind=8) :: prefact
-    complex(kind=8),dimension(1:4) :: tmp_p,tmp_val
+    complex(kind=8),dimension(1:4) :: tmp_p,tmp_val,numerator
     complex(kind=8),parameter :: cImag=(0d0,1d0)
     real(kind=8) :: fm,fw
     real(kind=8) :: denominator
+    complex(kind=8) :: massive_denominator
     logical :: valid
+    if (.not.all(ieee_is_finite(p)) .or. .not.all(complex_value_is_safe(wfq)) .or. &
+         .not.ieee_is_finite(fm)) then
+       call invalidate_feynman_point()
+       wfq=0d0
+       return
+    endif
+    if (any(abs(p).gt.feynman_value_limit) .or. &
+         abs(fm).gt.sqrt(feynman_value_limit)) then
+       call invalidate_feynman_point()
+       wfq=0d0
+       return
+    endif
     if (fm.eq.0d0 .and. fw.eq.0d0) then
        call massless_propagator_denominator(p,denominator,valid)
        if (.not.valid) then
+          call invalidate_feynman_point()
           wfq=0d0
           return
        endif
        prefact=cImag/denominator
     else
-       prefact=cImag/(p(0)**2-p(1)**2-p(2)**2-p(3)**2-fm**2+cImag*fm*fw)
+       call massive_propagator_denominator(p,fm,fw,massive_denominator,valid)
+       if (.not.valid) then
+          call invalidate_feynman_point()
+          wfq=0d0
+          return
+       endif
+       prefact=cImag/massive_denominator
     endif
     tmp_val(1:4)=wfq(1:4)
     tmp_p(1)=-(p(0)+p(3))
     tmp_p(2)=-(p(0)-p(3))
     tmp_p(3)=-(p(1)+cImag*p(2))
     tmp_p(4)=-(p(1)-cImag*p(2))
-    wfq(1)=(tmp_p(2)*tmp_val(3)-tmp_p(4)*tmp_val(4)+fm*tmp_val(1))*prefact
-    wfq(2)=(tmp_p(1)*tmp_val(4)-tmp_p(3)*tmp_val(3)+fm*tmp_val(2))*prefact
-    wfq(3)=(tmp_p(1)*tmp_val(1)+tmp_p(4)*tmp_val(2)+fm*tmp_val(3))*prefact
-    wfq(4)=(tmp_p(2)*tmp_val(2)+tmp_p(3)*tmp_val(1)+fm*tmp_val(4))*prefact
+    numerator(1)=tmp_p(2)*tmp_val(3)-tmp_p(4)*tmp_val(4)+fm*tmp_val(1)
+    numerator(2)=tmp_p(1)*tmp_val(4)-tmp_p(3)*tmp_val(3)+fm*tmp_val(2)
+    numerator(3)=tmp_p(1)*tmp_val(1)+tmp_p(4)*tmp_val(2)+fm*tmp_val(3)
+    numerator(4)=tmp_p(2)*tmp_val(2)+tmp_p(3)*tmp_val(1)+fm*tmp_val(4)
+    if (.not.complex_scaling_is_safe(numerator,prefact)) then
+       call invalidate_feynman_point()
+       wfq=0d0
+       return
+    endif
+    wfq=numerator*prefact
   end subroutine AntifermionPropagator
 
   subroutine AntifermionPropagator_weyl(wfq,p,chirality)
@@ -1572,12 +2062,24 @@ contains
     integer,intent(in) :: chirality
     complex(kind=8),dimension(*) :: wfq
     real(kind=8),dimension(0:3),intent(in) :: p
-    complex(kind=8) :: prefact,tmp1,tmp2,tmp3,tmp4,val1,val2
+    complex(kind=8) :: prefact,tmp1,tmp2,tmp3,tmp4,val1,val2,numerator(2)
     complex(kind=8),parameter :: cImag=(0d0,1d0)
     real(kind=8) :: denominator
     logical :: valid
+    if (.not.all(ieee_is_finite(p)) .or. &
+         .not.all(complex_value_is_safe(wfq(1:2)))) then
+       call invalidate_feynman_point()
+       wfq(1:2)=0d0
+       return
+    endif
+    if (any(abs(p).gt.feynman_value_limit)) then
+       call invalidate_feynman_point()
+       wfq(1:2)=0d0
+       return
+    endif
     call massless_propagator_denominator(p,denominator,valid)
     if (.not.valid) then
+       call invalidate_feynman_point()
        wfq(1:2)=0d0
        return
     endif
@@ -1589,25 +2091,43 @@ contains
     val1=wfq(1)
     val2=wfq(2)
     if (chirality.eq.1) then
-       wfq(1)=(tmp2*val1-tmp4*val2)*prefact
-       wfq(2)=(tmp1*val2-tmp3*val1)*prefact
+       numerator(1)=tmp2*val1-tmp4*val2
+       numerator(2)=tmp1*val2-tmp3*val1
     elseif (chirality.eq.-1) then
-       wfq(1)=(tmp1*val1+tmp4*val2)*prefact
-       wfq(2)=(tmp2*val2+tmp3*val1)*prefact
+       numerator(1)=tmp1*val1+tmp4*val2
+       numerator(2)=tmp2*val2+tmp3*val1
     else
        write (*,*) 'AntifermionPropagator_weyl called with zero chirality'
        stop 1
     endif
+    if (.not.complex_scaling_is_safe(numerator,prefact)) then
+       call invalidate_feynman_point()
+       wfq(1:2)=0d0
+       return
+    endif
+    wfq(1:2)=numerator*prefact
   end subroutine AntifermionPropagator_weyl
 
   subroutine ScalarPropagator(wfs,p,sm,sw)
     implicit none
     complex(kind=8),dimension(1),intent(inout) :: wfs
     real(kind=8),dimension(0:3),intent(in) :: p
-    complex(kind=8) :: propagator
+    complex(kind=8) :: propagator,denominator
     complex(kind=8),parameter :: cImag=(0d0,1d0)
     real(kind=8) :: sm,sw
-    propagator=cImag/(p(0)**2-p(1)**2-p(2)**2-p(3)**2-sm**2+cImag*sm*sw)
+    logical :: valid
+    call massive_propagator_denominator(p,sm,sw,denominator,valid)
+    if (.not.valid) then
+       call invalidate_feynman_point()
+       wfs=0d0
+       return
+    endif
+    propagator=cImag/denominator
+    if (.not.complex_scaling_is_safe(wfs,propagator)) then
+       call invalidate_feynman_point()
+       wfs=0d0
+       return
+    endif
     wfs(1)=wfs(1)*propagator
   end subroutine ScalarPropagator
 end module FeynmanRules

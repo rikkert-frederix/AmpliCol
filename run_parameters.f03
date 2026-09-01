@@ -1,6 +1,8 @@
 module run_parameters
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
+  real(kind=8),parameter :: run_parameter_limit=0.125d0*huge(1d0)**0.125d0
+  real(kind=8),parameter :: run_parameter_floor=1d0/(huge(1d0)**0.125d0)
 
   ! Particle properties used by the built-in Standard Model.
   real(kind=8) :: top_mass=173d0
@@ -152,6 +154,15 @@ contains
        write (*,*) 'All real-valued input parameters must be finite'
        stop 1
     endif
+    if (any(.not.numerically_representable_input([top_mass,top_width,z_mass,z_width,&
+         w_mass,w_width,higgs_mass,higgs_width,sw,alphaS_MZ,alphaEW,sqrts,&
+         pTj_min,DRjj_min,etaj_max,sqrt_sjj_min,pTa_min,DRaa_min,etaa_max,&
+         sqrt_saa_min,pTl_min,DRll_min,etal_max,sqrt_sll_min,DRja_min,&
+         sqrt_sja_min,DRjl_min,sqrt_sjl_min,DRla_min,sqrt_sla_min,&
+         alpha_dipole]))) then
+       write (*,*) 'Real-valued input parameters exceed the safe numerical range'
+       stop 1
+    endif
     if (top_mass.lt.0d0 .or. z_mass.le.0d0 .or. w_mass.le.0d0 .or.&
          higgs_mass.le.0d0) then
        write (*,*) 'Particle masses in the input file must be non-negative (and boson masses positive)'
@@ -162,19 +173,19 @@ contains
        write (*,*) 'Particle widths in the input file must be non-negative'
        stop 1
     endif
-    if (sw.le.0d0 .or. sw.ge.1d0) then
+    if (sw.lt.run_parameter_floor .or. sw.ge.1d0) then
        write (*,*) 'sw must lie strictly between zero and one',sw
        stop 1
     endif
-    if (alphaS_MZ.le.0d0 .or. alphaEW.le.0d0) then
+    if (alphaS_MZ.lt.run_parameter_floor .or. alphaEW.lt.run_parameter_floor) then
        write (*,*) 'alphaS_MZ and alphaEW must be positive',alphaS_MZ,alphaEW
        stop 1
     endif
-    if (sqrts.le.0d0) then
+    if (sqrts.lt.run_parameter_floor) then
        write (*,*) 'sqrts must be positive',sqrts
        stop 1
     endif
-    if (any(alpha_dipole.le.0d0 .or. alpha_dipole.gt.1d0)) then
+    if (any(alpha_dipole.lt.run_parameter_floor .or. alpha_dipole.gt.1d0)) then
        write (*,*) 'alpha_dipole values must satisfy 0 < alpha <= 1',alpha_dipole
        stop 1
     endif
@@ -195,6 +206,15 @@ contains
        stop 1
     endif
   end subroutine validate_run_parameters
+
+  elemental pure logical function numerically_representable_input(value)
+    real(kind=8),intent(in) :: value
+    numerically_representable_input=.false.
+    if (.not.ieee_is_finite(value)) return
+    if (abs(value).gt.run_parameter_limit) return
+    if (value.ne.0d0 .and. abs(value).lt.run_parameter_floor) return
+    numerically_representable_input=.true.
+  end function numerically_representable_input
 
   subroutine write_run_parameters(iunit)
     implicit none

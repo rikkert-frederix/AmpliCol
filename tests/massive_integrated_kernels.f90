@@ -1,15 +1,16 @@
 program massive_integrated_kernels_test
-  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite,ieee_value,ieee_quiet_nan
   use cs_integrated_kernels
   use cs_massive_integrated_kernels
   implicit none
 
   real(kind=8), parameter :: tol=2d-10
-  real(kind=8) :: c(-2:0),cref(-2:0),ell,q2,mi,mk,szone,sx,x,alpha
-  real(kind=8) :: mu2,mu_ren,mu_fac,expected,gz,g1,value
+  real(kind=8) :: c(-2:0),cref(-2:0),ell,q2,mi,mk,szone,sx,x,alpha,alpha_near_one
+  real(kind=8) :: mu2,mu_ren,mu_fac,expected,gz,g1,value,nan
+  real(kind=8),parameter :: scale_factors(2)=[1d-20,1d20]
   type(cs_convolution_kernel) :: kernel,kernel_base
   type(cs_distribution) :: alpha_kernel
-  integer :: info,a,b,split
+  integer :: info,a,b,split,iscale
 
   ell=0.37d0
   q2=1.0d6
@@ -22,12 +23,36 @@ program massive_integrated_kernels_test
   call assert_status(info,'massive-emitter massive-spectator FF')
   call assert_finite(c,'massive-emitter massive-spectator FF')
 
+  ! Roundoff at the alpha=1 boundary must not turn an analytically
+  ! non-negative square-root argument into a rejected phase-space point.
+  alpha_near_one=nearest(1d0,-1d0)
+  call cs_massive_ff_endpoint(cs_parton_q,cs_massive_split_qg,mi,mk,q2,&
+       ell,alpha_near_one,cs_scheme_hv,c,info)
+  call assert_status(info,'massive FF alpha boundary')
+  call assert_finite(c,'massive FF alpha boundary')
+  call cs_massive_ff_endpoint(cs_parton_q,cs_massive_split_qg,0d0,mk,q2,&
+       ell,alpha_near_one,cs_scheme_hv,c,info)
+  call assert_status(info,'massive-spectator quark FF alpha boundary')
+  call assert_finite(c,'massive-spectator quark FF alpha boundary')
+  call cs_massive_ff_endpoint(cs_parton_g,cs_massive_split_gg,0d0,mk,q2,&
+       ell,alpha_near_one,cs_scheme_hv,c,info)
+  call assert_status(info,'massive-spectator gluon FF alpha boundary')
+  call assert_finite(c,'massive-spectator gluon FF alpha boundary')
+
   ! Fixed values independently cross-checked against the original MadDipole
   ! finiteterms.f implementation.
   call cs_massive_ff_endpoint(cs_parton_q,cs_massive_split_qg,mi,mk,q2,&
        ell,0.2d0,cs_scheme_hv,c,info)
   call assert_vector_close(c,[0d0,-3.67979151661138282d0,&
        -20.4243030206532836d0],tol,'massive FF reference value')
+  cref=c
+  do iscale=1,size(scale_factors)
+     call cs_massive_ff_endpoint(cs_parton_q,cs_massive_split_qg,&
+          scale_factors(iscale)*mi,scale_factors(iscale)*mk,&
+          scale_factors(iscale)**2*q2,ell,0.2d0,cs_scheme_hv,c,info)
+     call assert_status(info,'massive FF scale covariance')
+     call assert_vector_close(c,cref,tol,'massive FF scale covariance')
+  enddo
 
   call cs_massive_ff_endpoint(cs_parton_q,cs_massive_split_qg,mi,0d0,q2,&
        ell,0.2d0,cs_scheme_hv,c,info)
@@ -70,19 +95,37 @@ program massive_integrated_kernels_test
   call assert_finite(c,'massive FI endpoint')
   call assert_vector_close(c,[0d0,-2.49718825314288573d0,&
        -8.95900540362021758d0],tol,'massive FI endpoint reference value')
+  cref=c
+  do iscale=1,size(scale_factors)
+     call cs_massive_fi_endpoint(scale_factors(iscale)*mi,&
+          scale_factors(iscale)**2*szone,ell,alpha,c,info)
+     call assert_status(info,'massive FI endpoint scale covariance')
+     call assert_vector_close(c,cref,tol,'massive FI endpoint scale covariance')
+  enddo
   mu2=mi*mi/szone
   expected=cs_cf_lc*(1d0+log(mu2/(1d0+mu2)))
   call assert_close(c(-2),0d0,tol,'massive FI double pole')
   call assert_close(c(-1),expected,tol,'massive FI single pole')
 
   x=0.91d0
-  sx=x*szone
+  ! The fixed Born invariant is x times the real-emission invariant.
+  sx=szone/x
   call cs_massive_fi_convolution(mi,sx,szone,x,alpha,kernel,info)
   call assert_status(info,'massive FI convolution')
   call assert_kernel_finite(kernel,'massive FI convolution')
-  call assert_kernel_close(kernel,[-22.6216787042754035d0,&
+  call assert_kernel_close(kernel,[-19.746497205397716d0,&
        55.4930722920641486d0,55.4930722920641486d0,0d0],tol,&
        'massive FI convolution reference value')
+  kernel_base=kernel
+  do iscale=1,size(scale_factors)
+     call cs_massive_fi_convolution(scale_factors(iscale)*mi,&
+          scale_factors(iscale)**2*sx,scale_factors(iscale)**2*szone,&
+          x,alpha,kernel,info)
+     call assert_status(info,'massive FI convolution scale covariance')
+     call assert_kernel_close(kernel,[kernel_base%regular,kernel_base%plus_z,&
+          kernel_base%plus_one,kernel_base%delta],tol,&
+          'massive FI convolution scale covariance')
+  enddo
   call assert_close(kernel%plus_z,kernel%plus_one,tol,&
        'massive FI plus endpoint')
 
@@ -109,19 +152,30 @@ program massive_integrated_kernels_test
   mu_fac=mu_ren
   call cs_massive_if_convolution(cs_parton_q,cs_parton_q,mk,sx,szone,x,&
        mu_ren,mu_fac,alpha,5,kernel,info)
-  call assert_kernel_close(kernel,[3.01373022844279159d0,&
-       -178.430858117428699d0,-175.268224965703638d0,0d0],tol,&
+  call assert_kernel_close(kernel,[2.0689712525664170d0,&
+       -171.73912070350647d0,-175.268224965703638d0,0d0],tol,&
        'massive IF convolution reference value')
+  kernel_base=kernel
+  do iscale=1,size(scale_factors)
+     call cs_massive_if_convolution(cs_parton_q,cs_parton_q,&
+          scale_factors(iscale)*mk,scale_factors(iscale)**2*sx,&
+          scale_factors(iscale)**2*szone,x,scale_factors(iscale)*mu_ren,&
+          scale_factors(iscale)*mu_fac,alpha,5,kernel,info)
+     call assert_status(info,'massive IF convolution scale covariance')
+     call assert_kernel_close(kernel,[kernel_base%regular,kernel_base%plus_z,&
+          kernel_base%plus_one,kernel_base%delta],tol,&
+          'massive IF convolution scale covariance')
+  enddo
   call cs_massive_if_convolution(cs_parton_q,cs_parton_g,mk,sx,szone,x,&
        mu_ren,mu_fac,alpha,5,kernel,info)
   ! This AmpliCol value includes the quark/gluon initial-state averaging
   ! ratio; integrated_beam subsequently applies the ordered 1/2 history
   ! weight.
-  call assert_kernel_close(kernel,[-10.5641230665211356d0,0d0,0d0,0d0],&
+  call assert_kernel_close(kernel,[-10.008572924824385d0,0d0,0d0,0d0],&
        tol,'massive IF qg reference value')
   call cs_massive_if_convolution(cs_parton_g,cs_parton_q,mk,sx,szone,x,&
        mu_ren,mu_fac,alpha,5,kernel,info)
-  call assert_kernel_close(kernel,[-2.01588338840959258d0,0d0,0d0,0d0],&
+  call assert_kernel_close(kernel,[-1.9271629744640093d0,0d0,0d0,0d0],&
        tol,'massive IF gq reference value')
   call cs_massive_if_endpoint(cs_parton_g,cs_parton_g,mk,szone,ell,&
        cs_scheme_hv,5,c,info)
@@ -129,8 +183,8 @@ program massive_integrated_kernels_test
        1.18179022959928925d0],tol,'massive IF gg endpoint reference value')
   call cs_massive_if_convolution(cs_parton_g,cs_parton_g,mk,sx,szone,x,&
        mu_ren,mu_fac,alpha,5,kernel,info)
-  call assert_kernel_close(kernel,[1.98477442794771974d0,&
-       -356.861716234857397d0,-350.536449931407276d0,0d0],tol,&
+  call assert_kernel_close(kernel,[0.26974149760112098d0,&
+       -343.47824140701294d0,-350.536449931407276d0,0d0],tol,&
        'massive IF gg reference value')
 
   ! The massive IF reference formula contains a non-cancelling diagonal
@@ -193,12 +247,37 @@ program massive_integrated_kernels_test
   value=cs_apply_convolution(kernel,gz,g1)
   expected=(kernel%regular+kernel%plus_z)*gz-kernel%plus_one*g1+kernel%delta*g1
   call assert_close(value,expected,tol,'massive convolution action')
+  kernel=cs_convolution_kernel()
+  kernel%regular=huge(1d0)
+  value=cs_apply_convolution(kernel,2d0,1d0,info)
+  call assert_true(info.eq.-20 .and. value.eq.0d0,&
+       'unsafe massive convolution action rejected before overflow')
 
   call cs_massive_fi_endpoint(0d0,szone,ell,alpha,c,info)
   call assert_true(info.ne.0,'massless input rejected by massive FI kernel')
   call cs_massive_ff_endpoint(cs_parton_q,cs_massive_split_qg,mi,mk,&
        (mi+mk)**2,ell,alpha,cs_scheme_hv,c,info)
   call assert_true(info.ne.0,'FF threshold rejected')
+
+  nan=ieee_value(0d0,ieee_quiet_nan)
+  call cs_massive_ff_endpoint(cs_parton_q,cs_massive_split_qg,nan,mk,q2,&
+       ell,alpha,cs_scheme_hv,c,info)
+  call assert_true(info.eq.-20 .and. all(c.eq.0d0),'non-finite massive FF input rejected')
+  call cs_massive_fi_endpoint(mi,nan,ell,alpha,c,info)
+  call assert_true(info.eq.-20 .and. all(c.eq.0d0),'non-finite massive FI endpoint input rejected')
+  call cs_massive_fi_convolution(mi,sx,szone,nan,alpha,kernel,info)
+  call assert_true(info.eq.-20,'non-finite massive FI convolution input rejected')
+  call cs_massive_if_endpoint(cs_parton_q,cs_parton_q,mk,szone,nan,&
+       cs_scheme_hv,5,c,info)
+  call assert_true(info.eq.-20 .and. all(c.eq.0d0),'non-finite massive IF endpoint input rejected')
+  call cs_massive_if_convolution(cs_parton_q,cs_parton_q,mk,sx,szone,x,&
+       mu_ren,nan,alpha,5,kernel,info)
+  call assert_true(info.eq.-20,'non-finite massive IF convolution input rejected')
+  call cs_massive_if_endpoint(cs_parton_q,cs_parton_q,mk,szone,ell,999,5,c,info)
+  call assert_true(info.ne.0,'unknown massive endpoint scheme rejected')
+  call cs_massive_if_endpoint(cs_parton_q,cs_parton_q,mk,szone,ell,&
+       cs_scheme_hv,7,c,info)
+  call assert_true(info.ne.0,'invalid active-flavour count rejected')
 
   write(*,'(a)') 'massive integrated kernel tests: PASS'
 

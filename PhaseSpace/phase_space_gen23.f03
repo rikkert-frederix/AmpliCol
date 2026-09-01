@@ -2,6 +2,7 @@ module phase_space_gen23_mod
   !  use common
   use phase_space_base
   use run_parameters, only: z_mass,z_width
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   type,extends(phase_space_type),public :: phase_space_gen23
      ! Whether this phase-space instance uses the cut-aware (soft) bounds
@@ -9,6 +10,11 @@ module phase_space_gen23_mod
      ! copied into this component during init so different channels can use
      ! different bound modes in one multichannel integration.
      logical :: use_soft_bounds_as_actual_limits=.false.
+     logical :: include_pdf=.false.
+     real(kind=8),dimension(-1:1) :: ip=[2d0,-1d0,-2d0]
+     real(kind=8),dimension(-1:1) :: ip_shat=[2d0,-1.2d0,-2d0]
+     real(kind=8),dimension(-1:1) :: ip_dt=[2d0,-1d0,-2d0]
+     real(kind=8),dimension(-1:1) :: ip_mass=[2d0,-0.5d0,-2d0]
    contains
      procedure :: init => gen23_init
      procedure :: generate_momenta => gen23_generate_momenta
@@ -17,16 +23,15 @@ module phase_space_gen23_mod
      final :: gen23_finalize
   end type phase_space_gen23
   private
-  logical :: includePDF
   ! TECHNIAL PARAMETERS
   ! vebose:
   logical,parameter :: verbose=.true.
   logical,parameter,public :: debug=.false.
   ! importance sampling (0d0=flat transformation; -1d0=1/x transformation):
-  real(kind=8),dimension(-1:1) :: ip,ip_shat,ip_dt,ip_mass
   real(kind=8),dimension(-1:1),parameter :: ip_flat=[0d0,0d0,0d0]
   ! tiny parameter cutoff to prevent/reduce numerical instabilities:
-  real(kind=8),parameter :: vtiny=1d-12,tiny=1d-8,tiny_kin=1d-30
+  real(kind=8),parameter :: vtiny=1d-12,tiny=1d-8
+  real(kind=8),parameter :: tiny_kin=128d0*epsilon(1d0)
   real(kind=8),parameter :: pi=3.1415926535897932d0
   logical,parameter :: use_t_channel_at_start=.true.
   ! If true, the cut-aware bounds are used as the actual integration limits.
@@ -46,6 +51,23 @@ contains
     real(kind=8),intent(in) :: x
     sqrt0=sqrt(max(x,0d0))
   end function sqrt0
+
+  subroutine longitudinal_rapidity(p,y,valid)
+    implicit none
+    real(kind=8),intent(in) :: p(0:3)
+    real(kind=8),intent(out) :: y
+    logical,intent(out) :: valid
+    real(kind=8) :: lightcone_plus,lightcone_minus
+    y=0d0
+    lightcone_plus=p(0)+p(3)
+    lightcone_minus=p(0)-p(3)
+    valid=.false.
+    if (.not.ieee_is_finite(lightcone_plus) .or. .not.ieee_is_finite(lightcone_minus)) return
+    if (lightcone_plus.le.0d0 .or. lightcone_minus.le.0d0) return
+    y=(log(lightcone_plus)-log(lightcone_minus))/2d0
+    valid=ieee_is_finite(y)
+  end subroutine longitudinal_rapidity
+
   subroutine gen23_init(this,sqrts,n,m,o,pt_cut,rap_cut,dr_cut,sqrt_s_min,t_chan,include_pdf,flat)
     ! Phase-space initialisation routines.
     implicit none
@@ -76,8 +98,55 @@ contains
     ! Should we include a PDF set? Currently, only the NNPDF2.3 NLO QED is available.
     logical,intent(in) :: include_pdf
     logical,intent(in),optional :: flat
-    integer(kind=4) :: i,j,ndim_extra,cnt1,cnt2
+    integer(kind=4) :: i,j,ndim_extra,cnt1,cnt2,allocation_status
     integer(kind=4),dimension(2) :: iset
+    character(len=256) :: allocation_message
+    if (n.lt.4) then
+       write (*,*) 'ERROR in gen23_init() -- at least two final-state particles are required'
+       stop 1
+    endif
+    if (n.gt.max_bitmask_particles) then
+       write (*,*) 'ERROR in gen23_init() -- particle multiplicity exceeds bit-mask workspace limit:',&
+            n,max_bitmask_particles
+       stop 1
+    endif
+    if (.not.ieee_is_finite(sqrts)) then
+       write (*,*) 'ERROR in gen23_init() -- invalid collider energy:',sqrts
+       stop 1
+    endif
+    if (sqrts.le.0d0) then
+       write (*,*) 'ERROR in gen23_init() -- invalid collider energy:',sqrts
+       stop 1
+    endif
+    if (sqrts.gt.phase_space_momentum_limit) then
+       write (*,*) 'ERROR in gen23_init() -- collider energy exceeds numerical range:',sqrts
+       stop 1
+    endif
+    do i=1,n
+       if (count(o.eq.i).ne.1) then
+          write (*,*) 'ERROR in gen23_init() -- colour order is not a permutation:',o
+          stop 1
+       endif
+       if (.not.ieee_is_finite(m(i))) then
+          write (*,*) 'ERROR in gen23_init() -- invalid external mass:',i,m(i)
+          stop 1
+       endif
+       if (m(i).lt.0d0) then
+          write (*,*) 'ERROR in gen23_init() -- invalid external mass:',i,m(i)
+          stop 1
+       endif
+    enddo
+    if (any(.not.ieee_is_finite(pt_cut)) .or. any(.not.ieee_is_finite(rap_cut)) .or. &
+         any(.not.ieee_is_finite(dr_cut)) .or. any(.not.ieee_is_finite(sqrt_s_min))) then
+       write (*,*) 'ERROR in gen23_init() -- non-finite phase-space cut'
+       stop 1
+    endif
+    if (max(maxval(abs(m)),maxval(abs(pt_cut)),maxval(abs(sqrt_s_min))).gt. &
+         phase_space_momentum_limit) then
+       write (*,*) 'ERROR in gen23_init() -- mass or dimensionful cut exceeds numerical range'
+       stop 1
+    endif
+    call gen23_cleanup(this)
     this%use_soft_bounds_as_actual_limits=use_soft_bounds_as_actual_limits
     this%can_invert_momenta=.true.
     this%sqrtshat=sqrts
@@ -88,25 +157,35 @@ contains
        write (99,*) 'Total available energy, sqrt(s-hat) =',this%sqrtshat
        write (99,*) 'Use the simple t-channel?',this%t_channel
     endif
-    includePDF=include_pdf
+    this%include_pdf=include_pdf
     this%next=n
     this%ndim=3*(this%next-2)-4
-    if (includePDF) this%ndim=this%ndim+2 ! the two Bjorken x's
-    allocate(this%order(this%next))
-    allocate(this%invm(maskr(this%next)))
-    allocate(this%invm_min(maskr(this%next),1:2))
-    allocate(this%ETmin(maskr(this%next),1:2))
-    allocate(this%invm_max(maskr(this%next),1:2))
-    allocate(this%pp(0:3,0:maskr(this%next)))
-    this%pp(0:3,0:maskr(this%next))=0d0
-    allocate(this%p(0:3,this%next))
-    allocate(this%x(this%ndim))
-    allocate(this%sets(0:this%next-2,2))
-    allocate(this%ptcut(1:this%next))
-    allocate(this%drcut(maskr(this%next)))
-    allocate(this%sqrt_s_min(1:this%next,1:this%next))
-    ! masses of external particles
+    if (this%include_pdf) this%ndim=this%ndim+2 ! the two Bjorken x's
+    allocate(this%order(this%next),this%invm(maskr(this%next)),&
+         this%invm_min(maskr(this%next),1:2),this%ETmin(maskr(this%next),1:2),&
+         this%invm_max(maskr(this%next),1:2),this%pp(0:3,0:maskr(this%next)),&
+         this%p(0:3,this%next),this%masses(this%next),this%x(this%ndim),&
+         this%sets(0:this%next-2,2),this%ptcut(1:this%next),&
+         this%drcut(maskr(this%next)),&
+         this%sqrt_s_min(1:this%next,1:this%next),stat=allocation_status,&
+         errmsg=allocation_message)
+    if (allocation_status.ne.0) then
+       call gen23_cleanup(this)
+       write (*,*) 'ERROR in gen23_init() -- unable to allocate phase-space workspace:',&
+            trim(allocation_message)
+       stop 1
+    endif
+    this%order=0
     this%invm=0d0
+    this%invm_min=0d0
+    this%ETmin=0d0
+    this%invm_max=0d0
+    this%pp(0:3,0:maskr(this%next))=0d0
+    this%p=0d0
+    this%masses=m
+    this%x=0d0
+    this%sets=0
+    ! masses of external particles
     do i=1,n
        if ((i.eq.1 .or. i.eq.2) .and. m(i).ne.0d0) then
           write (*,*) 'ERROR in gen23_init() -- ', &
@@ -218,24 +297,24 @@ contains
     endif
     if (present(flat)) then
        if (flat) then
-          ip=ip_flat
-          ip_shat=ip_flat
-          ip_dt=ip_flat
-          ip_mass=ip_flat
+          this%ip=ip_flat
+          this%ip_shat=ip_flat
+          this%ip_dt=ip_flat
+          this%ip_mass=ip_flat
        else
-          ip=[2d0,-1d0,-2d0]
-          ip_shat=[2d0,-1.2d0,-2d0]
-          ip_dt=[2d0,-1d0,-2d0]
-          ip_mass=[2d0,-0.5d0,-2d0]
+          this%ip=[2d0,-1d0,-2d0]
+          this%ip_shat=[2d0,-1.2d0,-2d0]
+          this%ip_dt=[2d0,-1d0,-2d0]
+          this%ip_mass=[2d0,-0.5d0,-2d0]
        endif
     else
-       ip=[2d0,-1d0,-2d0]
-       ip_shat=[2d0,-1.2d0,-2d0]
-       ip_dt=[2d0,-1d0,-2d0]
-       ip_mass=[2d0,-0.5d0,-2d0]
+       this%ip=[2d0,-1d0,-2d0]
+       this%ip_shat=[2d0,-1.2d0,-2d0]
+       this%ip_dt=[2d0,-1d0,-2d0]
+       this%ip_mass=[2d0,-0.5d0,-2d0]
     endif
     if (verbose) then
-       write (99,*) "Power in importance sampling:",ip
+       write (99,*) "Power in importance sampling:",this%ip
     endif
   end subroutine gen23_init
 
@@ -339,21 +418,26 @@ contains
     var_max_eff(2)=var_max_eff(1)
   end subroutine select_integration_bounds
 
-  subroutine random_to_var_inputs(power_in,var_min,var_max,power,vmin,vmax,use_soft_bounds)
+  subroutine random_to_var_inputs(power_in,var_min,var_max,power,vmin,vmax,use_soft_bounds,valid)
     implicit none
     real(kind=8),dimension(-1:1),intent(in) :: power_in
     real(kind=8),dimension(1:2),intent(in) :: var_min,var_max
     real(kind=8),dimension(3),intent(out) :: power,vmin,vmax
     logical,intent(in) :: use_soft_bounds
+    logical,intent(out) :: valid
     real(kind=8),dimension(1:2) :: varmin,varmax,var_min_loc,var_max_loc
-    real(kind=8),parameter :: epsilon=1d-8
+    real(kind=8) :: range_scale,range_tolerance
+    valid=.false.
+    power=0d0
+    vmin=0d0
+    vmax=0d0
+    if (any(.not.ieee_is_finite(power_in)) .or. any(.not.ieee_is_finite(var_min)) .or. &
+         any(.not.ieee_is_finite(var_max))) return
     call select_integration_bounds(var_min,var_max,var_min_loc,var_max_loc, &
          use_soft_bounds)
-    if (var_min_loc(1).gt.var_max_loc(1)) then
-       write (*,*) 'Incorrect hard range in random_to_var_inputs'
-       write (*,*) var_min, var_max
-       stop 1
-    endif
+    range_scale=max(maxval(abs(var_min_loc)),maxval(abs(var_max_loc)))
+    range_tolerance=128d0*epsilon(1d0)*max(spacing(0d0),range_scale)
+    if (var_min_loc(1).gt.var_max_loc(1)) return
     var_min_loc(2)=max(var_min_loc(2),var_min_loc(1))
     var_max_loc(2)=min(var_max_loc(2),var_max_loc(1))
     if (var_min_loc(2).gt.var_max_loc(2)) then
@@ -372,34 +456,31 @@ contains
        varmin=var_min_loc
        varmax=var_max_loc
     endif
-    if (varmin(1).gt.varmax(1)) then
-       write (*,*) 'Incorrect transformed hard range in random_to_var_inputs'
-       write (*,*) var_min, var_max, varmin, varmax
-       stop 1
-    endif
+    if (varmin(1).gt.varmax(1)) return
     if (varmin(2).lt.varmin(1)) varmin(2)=varmin(1)
     if (varmax(2).gt.varmax(1)) varmax(2)=varmax(1)
     vmin(1)=varmin(1)
-    if (varmin(2)-vmin(1).lt.epsilon) then
+    if (varmin(2)-vmin(1).lt.range_tolerance) then
        vmax(1)=vmin(1)
     else
        vmax(1)=min(varmin(2),varmax(1))
     endif
     vmin(2)=vmax(1)
-    if (varmax(2)-vmin(2).lt.epsilon) then
+    if (varmax(2)-vmin(2).lt.range_tolerance) then
        vmax(2)=vmin(2)
     else
        vmax(2)=varmax(2)
     endif
     vmin(3)=vmax(2)
-    if (varmax(1)-vmin(3).lt.epsilon) then
+    if (varmax(1)-vmin(3).lt.range_tolerance) then
        vmax(3)=vmin(3)
     else
        vmax(3)=varmax(1)
     endif
-    where (vmin(1:3).le.epsilon .and. power(1:3).le.-1d0)
+    where (vmin(1:3).le.spacing(0d0) .and. power(1:3).le.-1d0)
        power(1:3)=0d0
     end where
+    valid=.true.
   end subroutine random_to_var_inputs
 
   subroutine random_to_var_weights(power,vmin,vmax,q)
@@ -407,33 +488,108 @@ contains
     real(kind=8),dimension(3),intent(in) :: power,vmin,vmax
     real(kind=8),dimension(3),intent(out) :: q
     integer(kind=4) :: i
-    real(kind=8),dimension(3) :: inte,coef
-    real(kind=8) :: total
-    coef=1d0
-    if (vmax(1).gt.vmin(1) .and. vmin(2).gt.0d0) coef(1)=vmin(2)**(power(2)-power(1))
-    if (vmax(3).gt.vmin(3) .and. vmin(3).gt.0d0) coef(3)=vmin(3)**(power(2)-power(3))
+    real(kind=8),dimension(3) :: log_inte,scaled_inte
+    real(kind=8) :: total,max_log
+    logical,dimension(3) :: active
+    logical :: valid_integral
+
+    q=0d0
+    log_inte=-huge(1d0)
+    active=.false.
     do i=1,3
-       inte(i)=coef(i)*power_integral(vmin(i),vmax(i),power(i))
+       if (vmax(i).le.vmin(i)) cycle
+       call log_power_integral(vmin(i),vmax(i),power(i),log_inte(i),valid_integral)
+       if (.not.valid_integral) return
+       active(i)=.true.
     enddo
-    total=sum(inte(1:3))
-    if (total.le.0d0) then
-       q=0d0
-       return
+    if (.not.any(active)) return
+
+    ! Match the three power laws continuously at their shared boundaries.
+    ! Work in logarithms: the former direct powers overflowed for perfectly
+    ! representable invariant ranges and made the probabilities depend on the
+    ! arbitrary energy unit used for those invariants.
+    if (active(1) .and. power(2).ne.power(1)) then
+       if (vmin(2).le.0d0) return
+       log_inte(1)=log_inte(1)+(power(2)-power(1))*log(vmin(2))
     endif
-    q(1:3)=inte(1:3)/total
+    if (active(3) .and. power(2).ne.power(3)) then
+       if (vmin(3).le.0d0) return
+       log_inte(3)=log_inte(3)+(power(2)-power(3))*log(vmin(3))
+    endif
+    if (any(active .and. .not.ieee_is_finite(log_inte))) return
+    max_log=maxval(log_inte,mask=active)
+    scaled_inte=0d0
+    where (active) scaled_inte=exp(log_inte-max_log)
+    total=sum(scaled_inte)
+    if (.not.ieee_is_finite(total)) return
+    if (total.le.0d0) return
+    q=scaled_inte/total
   end subroutine random_to_var_weights
 
-  real(kind=8) function power_integral(lo,hi,p)
+  subroutine log_power_integral(lo,hi,p,log_integral,valid)
+    ! Logarithm of integral_lo^hi v**p dv without forming a dimensionful
+    ! power.  Scaling both bounds by c therefore adds (p+1)*log(c), as it
+    ! should, while the calculation remains finite over the double range.
     implicit none
     real(kind=8),intent(in) :: lo,hi,p
-    if (hi.le.lo) then
-       power_integral=0d0
-    elseif (abs(p+1d0).lt.1d-12) then
-       power_integral=log(hi/lo)
-    else
-       power_integral=(hi**(p+1d0)-lo**(p+1d0))/(p+1d0)
+    real(kind=8),intent(out) :: log_integral
+    logical,intent(out) :: valid
+    real(kind=8) :: exponent,log_ratio,difference
+
+    valid=.false.
+    log_integral=0d0
+    if (.not.ieee_is_finite(lo) .or. .not.ieee_is_finite(hi) .or. &
+         .not.ieee_is_finite(p)) return
+    if (hi.le.lo) return
+    if (p.eq.0d0) then
+       difference=hi-lo
+       if (.not.ieee_is_finite(difference)) return
+       if (difference.le.0d0) return
+       log_integral=log(difference)
+       valid=ieee_is_finite(log_integral)
+       return
     endif
-  end function power_integral
+    if (hi.le.0d0) return
+    exponent=p+1d0
+    if (abs(exponent).lt.1d-12) then
+       if (lo.le.0d0) return
+       difference=log(hi)-log(lo)
+       if (.not.ieee_is_finite(difference)) return
+       if (difference.le.0d0) return
+       log_integral=log(difference)
+    elseif (exponent.gt.0d0) then
+       if (lo.lt.0d0) return
+       if (lo.eq.0d0) then
+          difference=1d0
+       else
+          log_ratio=log(lo)-log(hi)
+          difference=one_minus_exp(exponent*log_ratio)
+       endif
+       if (.not.ieee_is_finite(difference)) return
+       if (difference.le.0d0) return
+       log_integral=exponent*log(hi)+log(difference)-log(exponent)
+    else
+       if (lo.le.0d0) return
+       log_ratio=log(hi)-log(lo)
+       difference=one_minus_exp(exponent*log_ratio)
+       if (.not.ieee_is_finite(difference)) return
+       if (difference.le.0d0) return
+       log_integral=exponent*log(lo)+log(difference)-log(-exponent)
+    endif
+    valid=ieee_is_finite(log_integral)
+  end subroutine log_power_integral
+
+  pure real(kind=8) function one_minus_exp(x)
+    ! Stable 1-exp(x) for the non-positive arguments used above.  Avoid
+    ! relying on the non-standard EXPM1 extension offered by some compilers.
+    implicit none
+    real(kind=8),intent(in) :: x
+    if (abs(x).lt.1d-5) then
+       one_minus_exp=-x*(1d0+x*(0.5d0+x*(1d0/6d0+x*(1d0/24d0+x/120d0))))
+    else
+       one_minus_exp=1d0-exp(x)
+    endif
+  end function one_minus_exp
 
 
   
@@ -459,6 +615,19 @@ contains
     if (allocated(this%ycut)) deallocate(this%ycut)
     if (allocated(this%drcut)) deallocate(this%drcut)
     if (allocated(this%sqrt_s_min)) deallocate(this%sqrt_s_min)
+    this%jac=0d0
+    this%xbjrk=0d0
+    this%s0=0d0
+    this%tot_mass=0d0
+    this%sqrtshat=0d0
+    this%sqrts=0d0
+    this%ndim=0
+    this%next=0
+    this%ndim_extra=0
+    this%t_channel=.false.
+    this%can_invert_momenta=.false.
+    this%include_pdf=.false.
+    this%use_soft_bounds_as_actual_limits=.false.
   end subroutine gen23_cleanup
 
   subroutine gen23_generate_momenta(this,ps)
@@ -468,8 +637,21 @@ contains
     type(psv),intent(inout) :: ps
     integer(kind=4) :: i,ix,ix_e
     real(kind=8) :: ycm,sqrtshat
+    real(kind=8),parameter :: random_tolerance=4096d0*epsilon(1d0)
     real(kind=8),dimension(0:3,0:maskr(this%next)) :: pp
     real(kind=8),dimension(maskr(this%next)) :: invm
+    ps%jac=-47d0
+    if (.not.allocated(ps%p) .or. .not.allocated(ps%x)) return
+    if (size(ps%p,1).ne.4 .or. size(ps%p,2).ne.this%next .or. &
+         lbound(ps%p,1).ne.0 .or. &
+         size(ps%x).lt.this%ndim+this%ndim_extra) return
+    ps%p=0d0
+    ps%xbjrk=1d0
+    if (any(.not.ieee_is_finite(ps%x(1:this%ndim+this%ndim_extra)))) return
+    if (any(ps%x(1:this%ndim+this%ndim_extra).lt.-random_tolerance) .or. &
+         any(ps%x(1:this%ndim+this%ndim_extra).gt.1d0+random_tolerance)) return
+    ps%x(1:this%ndim+this%ndim_extra)=max(0d0, &
+         min(1d0,ps%x(1:this%ndim+this%ndim_extra)))
     pp=0d0
     ps%jac=1d0
     ix=0
@@ -480,14 +662,18 @@ contains
 !!$       call setup_PS_cuts(this)
 
     invm=this%invm
-    if (includePDF) then
+    if (this%include_pdf) then
        call generate_initial_state
-       if (ps%jac.le.0d0) return
+       if (bad_forward_jac()) return
     else
        sqrtshat=this%sqrts
     endif
     call generate_momenta
-    if (ps%jac.le.0d0) return
+    if (bad_forward_jac()) return
+    if (ix.ne.this%ndim .or. ix_e.gt.size(ps%x) .or. .not.ieee_is_finite(ps%jac)) then
+       ps%jac=-47d0
+       return
+    endif
 !!$       this%next=this%next+1
 !!$    if (ps%jac.lt.0d0) return
 !!$
@@ -497,7 +683,7 @@ contains
        if (debug) call test_momenta
 
     do i=1,this%next
-       if (includePDF) then
+       if (this%include_pdf) then
           ! Note: 'ycm' is the rapidity needed to go from lab to CM
           ! frame. Hence, here we boost from CM to lab frame with '-ycm'
           call boostz(pp(0:3,ibset(0,i-1)),-ycm,ps%p(0:3,i))
@@ -505,7 +691,39 @@ contains
           ps%p(0:3,i)=pp(0:3,ibset(0,i-1))
        endif
     enddo
+    if (.not.generated_momenta_are_valid(ps%p,this%masses,ps%xbjrk,this%include_pdf)) then
+       ps%p=0d0
+       ps%jac=-48d0
+    endif
   contains
+    logical function bad_forward_jac()
+      implicit none
+      if (.not.ieee_is_finite(ps%jac)) then
+         ps%jac=-47d0
+         bad_forward_jac=.true.
+         return
+      endif
+      bad_forward_jac=ps%jac.le.0d0
+    end function bad_forward_jac
+
+    logical function update_forward_jac(numerator,denominator)
+      implicit none
+      real(kind=8),intent(in) :: numerator,denominator
+      real(kind=8) :: updated_jac
+      update_forward_jac=.false.
+      if (.not.ieee_is_finite(numerator) .or. .not.ieee_is_finite(denominator) .or. &
+           numerator.le.0d0 .or. denominator.le.0d0) then
+         ps%jac=-47d0
+         return
+      endif
+      if (.not.safe_phase_space_scaled_ratio(ps%jac,numerator,denominator,updated_jac)) then
+         ps%jac=-47d0
+         return
+      endif
+      ps%jac=updated_jac
+      update_forward_jac=.true.
+    end function update_forward_jac
+
     subroutine generate_bw_mass(ires)
       implicit none
       integer,intent(in) :: ires
@@ -519,9 +737,9 @@ contains
       B=atan((qmass-smax/qmass)/qwidth)
       ix=ix+1
       call random_to_var(ps%x(ix),ip_flat,B,A,y,ps%jac)
-      if (ps%jac.le.0d0) return
+      if (bad_forward_jac()) return
       this%invm(ibset(0,ires-1))=qmass*(qmass-qwidth*tan(y))
-      ps%jac=ps%jac*qmass*qwidth/(cos(y))**2
+      if (.not.update_forward_jac(qmass*qwidth,cos(y)**2)) return
     end subroutine generate_bw_mass
     subroutine decay_bw(ires,id1,id2)
       ! decay the BW
@@ -558,9 +776,9 @@ contains
       implicit none
       real(kind=8) :: tau
       call generate_tau(tau)
-      if (ps%jac.le.0d0) return
+      if (bad_forward_jac()) return
       call generate_y(tau)
-      if (ps%jac.le.0d0) return
+      if (bad_forward_jac()) return
       sqrtshat=sqrt(tau)*this%sqrts
       ps%xbjrk(1)=sqrt(tau)*exp(ycm)
       ps%xbjrk(2)=sqrt(tau)*exp(-ycm)
@@ -575,10 +793,10 @@ contains
       smin(1:2)=max(this%invm_min(maskr(this%next)-3,1:2),this%ETmin(maskr(this%next)-3,1:2)**2)
       smax(1:2)=this%sqrts**2
       ix=ix+1
-      call random_to_var(ps%x(ix),ip_shat,smin,smax,shat,ps%jac)
-      if (ps%jac.le.0d0) return
+      call random_to_var(ps%x(ix),this%ip_shat,smin,smax,shat,ps%jac)
+      if (bad_forward_jac()) return
       tau=shat/smax(1)
-      ps%jac=ps%jac/smax(1)
+      if (.not.update_forward_jac(1d0,smax(1))) return
     end subroutine generate_tau
 
     subroutine generate_y(tau)
@@ -589,7 +807,7 @@ contains
       ymax(1:2)=-log(tau)/2d0
       ix=ix+1
       call random_to_var(ps%x(ix),ip_flat,ymin,ymax,ycm,ps%jac)
-      if (ps%jac.le.0d0) return
+      if (bad_forward_jac()) return
     end subroutine generate_y
 
     subroutine generate_momenta
@@ -620,28 +838,28 @@ contains
          else
             call gens_one_step(set(2),set(1))
          endif
-         if (ps%jac.le.0d0) return
+         if (bad_forward_jac()) return
          pp(0:3,set(2)+2)=pp(0:3,1)-pp(0:3,set(1))
          invm(set(2)+2)=dot(pp(0:3,set(2)+2),pp(0:3,set(2)+2))
       elseif (popcnt(set(1)).eq.1 .and. popcnt(set(2)).gt.1) then
          if (debug) write (*,*) 'special double t-channel (1)'&
               &,popcnt(this%sets(0,1)),popcnt(this%sets(0,2))
          call double_t(set(1),set(2),1,2)
-         if (ps%jac.le.0d0) return
+         if (bad_forward_jac()) return
          pp(0:3,set(2)+2)=pp(0:3,1)-pp(0:3,set(1))
          invm(set(2)+2)=dot(pp(0:3,set(2)+2),pp(0:3,set(2)+2))
       elseif (popcnt(set(1)).gt.1 .and. popcnt(set(2)).eq.1) then
          if (debug) write (*,*) 'special double t-channel (2)'&
               &,popcnt(this%sets(0,1)),popcnt(this%sets(0,2))
          call double_t(set(2),set(1),1,2)
-         if (ps%jac.le.0d0) return
+         if (bad_forward_jac()) return
          pp(0:3,set(1)+1)=pp(0:3,2)-pp(0:3,set(2))
          invm(set(1)+1)=dot(pp(0:3,set(1)+1),pp(0:3,set(1)+1))
       elseif (popcnt(set(1)).eq.1 .and. popcnt(set(2)).eq.1) then
          if (debug) write (*,*) '2->2 scattering with one particle in each set'&
               &,popcnt(this%sets(0,1)),popcnt(this%sets(0,2))
          call gent_one_step(set(2),set(1),1)
-         if (ps%jac.le.0d0) return
+         if (bad_forward_jac()) return
          pp(0:3,set(2)+2)=pp(0:3,1)-pp(0:3,set(1))
          invm(set(2)+2)=dot(pp(0:3,set(2)+2),pp(0:3,set(2)+2))
       endif
@@ -655,7 +873,7 @@ contains
             if (debug) write (*,*) 'At least 3 particles in a set',&
                  & popcnt(this%sets(0,i)),popcnt(this%sets(0,3-i))
             call gent_one_step(set(i),inext,i)
-            if (ps%jac.le.0d0) return
+            if (bad_forward_jac()) return
             pp(0:3,(3-i)+set(i)+inext)=pp(0:3,i)-pp(0:3,this%sets(0,(3-i)))
             invm((3-i)+set(i)+inext)=dot(pp(0:3,(3-i)+set(i)+inext),pp(0:3,(3-i)+set(i)+inext))
             pp(0:3,(3-i)+set(i))=pp(0:3,i)-pp(0:3,this%sets(0,(3-i)))-pp(0:3,inext)
@@ -670,7 +888,7 @@ contains
                else
                   call gen23_one_step(inext,set(i),3-i,im1)
                endif
-               if (ps%jac.le.0d0) return
+               if (bad_forward_jac()) return
             enddo
             inext=ibset(0,this%sets(j,i)-1)
             im1=ibset(0,this%sets(j-1,i)-1)
@@ -680,7 +898,7 @@ contains
             else
                call gen23_one_step(inext,set(i),3-i,im1)
             endif
-            if (ps%jac.le.0d0) return
+            if (bad_forward_jac()) return
          elseif (popcnt(set(i)).eq.1 .and. popcnt(this%sets(0,3-i)).ne.0) then
             ! Exactly 2 particles in a set (and the other set contains at least one)
             if (debug) write (*,*) 'Exactly 2 particles in a set (and ', &
@@ -696,27 +914,28 @@ contains
             else
                call gen23_one_step(set(i),inext,i,im1)
             endif
-            if (ps%jac.le.0d0) return
+            if (bad_forward_jac()) return
          elseif (popcnt(set(i)).eq.1 .and. popcnt(this%sets(0,3-i)).eq.0) then
             ! Exactly 2 particles in a set (and the other set contains none)
             if (debug) write (*,*) 'Exactly 2 particles in a set (and ', &
                  & 'the other set contains none)', &
                  & popcnt(this%sets(0,i)),popcnt(this%sets(0,3-i))
             call gent_one_step(set(i),inext,i)
-            if (ps%jac.le.0d0) return
+            if (bad_forward_jac()) return
          else
             write (*,*) 'Inconsistent sets'
             write (*,*) i,':',this%sets(:,i)
             write (*,*) 3-i,':',this%sets(:,3-i)
-            stop 1
+            ps%jac=-47d0
+            return
          endif
          ! We need to get the momentum of the final particle of the set.
          pp(0:3,set(i))=pp(0:3,set(i)+inext+(3-i))+pp(0:3,(3-i))-pp(0:3,inext)
       enddo
       ! Add factors of 2*pi
-      ps%jac=ps%jac/((2d0*pi)**(3*(this%next-2)-4))
+      if (.not.update_forward_jac(1d0,(2d0*pi)**(3*(this%next-2)-4))) return
       ! Add flux factor
-      ps%jac=ps%jac/(2d0*sqrtshat**2)
+      if (.not.update_forward_jac(1d0,2d0*sqrtshat**2)) return
     end subroutine generate_momenta
 
     subroutine test_momenta
@@ -759,13 +978,14 @@ contains
       ! back-to-back incoming particles. The mass of i is fixed.
       implicit none
       integer(kind=4),intent(in) :: i,ir,ia,ib
-      real(kind=8) :: phi,pt2,mass_tol,den_t,den_ir,den_scale
+      real(kind=8) :: phi,pt2,mass_tol,den_t,den_ir,den_scale,jac_den,jac_scale
       real(kind=8),dimension(1:2) :: tmin,tmax,pzmax,Eimax,yr
       logical :: soft_ok,massless_collinear_limit
       if (popcnt(i).ne.1 .or. popcnt(ir).le.1) then
          write (*,*) 'Subroutine only for i is a single particle '&
               //'and ir is more than 1',i,ir,popcnt(i),popcnt(ir)
-         stop 1
+         ps%jac=-47d0
+         return
       endif
       soft_ok=.true.
       yr(1:2)=lambda(invm(ia+ib),invm(i),this%invm_min(ir,1:2))
@@ -818,14 +1038,14 @@ contains
          return
       endif
       ix=ix+1
-      call random_to_var(ps%x(ix),ip_dt,tmin,tmax,invm(i+ia),ps%jac)
-      if (ps%jac.le.0d0) return
+      call random_to_var(ps%x(ix),this%ip_dt,tmin,tmax,invm(i+ia),ps%jac)
+      if (bad_forward_jac()) return
       if (debug) then
          write (*,*) 'dt- i+ia',i+ia,invm(i+ia),tmin,tmax
       endif
       den_t=invm(i)-invm(i+ia)
       den_ir=sqrtshat**2+invm(i+ia)-invm(i)
-      den_scale=max(1d0,abs(invm(i)),abs(invm(i+ia)),sqrtshat**2)
+      den_scale=max(spacing(0d0),abs(invm(i)),abs(invm(i+ia)),sqrtshat**2)
       massless_collinear_limit=abs(den_t).le.vtiny*den_scale .and. &
            abs(invm(i)).le.vtiny*den_scale .and. &
            this%ETmin(i,1).le.vtiny*sqrt(den_scale)
@@ -859,25 +1079,23 @@ contains
          return
       endif
       ix=ix+1
-      call random_to_var(ps%x(ix),ip_dt,tmin,tmax,invm(i+ib),ps%jac)
-      if (ps%jac.le.0d0) return
+      call random_to_var(ps%x(ix),this%ip_dt,tmin,tmax,invm(i+ib),ps%jac)
+      if (bad_forward_jac()) return
       if (debug) then
          write (*,*) 'dt- i+ib',i+ib,invm(i+ib),tmin,tmax
       endif
       ix=ix+1
       call random_to_var(ps%x(ix),ip_flat,[0d0,0d0],[2d0*pi,2d0*pi],phi,ps%jac)
-      if (ps%jac.le.0d0) return
+      if (bad_forward_jac()) return
       if (debug) then
          write (*,*) 'dt- phi',phi
       endif
       pt2=invm(i+ia)*invm(i+ib)/invm(ia+ib)+ &
            & invm(i)**2/invm(ia+ib)-(invm(i+ia)+invm(i+ib))*invm(i)/invm(ia+ib)-invm(i)
-      if (pt2/invm(ia+ib).lt.-vtiny) then
-         write (*,*) "ERROR in double_t: pt2 should be larger than zero", &
-              & pt2,invm(i+ia),invm(i+ib),invm(ia+ib),invm(i)
-         write (*,*) invm(i+ia)*invm(i+ib)/invm(ia+ib), &
-              & invm(i)**2/invm(ia+ib),(invm(i+ia)+invm(i+ib))*invm(i)/invm(ia+ib),invm(i)
-         stop 1
+      if (pt2.lt.-vtiny*max(spacing(0d0),abs(invm(ia+ib)))) then
+         ps%jac=-3d0
+         if (debug) write (*,*) "rejecting double_t point with negative pt2",pt2
+         return
       elseif (pt2.lt.0d0) then
          pt2=0d0
       endif
@@ -887,18 +1105,23 @@ contains
       pp(3,i)=(invm(i+ia)-invm(i+ib))/(2d0*sqrtshat)
       pp(0,ir)=sqrtshat-pp(0,i)
       pp(1:3,ir)=-pp(1:3,i)
-      invm(ir)=dot(pp(0,ir),pp(0,ir))
-      mass_tol=vtiny*max(1d0,abs(invm(ia+ib)),abs(invm(i+ia)),abs(invm(i+ib)),abs(invm(i)))
+      invm(ir)=dot(pp(0:3,ir),pp(0:3,ir))
+      mass_tol=vtiny*max(spacing(0d0),abs(invm(ia+ib)),abs(invm(i+ia)), &
+           abs(invm(i+ib)),abs(invm(i)))
       if (invm(ir).lt.-mass_tol) then
-         write (*,*) "ERROR in double_t: invariant mass of system", &
-              & " must be non-negative",ir,invm(ir),i
-         write (*,*) invm(ir),invm(ia+ib)+invm(i+ia)+invm(i+ib)-invm(i)&
-              &,invm(ia+ib),invm(i +ia),invm(i+ib),invm(i)
-         stop
+         ps%jac=-4d0
+         if (debug) write (*,*) "rejecting double_t point with negative remainder mass",ir,invm(ir),i
+         return
       elseif (invm(ir).lt.0d0) then
          invm(ir)=0d0
       endif
-      ps%jac = ps%jac/(4d0*sqrt0(lambda(invm(ir+i),0d0,0d0)))
+      jac_den=sqrt0(lambda(invm(ir+i),0d0,0d0))
+      jac_scale=max(spacing(0d0),abs(invm(ir+i)))
+      if (jac_den.le.tiny_kin*jac_scale) then
+         ps%jac=-4d0
+         return
+      endif
+      if (.not.update_forward_jac(1d0,4d0*jac_den)) return
     end subroutine double_t
 
     subroutine gen23_one_step(i,ir,ib,im1)
@@ -909,9 +1132,11 @@ contains
       ! doi:10.1103/PhysRev.187.2008.  Assumes massless incoming particles.
       implicit none
       integer(kind=4),intent(in) :: im1,i,ir,ib
+      integer :: gent_status
       real(kind=8) :: tmin_S,tmax_S,smin_S,smax_S,phi1,phi2,gram4,V,sqrtGG,y,phi_rot,delta_ir,delta_scale
       real(kind=8),dimension(1:2) :: shatmin,shatmax,tmin,tmax,etminir,etmini,base,root,smin,smax,rad
       real(kind=8),dimension(0:3) :: pi1,pr1,ppibir1,pi2,pr2,ppibir2,piir,pib,pim1,piirr,pim1r
+      logical :: rapidity_ok
       if (popcnt(i).gt.1) then
          if (popcnt(ir).gt.1) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
          call shatminmax(this,i,ir,shatmin,shatmax,invm)
@@ -921,7 +1146,7 @@ contains
          call shatminmax(this,ir,i,shatmin,shatmax,invm)
          call generate_mass(ir,shatmin,shatmax)
       endif
-      if (ps%jac.le.0d0) return
+      if (bad_forward_jac()) return
       if (debug) then
          write (*,*) '23- i    ',i,invm(i)
          write (*,*) '23- ir   ',ir,invm(ir)
@@ -940,11 +1165,11 @@ contains
       ! p(:,i+ir) has p_z=0, since in this frame p_z(i)=-p_z(ir). (Note that
       ! ETmin() is boost invariant in the z-direction)
       pp(0:3,i+ir)=pp(0:3,i+ir+ib)+pp(0:3,ib)
-      if ((pp(0,i+ir)+pp(3,i+ir))*(pp(0,i+ir)-pp(3,i+ir)).le.vtiny) then
+      call longitudinal_rapidity(pp(0:3,i+ir),y,rapidity_ok)
+      if (.not.rapidity_ok) then
          ps%jac=-35d0
          return
       endif
-      y=log((pp(0,i+ir)+pp(3,i+ir))/(pp(0,i+ir)-pp(3,i+ir)))/2d0
       call boostz(pp(0,i+ir),y,piir)
       call boostz(pp(0,ib),y,pib)
       where ( piir(1)**2+piir(2)**2.lt.this%ETmin(i,1:2)**2-invm(i) .and. popcnt(i).eq.1 )
@@ -970,7 +1195,7 @@ contains
          if (debug) write (*,*) 'root.lt.0d0',root
          return
       endif
-      if (abs(piir(0)).le.vtiny*max(1d0,sqrtshat)) then
+      if (abs(piir(0)).le.vtiny*max(spacing(0d0),sqrtshat)) then
          ps%jac=-38d0
          if (debug) write (*,*) 'zero-energy system in gen23_one_step',piir(0)
          return
@@ -990,8 +1215,8 @@ contains
          return
       endif
       ix=ix+1
-      call random_to_var(ps%x(ix),ip,tmin,tmax,invm(ir+ib),ps%jac)
-      if (ps%jac.le.0d0) return
+      call random_to_var(ps%x(ix),this%ip,tmin,tmax,invm(ir+ib),ps%jac)
+      if (bad_forward_jac()) return
       if (debug) then
          write (*,*) '23- ir+ib',ir+ib,invm(ir+ib),tmin,tmax
       endif
@@ -1007,11 +1232,11 @@ contains
       end where
       if (im1.gt.2) then
          ! Boost and rotate in z-direction such that pp(:,im1) goes in the x-direction.
-         if ((pp(0,im1)+pp(3,im1))*(pp(0,im1)-pp(3,im1)).le.vtiny) then
+         call longitudinal_rapidity(pp(0:3,im1),y,rapidity_ok)
+         if (.not.rapidity_ok) then
             ps%jac=-35d0
             return
          endif
-         y=log((pp(0,im1)+pp(3,im1))/(pp(0,im1)-pp(3,im1)))/2d0
          call boostz(pp(0,i+ir),y,piirr)
          call boostz(pp(0,im1),y,pim1r)
          call boostz(pp(0,ib),y,pib)
@@ -1020,8 +1245,8 @@ contains
          call rotz(pim1r,-phi_rot,pim1)
          ! Eir > Etmin(ir) + constraint coming from t
          delta_ir=invm(ir)-invm(ir+ib)
-         delta_scale=max(1d0,abs(invm(ir)),abs(invm(ir+ib)),pib(0)**2)
-         if (abs(pib(0)).le.vtiny*max(1d0,sqrtshat)) then
+         delta_scale=max(spacing(0d0),abs(invm(ir)),abs(invm(ir+ib)),pib(0)**2)
+         if (abs(pib(0)).le.vtiny*max(spacing(0d0),sqrtshat)) then
             ps%jac=-34d0
             if (debug) write (*,*) 'unphysical Eir constraint',delta_ir,pib(0)
             return
@@ -1070,8 +1295,8 @@ contains
          return
       endif
       ix=ix+1
-      call random_to_var(ps%x(ix),ip,smin,smax,invm(i+im1),ps%jac)
-      if (ps%jac.le.0d0) return
+      call random_to_var(ps%x(ix),this%ip,smin,smax,invm(i+im1),ps%jac)
+      if (bad_forward_jac()) return
       if (debug) then
          write (*,*) '23- i+im1',i+im1,invm(i+im1),smin,smax
       endif
@@ -1082,16 +1307,28 @@ contains
       phi1=getphifroms(invm(i+im1),invm(ir+i),invm(ir),invm(ir+i+im1)&
            &,invm(ir+i+ib),V,sqrtGG,1d0)
       call gentcms2(pp(0,ib),pp(0,ib+ir+i),pp(0,ib+ir+i+im1),invm(ir+ib),phi1 &
-           &,sqrt(invm(i)),sqrt(invm(ir)),pi1,ppibir1)
+           &,sqrt0(invm(i)),sqrt0(invm(ir)),pi1,ppibir1,gent_status)
+      if (gent_status.ne.0) then
+         ps%jac=-9d0
+         return
+      endif
       pr1(0:3)=pp(0:3,ir+i)-pi1(0:3)
       phi2=getphifroms(invm(i+im1),invm(ir+i),invm(ir),invm(ir+i+im1)&
            &,invm(ir+i+ib),V,sqrtGG,0d0)
       call gentcms2(pp(0,ib),pp(0,ib+ir+i),pp(0,ib+ir+i+im1),invm(ir+ib),phi2 &
-           &,sqrt(invm(i)),sqrt(invm(ir)),pi2,ppibir2)
+           &,sqrt0(invm(i)),sqrt0(invm(ir)),pi2,ppibir2,gent_status)
+      if (gent_status.ne.0) then
+         ps%jac=-9d0
+         return
+      endif
       pr2(0:3)=pp(0:3,ir+i)-pi2(0:3)
       if ( pi1(0)**2-pi1(3)**2.ge.this%ETmin(i,1)**2 .and. pr1(0)**2-pr1(3)**2.ge.this%ETmin(ir,1)**2 .and. &
            pi2(0)**2-pi2(3)**2.ge.this%ETmin(i,1)**2 .and. pr2(0)**2-pr2(3)**2.ge.this%ETmin(ir,1)**2 ) then
          ix_e=ix_e+1
+         if (ix_e.gt.size(ps%x)) then
+            ps%jac=-47d0
+            return
+         endif
          if(ps%x(ix_e).gt.0.5d0) then
             pp(0:3,i)=pi1(0:3)
             pp(0:3,ir)=pr1(0:3)
@@ -1105,12 +1342,12 @@ contains
          pp(0:3,i)=pi1(0:3)
          pp(0:3,ir)=pr1(0:3)
          pp(0:3,ib+ir)=ppibir1(0:3)
-         ps%jac=ps%jac/2d0
+         if (.not.update_forward_jac(1d0,2d0)) return
       elseif (pi2(0)**2-pi2(3)**2.ge.this%ETmin(i,1)**2 .and. pr2(0)**2-pr2(3)**2.ge.this%ETmin(ir,1)**2) then
          pp(0:3,i)=pi2(0:3)
          pp(0:3,ir)=pr2(0:3)
          pp(0:3,ib+ir)=ppibir2(0:3)
-         ps%jac=ps%jac/2d0
+         if (.not.update_forward_jac(1d0,2d0)) return
       else
          ps%jac=-19d0
          if (debug) then
@@ -1135,7 +1372,7 @@ contains
          ps%jac=-5d0
          return
       endif
-      ps%jac=ps%jac/(8d0*sqrt(-gram4))
+      if (.not.update_forward_jac(1d0,8d0*sqrt(-gram4))) return
     end subroutine gen23_one_step
 
 
@@ -1146,9 +1383,10 @@ contains
       ! One step in the usual MadGraph t-channel phase-space generation.
       implicit none
       integer(kind=4),intent(in) :: i,ir,ib
-      real(kind=8) :: tmin_S,tmax_S,phi,y
+      real(kind=8) :: tmin_S,tmax_S,phi,y,jac_den,jac_scale
       real(kind=8),dimension(1:2) :: shatmin,shatmax,Eimax,tmin,tmax,etminir,base,root,etmini
       real(kind=8),dimension(0:3) :: piir,pib
+      logical :: rapidity_ok
       if (popcnt(i).gt.1) then
          if (popcnt(ir).gt.1) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
          call shatminmax(this,i,ir,shatmin,shatmax,invm)
@@ -1183,7 +1421,7 @@ contains
             write (*,*) 't - ir   ',ir,invm(ir),shatmin,shatmax
          endif
       endif
-      if (ps%jac.le.0d0) return
+      if (bad_forward_jac()) return
       call tminmax(invm(ir+i),invm(ir+i+ib),invm(ir),invm(i),0d0,tmin_S,tmax_S)
       tmin(1:2)=tmin_S
       tmax(1:2)=tmax_S
@@ -1198,11 +1436,11 @@ contains
       ! p(:,i+ir) has p_z=0, since in this frame p_z(i)=-p_z(ir). (Note that
       ! ETmin() is boost invariant in the z-direction)
       pp(0:3,i+ir)=pp(0:3,i+ir+ib)+pp(0:3,ib)
-      if ((pp(0,i+ir)+pp(3,i+ir))*(pp(0,i+ir)-pp(3,i+ir)).le.vtiny) then
+      call longitudinal_rapidity(pp(0:3,i+ir),y,rapidity_ok)
+      if (.not.rapidity_ok) then
          ps%jac=-35d0
          return
       endif
-      y=log((pp(0,i+ir)+pp(3,i+ir))/(pp(0,i+ir)-pp(3,i+ir)))/2d0
       call boostz(pp(0,i+ir),y,piir)
       call boostz(pp(0,ib),y,pib)
       where ( piir(1)**2+piir(2)**2.lt.this%ETmin(i,1:2)**2-invm(i) .and. popcnt(i).eq.1 )
@@ -1227,7 +1465,7 @@ contains
          if (debug) write (*,*) 'root.lt.0d0',root
          return
       endif
-      if (abs(piir(0)).le.vtiny*max(1d0,sqrtshat)) then
+      if (abs(piir(0)).le.vtiny*max(spacing(0d0),sqrtshat)) then
          ps%jac=-38d0
          if (debug) write (*,*) 'zero-energy system in gent_one_step',piir(0)
          return
@@ -1247,21 +1485,28 @@ contains
          return
       endif
       ix=ix+1
-      call random_to_var(ps%x(ix),ip,tmin,tmax,invm(ir+ib),ps%jac)
-      if (ps%jac.le.0d0) return
+      call random_to_var(ps%x(ix),this%ip,tmin,tmax,invm(ir+ib),ps%jac)
+      if (bad_forward_jac()) return
       if (debug) then
          write (*,*) 't- ir+ib',ir+ib,invm(ir+ib),tmin,tmax
       endif
       ix=ix+1
       call random_to_var(ps%x(ix),ip_flat,[0d0,0d0],[2d0*pi,2d0*pi],phi,ps%jac)
-      if (ps%jac.le.0d0) return
+      if (bad_forward_jac()) return
       if (debug) then
          write (*,*) 't - phi  ',i,phi,0d0,2d0*pi
       endif
       call gentcms(pp(0,ib+ir+i),pp(0,ib),invm(ib+ir),phi,sqrt0(invm(i)) &
            &,sqrt0(invm(ir)),pp(0,i),pp(0,ib+ir))
+      if (bad_forward_jac()) return
       pp(0:3,ir)=pp(0:3,ib+ir+i)+pp(0:3,ib)-pp(0:3,i)
-      ps%jac = ps%jac/(4d0*sqrt0(lambda(invm(ir+i),0d0,invm(ir+i+ib))))
+      jac_den=sqrt0(lambda(invm(ir+i),0d0,invm(ir+i+ib)))
+      jac_scale=max(spacing(0d0),abs(invm(ir+i)),abs(invm(ir+i+ib)))
+      if (jac_den.le.tiny_kin*jac_scale) then
+         ps%jac=-8d0
+         return
+      endif
+      if (.not.update_forward_jac(1d0,4d0*jac_den)) return
     end subroutine gent_one_step
 
     subroutine gens_one_step(i,ir)
@@ -1279,18 +1524,20 @@ contains
          call shatminmax(this,ir,i,shatmin,shatmax,invm)
          call generate_mass(ir,shatmin,shatmax)
       endif
-      if (ps%jac.le.0d0) return
+      if (bad_forward_jac()) return
       esum=sqrt0(invm(i+ir))
       ix=ix+1
       call random_to_var(ps%x(ix),ip_flat,[-1d0,-1d0],[1d0,1d0],costh,ps%jac)
-      if (ps%jac.le.0d0) return
+      if (bad_forward_jac()) return
       ix=ix+1
       call random_to_var(ps%x(ix),ip_flat,[0d0,0d0],[2d0*pi,2d0*pi],phi,ps%jac)
-      if (ps%jac.le.0d0) return
+      if (bad_forward_jac()) return
       call mom2cx(esum,sqrt0(invm(i)),sqrt0(invm(ir)),costh,phi,p_i,p_ir)
+      if (bad_forward_jac()) return
       call boostm(p_i,pp(0:3,i+ir),esum,pp(0:3,i))
       call boostm(p_ir,pp(0:3,i+ir),esum,pp(0:3,ir))
-      ps%jac=ps%jac*sqrt0(lambda(invm(i+ir),invm(i),invm(ir)))/(8d0*invm(i+ir))
+      if (.not.update_forward_jac(sqrt0(lambda(invm(i+ir),invm(i),invm(ir))),&
+           8d0*invm(i+ir))) return
       ! fill t-channel stuff to be safe.
       pp(0:3,i+1)=pp(0:3,i)-pp(0:3,1)
       pp(0:3,i+2)=pp(0:3,i)-pp(0:3,2)
@@ -1318,8 +1565,8 @@ contains
          return
       endif
       ix=ix+1
-      call random_to_var(ps%x(ix),ip_mass,shatmin,shatmax,invm(i),ps%jac)
-      if (ps%jac.le.0d0) return
+      call random_to_var(ps%x(ix),this%ip_mass,shatmin,shatmax,invm(i),ps%jac)
+      if (bad_forward_jac()) return
     end subroutine generate_mass
 
     subroutine mom2cx(esum,mass1,mass2,costh1,phi1,p1,p2)
@@ -1336,17 +1583,40 @@ contains
       !       real    p2(0:3)        : four-momentum of particle 2
       implicit none
       real(kind=8),dimension(0:3) :: p1,p2
-      real(kind=8) :: esum,mass1,mass2,costh1,phi1,md2,ed,pp,sinth1
+      real(kind=8) :: esum,mass1,mass2,costh1,phi1,md2,ed,pp,sinth1,pp2,scale
       real(kind=8),parameter :: rZero = 0d0,rHalf = 0.5d0,rOne = 1d0,rTwo = 2d0
+      p1=0d0
+      p2=0d0
+      scale=max(spacing(0d0),esum**2,mass1**2,mass2**2)
+      if (esum.le.vtiny*sqrt(scale) .or. abs(costh1).gt.1d0+vtiny) then
+         ps%jac=-8d0
+         return
+      endif
       md2 = (mass1-mass2)*(mass1+mass2)
       ed = md2/esum
       if ( mass1*mass2.eq.rZero ) then
          pp = (esum-abs(ed))*rHalf
+         if (pp.lt.-vtiny*sqrt(scale)) then
+            ps%jac=-8d0
+            return
+         endif
+         pp=max(pp,0d0)
       else
-         pp = sqrt((md2/esum)**2-rTwo*(mass1**2+mass2**2)+esum**2)*rHalf
+         pp2=(md2/esum)**2-rTwo*(mass1**2+mass2**2)+esum**2
+         if (pp2.lt.-vtiny*scale) then
+            ps%jac=-8d0
+            return
+         endif
+         pp=sqrt(max(pp2,0d0))*rHalf
       endif
-      sinth1 = sqrt((rOne-costh1)*(rOne+costh1))
+      sinth1 = sqrt(max((rOne-costh1)*(rOne+costh1),0d0))
       p1(0) = max((esum+ed)*rHalf,rZero)
+      if (esum+ed.lt.-vtiny*sqrt(scale) .or. esum-ed.lt.-vtiny*sqrt(scale)) then
+         ps%jac=-8d0
+         p1=0d0
+         p2=0d0
+         return
+      endif
       p1(1) = pp*sinth1*cos(phi1)
       p1(2) = pp*sinth1*sin(phi1)
       p1(3) = pp*costh1
@@ -1367,6 +1637,8 @@ contains
       real(kind=8) :: E_acms,p_acms,esum,esum2,ed,pp2,md2,ma2,pt,pt2,pt2_tol
       real(kind=8),dimension(0:3) :: ptot,pa_cms,ptotm,p1_rot
       real(kind=8),parameter :: tiny=1d-5
+      p1=0d0
+      pr=0d0
       ptot(0:3)=pa(0:3)+pb(0:3)
       ptotm(0)=ptot(0)
       ptotm(1:3)=-ptot(1:3)
@@ -1374,8 +1646,8 @@ contains
       ! determine magnitude of p1 in cms frame (from dhelas routine mom2cx)
       ESUM2 = dot(ptot,ptot)
       if (esum2 .le. 0d0) then
-         write (*,*) "error :: must be time-like momentum in gentcms",esum2
-         stop 1
+         ps%jac=-8d0
+         return
       endif
       esum=sqrt(esum2)
       MD2=(M1-M2)*(M1+M2)
@@ -1385,32 +1657,29 @@ contains
       ELSE
          PP2=0.25d0*((MD2/ESUM)**2-2d0*(M1**2+M2**2)+ESUM**2)
          if(pp2.lt.0d0) then
-            write(*,*) 'Error #12 in genps_fks.f: magnitude^2 of '/&
-                 &/'3-momentum smaller than 0',pp2
-            stop 1
+            ps%jac=-8d0
+            return
          endif
       ENDIF
       call boostm(pa,ptotm,esum,pa_cms)
       E_acms = pa_cms(0)
       p_acms = sqrt(pa_cms(1)**2+pa_cms(2)**2+pa_cms(3)**2)
+      if (p_acms.le.vtiny*max(spacing(0d0),abs(E_acms),esum)) then
+         ps%jac=-8d0
+         return
+      endif
       ! define p1 in the frame where pa_cms is aligned with the positive z axis.
       p1(0) = MAX((ESUM+ED)*0.5d0,0.d0)
       if (esum+ed.le.0d0) then
-         write (*,*) 'Error #14 in genps_fks.f: negative energy',esum,ed
          ps%jac=-8d0
          return
-         write (*,*) pa(0:3)
-         write (*,*) pb(0:3)
-         write (*,*) m1,m2,t,phi
-         write (*,*) pa_cms(0:3)
-         stop 1
       endif
       p1(3) = -(m1**2+ma2-t-2d0*p1(0)*E_acms)/(2d0*p_acms)
       pt2=pp2-p1(3)**2
       pt2_tol=tiny*max(abs(esum2),abs(pp2),abs(p1(3)**2))
       if (pt2.lt.-pt2_tol) then
-         write (*,*) 'Error #13 in genps_fks.f: relative pt^2 smaller than 0',pt2,esum2
-         stop 1
+         ps%jac=-8d0
+         return
       elseif (pt2.lt.0d0) then
          pt2=0d0
       endif
@@ -1433,21 +1702,46 @@ contains
       real(kind=8),intent(inout) :: jac
       integer(kind=4) :: k
       real(kind=8),dimension(3) :: vmin,vmax,power,q
-      real(kind=8) :: xloc
+      real(kind=8) :: xloc,updated_jac
+      logical :: valid_inputs
+      var=0d0
+      if (.not.ieee_is_finite(jac)) then
+         jac=-1d0
+         return
+      endif
+      if (jac.le.0d0) return
+      if (.not.ieee_is_finite(x)) then
+         jac=-1d0
+         return
+      endif
+      if (x.lt.-vtiny .or. x.gt.1d0+vtiny) then
+         jac=-1d0
+         return
+      endif
       call random_to_var_inputs(power_in,var_min,var_max,power,vmin,vmax, &
-           this%use_soft_bounds_as_actual_limits)
+           this%use_soft_bounds_as_actual_limits,valid_inputs)
+      if (.not.valid_inputs) then
+         jac=-1d0
+         return
+      endif
       call random_to_var_weights(power,vmin,vmax,q)
-      if (sum(q(1:3)).le.0d0) then
+      if (any(.not.ieee_is_finite(q))) then
          var=vmin(2)
          jac=-1d0
          return
       endif
-      if (q(1).gt.0d0 .and. x .le. q(1)) then
+      if (any(q.lt.0d0) .or. sum(q(1:3)).le.0d0) then
+         var=vmin(2)
+         jac=-1d0
+         return
+      endif
+      xloc=max(0d0,min(1d0,x))
+      if (q(1).gt.0d0 .and. xloc.le.q(1)) then
          k = 1
-         xloc = x / q(1)
-      elseif (q(2).gt.0d0 .and. x .le. q(1) + q(2)) then
+         xloc = xloc / q(1)
+      elseif (q(2).gt.0d0 .and. xloc.le.q(1) + q(2)) then
          k = 2
-         xloc = (x - q(1)) / q(2)
+         xloc = (xloc - q(1)) / q(2)
       else
          k = 3
          if (q(3).le.0d0) then
@@ -1455,13 +1749,27 @@ contains
             jac=-1d0
             return
          endif
-         xloc = (x - q(1) - q(2)) / q(3)
+         xloc = (xloc - q(1) - q(2)) / q(3)
       endif
       call random_to_var_map(xloc,power(k),vmin(k),vmax(k),var,jac)
       if (var_min(1).lt.0d0 .and. var_max(1).le.0d0) then
          var=-var
       endif
-      jac=jac/q(k)
+      if (.not.safe_phase_space_ratio(jac,q(k),updated_jac)) then
+         var=0d0
+         jac=-1d0
+         return
+      endif
+      jac=updated_jac
+      if (.not.ieee_is_finite(var) .or. .not.ieee_is_finite(jac)) then
+         var=0d0
+         jac=-1d0
+         return
+      endif
+      if (jac.le.0d0) then
+         var=0d0
+         jac=-1d0
+      endif
     end subroutine random_to_var
 
     subroutine random_to_var_map(x,power,varmin,varmax,var,jac)
@@ -1469,38 +1777,76 @@ contains
       real(kind=8),intent(in) :: x,power,varmin,varmax
       real(kind=8),intent(out) :: var
       real(kind=8),intent(inout) :: jac
-      integer(kind=4) :: ip
-      if (varmax-varmin.le.tiny*max(1d0,max(abs(varmin),abs(varmax)))) then
+      real(kind=8) :: jac_factor,updated_jac
+      real(kind=8) :: interval_scale,interval_tolerance
+      logical :: valid_power_map
+      var=0d0
+      if (.not.ieee_is_finite(x) .or. .not.ieee_is_finite(power) .or. &
+           .not.ieee_is_finite(varmin) .or. .not.ieee_is_finite(varmax) .or. &
+           .not.ieee_is_finite(jac)) then
+         jac=-1d0
+         return
+      endif
+      interval_scale=max(abs(varmin),abs(varmax))
+      interval_tolerance=128d0*epsilon(1d0)*max(spacing(0d0),interval_scale)
+      if (varmax.le.varmin .or. varmax-varmin.le.interval_tolerance) then
          var=varmin
          jac=-1d0
          return
       endif
-      ip=nint(power)
-      if (dble(ip).eq.power) then
-         ! integer
-         if (ip.eq.-1) then
-            var=varmax**x * varmin**(1d0-x)
-            jac=jac*var*log(varmax/varmin)
-         elseif (ip.eq.-2) then
-            var=1d0/( (1d0-x)/varmin + x/varmax )
-            jac=jac*var**2*(varmax-varmin)/(varmax*varmin)
-         elseif (ip.eq.0) then
-            var=varmin+x*(varmax-varmin)
-            jac=jac*(varmax-varmin)
-         elseif (ip.eq.101) then
-            var=varmin+(varmax-varmin)*(1d0-cos(pi*x))/2d0
-            jac=jac*(varmax-varmin)*pi*sin(pi*x)/2d0
-         else
-            var=(varmin**(1+ip)*(1d0-x)+varmax**(1+ip)*x)**(1d0/(1d0+power))
-            jac=jac*(varmax**(1+ip)-varmin**(1+ip))* &
-                 (varmin**(1+ip)*(1d0-x)+varmax**(1+ip)*x)**(-power/(1d0+power))/ &
-                 (1d0+power)
+      if (x.lt.0d0 .or. x.gt.1d0) then
+         jac=-1d0
+         return
+      endif
+      if (power.eq.0d0) then
+         var=varmin+x*(varmax-varmin)
+         jac_factor=varmax-varmin
+      elseif (power.eq.-1d0) then
+         if (varmin.le.0d0) then
+            jac=-1d0
+            return
          endif
+         jac_factor=log(varmax)-log(varmin)
+         if (.not.ieee_is_finite(jac_factor)) then
+            jac=-1d0
+            return
+         endif
+         if (jac_factor.le.0d0) then
+            jac=-1d0
+            return
+         endif
+         var=exp((1d0-x)*log(varmin)+x*log(varmax))
+         jac_factor=var*jac_factor
+      elseif (power.eq.101d0) then
+         var=varmin+(varmax-varmin)*(1d0-cos(pi*x))/2d0
+         jac_factor=(varmax-varmin)*pi*sin(pi*x)/2d0
       else
-         var=(varmin**(1d0+power)*(1d0-x)+varmax**(1d0+power)*x)**(1d0/(1d0+power))
-         jac=jac*(varmax**(1d0+power)-varmin**(1d0+power))* &
-              (varmin**(1d0+power)*(1d0-x)+varmax**(1d0+power)*x)**(-power/(1d0+power))/&
-              (1d0+power)
+         call stable_phase_space_power_map(x,power,varmin,varmax,var,&
+              jac_factor,valid_power_map)
+         if (.not.valid_power_map) then
+            jac=-1d0
+            return
+         endif
+      endif
+      if (.not.ieee_is_finite(var) .or. .not.ieee_is_finite(jac_factor)) then
+         var=0d0
+         jac=-1d0
+         return
+      endif
+      if (jac_factor.le.0d0) then
+         var=0d0
+         jac=-1d0
+         return
+      endif
+      if (.not.safe_phase_space_product(jac,jac_factor,updated_jac)) then
+         var=0d0
+         jac=-1d0
+         return
+      endif
+      jac=updated_jac
+      if (jac.le.0d0) then
+         var=0d0
+         jac=-1d0
       endif
     end subroutine random_to_var_map
   end subroutine gen23_generate_momenta
@@ -1515,6 +1861,12 @@ contains
     real(kind=8),dimension(maskr(this%next)) :: invm
     real(kind=8),dimension(0:3,2) :: p_tmp
     if (debug) write (*,*) 'computing x from momenta'
+    ps%jac=-48d0
+    if (.not.allocated(ps%p) .or. .not.allocated(ps%x)) return
+    if (size(ps%p,1).ne.4 .or. size(ps%p,2).ne.this%next .or. &
+         lbound(ps%p,1).ne.0 .or. size(ps%x).lt.this%ndim) return
+    if (.not.generated_momenta_are_valid(ps%p,this%masses,ps%xbjrk,this%include_pdf)) return
+    ps%x=0d0
     ps%jac=1d0
     ix=0
     
@@ -1530,8 +1882,9 @@ contains
     ! Fill the full momentum array, including all possible
     ! intermediate states:
     call fill_momentum_array
+    if (bad_inverse_jac()) return
     ! get the two random number corresponding to the initial state
-    if (includePDF) then
+    if (this%include_pdf) then
        call compute_x_initial_state
        if (bad_inverse_jac()) return
     else
@@ -1540,6 +1893,11 @@ contains
     ! The final-state momenta configuration gives all the other random numbers
     call compute_x_final_state
     if (bad_inverse_jac()) return
+    if (ix.ne.this%ndim .or. .not.ieee_is_finite(ps%jac) .or. &
+         any(.not.ieee_is_finite(ps%x(1:this%ndim)))) then
+       ps%jac=-47d0
+       return
+    endif
 
 !!$       this%next=this%next+1
 !!$       pp(0:3,ibset(0,this%next-2))=p_tmp(0:3,1)
@@ -1563,7 +1921,14 @@ contains
       ! reference, -36/-37 are double-t bound failures, -38 is a zero
       ! reconstructed energy, -39 is a zero Eir denominator, -40 is an
       ! otherwise unclassified zero Jacobian, -41:-43 are inverse-variable
-      ! bounds/range failures, and -45/-46 are singular Eir/radial bounds.
+      ! bounds/range failures, -44 is invalid initial-state kinematics,
+      ! -45/-46 are singular Eir/radial bounds, -47 is inconsistent random
+      ! bookkeeping, and -48 is a non-finite generated momentum.
+      if (.not.ieee_is_finite(ps%jac)) then
+         ps%jac=-47d0
+         bad_inverse_jac=.true.
+         return
+      endif
       bad_inverse_jac=ps%jac.le.0d0
       ! Preserve the diagnostic status set by the inverse step.  In
       ! particular, the multichannel caller needs to distinguish a point
@@ -1571,6 +1936,24 @@ contains
       ! other kinematic reconstruction failure.
       if (bad_inverse_jac .and. ps%jac.eq.0d0) ps%jac=-40d0
     end function bad_inverse_jac
+
+    logical function update_inverse_jac(numerator,denominator)
+      implicit none
+      real(kind=8),intent(in) :: numerator,denominator
+      real(kind=8) :: updated_jac
+      update_inverse_jac=.false.
+      if (.not.ieee_is_finite(numerator) .or. .not.ieee_is_finite(denominator) .or. &
+           numerator.le.0d0 .or. denominator.le.0d0) then
+         ps%jac=-47d0
+         return
+      endif
+      if (.not.safe_phase_space_scaled_ratio(ps%jac,numerator,denominator,updated_jac)) then
+         ps%jac=-47d0
+         return
+      endif
+      ps%jac=updated_jac
+      update_inverse_jac=.true.
+    end function update_inverse_jac
 
     subroutine generate_bw_mass_inverse(ires)
       implicit none
@@ -1588,7 +1971,7 @@ contains
       y=atan((qmass-this%invm(ibset(0,ires-1))/qmass)/qwidth)
       call var_to_random(y,ip_flat,B,A,ps%x(ix),ps%jac)
       if (bad_inverse_jac()) return
-      ps%jac=ps%jac*qmass*qwidth/(cos(y))**2
+      if (.not.update_inverse_jac(qmass*qwidth,cos(y)**2)) return
     end subroutine generate_bw_mass_inverse
     subroutine decay_bw_inverse(ires,id1,id2)
       implicit none
@@ -1614,15 +1997,20 @@ contains
       real(kind=8),intent(out) :: tau
       real(kind=8) :: shat
       real(kind=8),dimension(1:2) :: smin,smax
+      tau=0d0
       smin(1:2)=max(this%invm_min(maskr(this%next)-3,1:2),this%ETmin(maskr(this%next)-3,1:2)**2)
       smax(1:2)=this%sqrts**2
       shat=dot(pp(0:3,3),pp(0:3,3))
+      if (shat.le.0d0) then
+         ps%jac=-44d0
+         return
+      endif
       sqrtshat=sqrt(shat)
       ix=ix+1
-      call var_to_random(shat,ip_shat,smin,smax,ps%x(ix),ps%jac)
+      call var_to_random(shat,this%ip_shat,smin,smax,ps%x(ix),ps%jac)
       if (bad_inverse_jac()) return
       tau=shat/smax(1)
-      ps%jac=ps%jac/smax(1)
+      if (.not.update_inverse_jac(1d0,smax(1))) return
     end subroutine compute_x_from_tau
     subroutine compute_x_from_y(tau)
       implicit none
@@ -1732,22 +2120,24 @@ contains
             write (*,*) 'Inconsistent sets'
             write (*,*) i,':',this%sets(:,i)
             write (*,*) 3-i,':',this%sets(:,3-i)
-            stop 
+            ps%jac=-48d0
+            return
          endif
       enddo
 
       ! Add factors of 2*pi
-      ps%jac=ps%jac/((2d0*pi)**(3*(this%next-2)-4))
+      if (.not.update_inverse_jac(1d0,(2d0*pi)**(3*(this%next-2)-4))) return
       ! Add flux factor
-      ps%jac=ps%jac/(2d0*sqrtshat**2)
+      if (.not.update_inverse_jac(1d0,2d0*sqrtshat**2)) return
 
     end subroutine compute_x_final_state
     subroutine gent_one_step_inverse(i,ir,ib)
       implicit none
       integer(kind=4),intent(in) :: i,ir,ib
-      real(kind=8) :: tmin_S,tmax_S,phi,y,esum
+      real(kind=8) :: tmin_S,tmax_S,phi,y,esum,jac_den,jac_scale
       real(kind=8),dimension(1:2) :: shatmin,shatmax,Eimax,tmin,tmax,etminir,base,root,etmini
       real(kind=8),dimension(0:3) :: piir,pib,p_boost,pi_rot,pa_cms
+      logical :: rapidity_ok
       if (popcnt(i).gt.1) then
          if (popcnt(ir).gt.1) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
          call shatminmax(this,i,ir,shatmin,shatmax,invm)
@@ -1787,11 +2177,11 @@ contains
       ! invariant we can compute it in any frame. Let's use the frame in which
       ! p(:,i+ir) has p_z=0, since in this frame p_z(i)=-p_z(ir). (Note that
       ! ETmin() is boost invariant in the z-direction)
-      if ((pp(0,i+ir)+pp(3,i+ir))*(pp(0,i+ir)-pp(3,i+ir)).le.vtiny) then
+      call longitudinal_rapidity(pp(0:3,i+ir),y,rapidity_ok)
+      if (.not.rapidity_ok) then
          ps%jac=-35d0
          return
       endif
-      y=log((pp(0,i+ir)+pp(3,i+ir))/(pp(0,i+ir)-pp(3,i+ir)))/2d0
       call boostz(pp(0,i+ir),y,piir)
       call boostz(pp(0,ib),y,pib)
       where ( piir(1)**2+piir(2)**2.lt.this%ETmin(i,1:2)**2-invm(i) .and. popcnt(i).eq.1 )
@@ -1816,7 +2206,7 @@ contains
          if (debug) write (*,*) 'root.lt.0d0 in gent_one_step_inverse',root
          return
       endif
-      if (abs(piir(0)).le.vtiny*max(1d0,sqrtshat)) then
+      if (abs(piir(0)).le.vtiny*max(spacing(0d0),sqrtshat)) then
          ps%jac=-38d0
          return
       endif
@@ -1839,10 +2229,15 @@ contains
          write (*,*) 'ti - ir+ib',ir+ib,tmin,tmax,invm(ir+ib)
       endif
       ix=ix+1
-      call var_to_random(invm(ir+ib),ip,tmin,tmax,ps%x(ix),ps%jac)
+      call var_to_random(invm(ir+ib),this%ip,tmin,tmax,ps%x(ix),ps%jac)
       if (bad_inverse_jac()) return
       ! inverse of boosts and rotation from gentcms()
-      esum=sqrt0(invm(i+ir))
+      jac_scale=max(spacing(0d0),abs(invm(i+ir)))
+      if (invm(i+ir).le.tiny_kin*jac_scale) then
+         ps%jac=-44d0
+         return
+      endif
+      esum=sqrt(invm(i+ir))
       p_boost(0)=pp(0,i+ir)
       p_boost(1:3)=-pp(1:3,i+ir)
       call boostm(pp(0:3,i),p_boost,esum,pib)
@@ -1856,12 +2251,18 @@ contains
       ix=ix+1
       call var_to_random(phi,ip_flat,[0d0,0d0],[2d0*pi,2d0*pi],ps%x(ix),ps%jac)
       if (bad_inverse_jac()) return
-      ps%jac = ps%jac/(4d0*sqrt0(lambda(invm(ir+i),0d0,invm(ir+i+ib))))
+      jac_den=sqrt0(lambda(invm(ir+i),0d0,invm(ir+i+ib)))
+      jac_scale=max(spacing(0d0),abs(invm(ir+i)),abs(invm(ir+i+ib)))
+      if (jac_den.le.tiny_kin*jac_scale) then
+         ps%jac=-44d0
+         return
+      endif
+      if (.not.update_inverse_jac(1d0,4d0*jac_den)) return
     end subroutine gent_one_step_inverse
     subroutine gens_one_step_inverse(i,ir)
       implicit none
       integer(kind=4),intent(in) :: i,ir
-      real(kind=8) :: esum,costh,phi
+      real(kind=8) :: esum,costh,phi,pnorm,jac_scale
       real(kind=8),dimension(1:2) :: shatmin,shatmax
       real(kind=8),dimension(0:3) :: p_i,p_boost
       if (popcnt(i).gt.1) then
@@ -1878,12 +2279,22 @@ contains
          if (bad_inverse_jac()) return
       endif
       ! boost p(i) and p(ir) to the p(i+ir) rest frame
-      esum=sqrt0(invm(i+ir))
+      jac_scale=max(spacing(0d0),abs(invm(i+ir)))
+      if (invm(i+ir).le.tiny_kin*jac_scale) then
+         ps%jac=-44d0
+         return
+      endif
+      esum=sqrt(invm(i+ir))
       p_boost(0)=-pp(0,i+ir)
       p_boost(1:3)=-pp(1:3,i+ir)
       call boostm(pp(0:3,i),p_boost,esum,p_i)
       ! compute the angles from the momenta and use that to get the random numbers
-      costh=p_i(3)/sqrt(p_i(1)**2+p_i(2)**2+p_i(3)**2)
+      pnorm=sqrt(p_i(1)**2+p_i(2)**2+p_i(3)**2)
+      if (pnorm.le.tiny_kin*max(spacing(0d0),abs(p_i(0)))) then
+         ps%jac=-44d0
+         return
+      endif
+      costh=max(-1d0,min(1d0,p_i(3)/pnorm))
       if (debug) then
          write (*,*) 'si - i',i,-1d0,1d0,costh
       endif
@@ -1899,7 +2310,8 @@ contains
       call var_to_random(phi,ip_flat,[0d0,0d0],[2d0*pi,2d0*pi],ps%x(ix),ps%jac)
       if (bad_inverse_jac()) return
       ! update the Jacobian
-      ps%jac=ps%jac*sqrt0(lambda(invm(i+ir),invm(i),invm(ir)))/(8d0*invm(i+ir))
+      if (.not.update_inverse_jac(sqrt0(lambda(invm(i+ir),invm(i),invm(ir))),&
+           8d0*invm(i+ir))) return
       ! compute some t-channel invariants just to make sure they are filled. 
       invm(i+1)=dot(pp(0:3,i+1),pp(0:3,i+1))
       invm(i+2)=dot(pp(0:3,i+2),pp(0:3,i+2))
@@ -1909,13 +2321,14 @@ contains
     subroutine double_t_inverse(i,ir,ia,ib)
       implicit none
       integer(kind=4),intent(in) :: i,ir,ia,ib
-      real(kind=8) :: phi,mass_tol,den_t,den_ir,den_scale
+      real(kind=8) :: phi,mass_tol,den_t,den_ir,den_scale,jac_den,jac_scale
       real(kind=8),dimension(1:2) :: tmin,tmax,yr,Eimax,pzmax
       logical :: soft_ok,massless_collinear_limit
       if (popcnt(i).ne.1 .or. popcnt(ir).le.1) then
          write (*,*) 'Subroutine only for i is a single particle '&
               //'and ir is more than 1',i,ir,popcnt(i),popcnt(ir)
-         stop 1
+         ps%jac=-48d0
+         return
       endif
       soft_ok=.true.
       yr(1:2)=lambda(invm(ia+ib),invm(i),this%invm_min(ir,1:2))
@@ -1970,11 +2383,11 @@ contains
          write (*,*) 'dti- i+ia',i+ia,tmin,tmax,invm(i+ia)
       endif
       ix=ix+1
-      call var_to_random(invm(i+ia),ip_dt,tmin,tmax,ps%x(ix),ps%jac)
+      call var_to_random(invm(i+ia),this%ip_dt,tmin,tmax,ps%x(ix),ps%jac)
       if (bad_inverse_jac()) return
       den_t=invm(i)-invm(i+ia)
       den_ir=sqrtshat**2+invm(i+ia)-invm(i)
-      den_scale=max(1d0,abs(invm(i)),abs(invm(i+ia)),sqrtshat**2)
+      den_scale=max(spacing(0d0),abs(invm(i)),abs(invm(i+ia)),sqrtshat**2)
       massless_collinear_limit=abs(den_t).le.vtiny*den_scale .and. &
            abs(invm(i)).le.vtiny*den_scale .and. &
            this%ETmin(i,1).le.vtiny*sqrt(den_scale)
@@ -2012,7 +2425,7 @@ contains
          write (*,*) 'dti- i+ib',i+ib,tmin,tmax,invm(i+ib)
       endif
       ix=ix+1
-      call var_to_random(invm(i+ib),ip_dt,tmin,tmax,ps%x(ix),ps%jac)
+      call var_to_random(invm(i+ib),this%ip_dt,tmin,tmax,ps%x(ix),ps%jac)
       if (bad_inverse_jac()) return
       phi=atan2(pp(2,i),pp(1,i))
       if(phi.lt.0d0) phi=phi+2d0*pi
@@ -2022,25 +2435,32 @@ contains
       ix=ix+1
       call var_to_random(phi,ip_flat,[0d0,0d0],[2d0*pi,2d0*pi],ps%x(ix),ps%jac)
       if (bad_inverse_jac()) return
-      invm(ir)=dot(pp(0,ir),pp(0,ir))
-      mass_tol=vtiny*max(1d0,abs(invm(ia+ib)),abs(invm(i+ia)),abs(invm(i+ib)),abs(invm(i)))
+      invm(ir)=dot(pp(0:3,ir),pp(0:3,ir))
+      mass_tol=vtiny*max(spacing(0d0),abs(invm(ia+ib)),abs(invm(i+ia)), &
+           abs(invm(i+ib)),abs(invm(i)))
       if (invm(ir).lt.-mass_tol) then
-         write (*,*) "ERROR in double_t: invariant mass of system", &
-              & " must be non-negative",ir,invm(ir),i
-         write (*,*) invm(ir),invm(ia+ib)+invm(i+ia)+invm(i+ib)-invm(i)&
-              &,invm(ia+ib),invm(i +ia),invm(i+ib),invm(i)
-         stop
+         ps%jac=-4d0
+         if (debug) write (*,*) "rejecting inverse double_t point with negative remainder mass",ir,invm(ir),i
+         return
       elseif (invm(ir).lt.0d0) then
          invm(ir)=0d0
       endif
-      ps%jac = ps%jac/(4d0*sqrt0(lambda(invm(ir+i),0d0,0d0)))
+      jac_den=sqrt0(lambda(invm(ir+i),0d0,0d0))
+      jac_scale=max(spacing(0d0),abs(invm(ir+i)))
+      if (jac_den.le.tiny_kin*jac_scale) then
+         ps%jac=-44d0
+         return
+      endif
+      if (.not.update_inverse_jac(1d0,4d0*jac_den)) return
     end subroutine double_t_inverse
     subroutine gen23_one_step_inverse(i,ir,ib,im1)
       implicit none
       integer(kind=4),intent(in) :: im1,i,ir,ib
+      integer :: gent_status
       real(kind=8) :: tmin_S,tmax_S,smin_S,smax_S,phi1,phi2,gram4,V,sqrtGG,y,phi_rot,delta_ir,delta_scale
       real(kind=8),dimension(1:2) :: shatmin,shatmax,tmin,tmax,etminir,etmini,base,root,smin,smax,rad
       real(kind=8),dimension(0:3) :: pi1,pr1,ppibir1,pi2,pr2,ppibir2,piir,pib,pim1,piirr,pim1r
+      logical :: rapidity_ok
       if (popcnt(i).gt.1) then
          if (popcnt(ir).gt.1) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
          call shatminmax(this,i,ir,shatmin,shatmax,invm)
@@ -2064,11 +2484,11 @@ contains
          tmin(1:2)=max(tmin_S,this%invm_min(ir+ib,1:2))
       end where
       pp(0:3,i+ir)=pp(0:3,i+ir+ib)+pp(0:3,ib)
-      if (abs(pp(0,i+ir)-pp(3,i+ir)).le.vtiny) then
+      call longitudinal_rapidity(pp(0:3,i+ir),y,rapidity_ok)
+      if (.not.rapidity_ok) then
          ps%jac=-35d0
          return
       endif
-      y=log((pp(0,i+ir)+pp(3,i+ir))/(pp(0,i+ir)-pp(3,i+ir)))/2d0
       call boostz(pp(0,i+ir),y,piir)
       call boostz(pp(0,ib),y,pib)
       where ( piir(1)**2+piir(2)**2.lt.this%ETmin(i,1:2)**2-invm(i) .and. popcnt(i).eq.1 )
@@ -2092,7 +2512,7 @@ contains
          ps%jac=-33d0
          return
       endif
-      if (abs(piir(0)).le.vtiny*max(1d0,sqrtshat)) then
+      if (abs(piir(0)).le.vtiny*max(spacing(0d0),sqrtshat)) then
          ps%jac=-38d0
          return
       endif
@@ -2114,7 +2534,7 @@ contains
          write (*,*) '23i- ir+ib',ir+ib,tmin,tmax,invm(ir+ib)
       endif
       ix=ix+1
-      call var_to_random(invm(ir+ib),ip,tmin,tmax,ps%x(ix),ps%jac)
+      call var_to_random(invm(ir+ib),this%ip,tmin,tmax,ps%x(ix),ps%jac)
       if (bad_inverse_jac()) return
       call sminmax(invm(ir+i),invm(ir),invm(ir+i+im1),invm(ir+i+ib)&
            &,invm(ir+ib),invm(ir+ib+i+im1),invm(i),invm(im1),smin_S,smax_S,V,sqrtGG)
@@ -2128,11 +2548,11 @@ contains
       end where
       if (im1.gt.2) then
          ! Boost and rotate in z-direction such that pp(:,im1) goes in the x-direction.
-         if ((pp(0,im1)+pp(3,im1))*(pp(0,im1)-pp(3,im1)).le.vtiny) then
+         call longitudinal_rapidity(pp(0:3,im1),y,rapidity_ok)
+         if (.not.rapidity_ok) then
             ps%jac=-35d0
             return
          endif
-         y=log((pp(0,im1)+pp(3,im1))/(pp(0,im1)-pp(3,im1)))/2d0
          call boostz(pp(0,i+ir),y,piirr)
          call boostz(pp(0,im1),y,pim1r)
          call boostz(pp(0,ib),y,pib)
@@ -2141,8 +2561,8 @@ contains
          call rotz(pim1r,-phi_rot,pim1)
          ! Eir > Etmin(ir) + constraint coming from t
          delta_ir=invm(ir)-invm(ir+ib)
-         delta_scale=max(1d0,abs(invm(ir)),abs(invm(ir+ib)),pib(0)**2)
-         if (abs(pib(0)).le.vtiny*max(1d0,sqrtshat)) then
+         delta_scale=max(spacing(0d0),abs(invm(ir)),abs(invm(ir+ib)),pib(0)**2)
+         if (abs(pib(0)).le.vtiny*max(spacing(0d0),sqrtshat)) then
             ps%jac=-39d0
             if (debug) write (*,*) 'unphysical inverse Eir constraint',delta_ir,pib(0)
             return
@@ -2186,7 +2606,7 @@ contains
          write (*,*) '23i- i+im1',i+im1,smin,smax,invm(i+im1)
       endif
       ix=ix+1
-      call var_to_random(invm(i+im1),ip,smin,smax,ps%x(ix),ps%jac)
+      call var_to_random(invm(i+im1),this%ip,smin,smax,ps%x(ix),ps%jac)
       if (bad_inverse_jac()) return
       ! Generate the momenta from the integration variables. Since there is an
       ! ambiguity in phi, get both of them and pick the one that passes the cuts
@@ -2195,20 +2615,28 @@ contains
       phi1=getphifroms(invm(i+im1),invm(ir+i),invm(ir),invm(ir+i+im1)&
            &,invm(ir+i+ib),V,sqrtGG,1d0)
       call gentcms2(pp(0,ib),pp(0,ib+ir+i),pp(0,ib+ir+i+im1),invm(ir+ib),phi1 &
-           &,sqrt0(invm(i)),sqrt0(invm(ir)),pi1,ppibir1)
+           &,sqrt0(invm(i)),sqrt0(invm(ir)),pi1,ppibir1,gent_status)
+      if (gent_status.ne.0) then
+         ps%jac=-9d0
+         return
+      endif
       pr1(0:3)=pp(0:3,ir+i)-pi1(0:3)
       phi2=getphifroms(invm(i+im1),invm(ir+i),invm(ir),invm(ir+i+im1)&
            &,invm(ir+i+ib),V,sqrtGG,0d0)
       call gentcms2(pp(0,ib),pp(0,ib+ir+i),pp(0,ib+ir+i+im1),invm(ir+ib),phi2 &
-           &,sqrt0(invm(i)),sqrt0(invm(ir)),pi2,ppibir2)
+           &,sqrt0(invm(i)),sqrt0(invm(ir)),pi2,ppibir2,gent_status)
+      if (gent_status.ne.0) then
+         ps%jac=-9d0
+         return
+      endif
       pr2(0:3)=pp(0:3,ir+i)-pi2(0:3)
       if ( pi1(0)**2-pi1(3)**2.ge.this%ETmin(i,1)**2 .and. pr1(0)**2-pr1(3)**2.ge.this%ETmin(ir,1)**2 .and. &
            pi2(0)**2-pi2(3)**2.ge.this%ETmin(i,1)**2 .and. pr2(0)**2-pr2(3)**2.ge.this%ETmin(ir,1)**2 ) then
          continue
       elseif (pi1(0)**2-pi1(3)**2.ge.this%ETmin(i,1)**2 .and. pr1(0)**2-pr1(3)**2.ge.this%ETmin(ir,1)**2) then
-         ps%jac=ps%jac/2d0
+         if (.not.update_inverse_jac(1d0,2d0)) return
       elseif (pi2(0)**2-pi2(3)**2.ge.this%ETmin(i,1)**2 .and. pr2(0)**2-pr2(3)**2.ge.this%ETmin(ir,1)**2) then
-         ps%jac=ps%jac/2d0
+         if (.not.update_inverse_jac(1d0,2d0)) return
       endif
       ! Compute the Jacobian
       gram4=gram_determinant4(invm(ir+i+im1),invm(ir+ib),invm(ir+i+ib)&
@@ -2223,13 +2651,26 @@ contains
          ps%jac=-5d0
          return
       endif
-      ps%jac=ps%jac/(8d0*sqrt(-gram4))
+      if (.not.update_inverse_jac(1d0,8d0*sqrt(-gram4))) return
     end subroutine gen23_one_step_inverse
     subroutine fill_momentum_array
       implicit none
       integer :: i,j
       real(kind=8),dimension(0:3) :: p
-      ycm=log((ps%p(0,1)+ps%p(0,2)+ps%p(3,1)+ps%p(3,2))/(ps%p(0,1)+ps%p(0,2)-ps%p(3,1)-ps%p(3,2)))/2d0
+      real(kind=8) :: e_initial,pz_initial,lightcone_plus,lightcone_minus
+      e_initial=ps%p(0,1)+ps%p(0,2)
+      pz_initial=ps%p(3,1)+ps%p(3,2)
+      lightcone_plus=e_initial+pz_initial
+      lightcone_minus=e_initial-pz_initial
+      if (.not.ieee_is_finite(lightcone_plus) .or. .not.ieee_is_finite(lightcone_minus)) then
+         ps%jac=-44d0
+         return
+      endif
+      if (lightcone_plus.le.0d0 .or. lightcone_minus.le.0d0) then
+         ps%jac=-44d0
+         return
+      endif
+      ycm=(log(lightcone_plus)-log(lightcone_minus))/2d0
       do i=1,maskr(this%next)
          p(0:3)=0d0
          do j=0,this%next-1
@@ -2262,15 +2703,24 @@ contains
       integer(kind=4) :: i,k
       real(kind=8),dimension(3) :: vmin,vmax,power,q
       real(kind=8),dimension(1:2) :: var_min_eff,var_max_eff
-      real(kind=8) :: var,xloc,variable_clamped,bound_tol
-      logical :: found
+      real(kind=8) :: var,xloc,variable_clamped,bound_tol,range_tol,updated_jac
+      logical :: found,valid_inputs
+      x=0d0
+      if (.not.ieee_is_finite(variable) .or. .not.ieee_is_finite(jac)) then
+         jac=-41d0
+         return
+      endif
+      if (jac.le.0d0) then
+         jac=-41d0
+         return
+      endif
       call select_integration_bounds(var_min,var_max,var_min_eff,var_max_eff, &
            this%use_soft_bounds_as_actual_limits)
       if (var_min_eff(1).gt.var_max_eff(1)) then
          jac=-41d0
          return
       endif
-      bound_tol=5d-8*max(1d0,abs(variable),abs(var_min_eff(1)),abs(var_max_eff(1)))
+      bound_tol=5d-8*max(spacing(0d0),abs(variable),abs(var_min_eff(1)),abs(var_max_eff(1)))
       if (variable.lt.var_min_eff(1)-bound_tol .or. variable.gt.var_max_eff(1)+bound_tol) then
          write (99,*) 'Warning: variable not between varmin and varmax',var_min_eff(1),variable,var_max_eff(1)
          jac=-42d0
@@ -2278,8 +2728,20 @@ contains
       endif
       variable_clamped=min(max(variable,var_min_eff(1)),var_max_eff(1))
       call random_to_var_inputs(power_in,var_min_eff,var_max_eff,power,vmin,vmax, &
-           this%use_soft_bounds_as_actual_limits)
+           this%use_soft_bounds_as_actual_limits,valid_inputs)
+      if (.not.valid_inputs) then
+         jac=-41d0
+         return
+      endif
       call random_to_var_weights(power,vmin,vmax,q)
+      if (any(.not.ieee_is_finite(q))) then
+         jac=-41d0
+         return
+      endif
+      if (any(q.lt.0d0) .or. sum(q).le.0d0) then
+         jac=-41d0
+         return
+      endif
       if (var_min_eff(1).lt.0d0 .and. var_max_eff(1).le.0d0) then
          var=-variable_clamped
       else
@@ -2289,7 +2751,8 @@ contains
       k=0
       do i=1,3
          if (q(i).le.0d0) cycle
-         if (var.ge.vmin(i)-tiny .and. var.le.vmax(i)+tiny) then
+         range_tol=128d0*epsilon(1d0)*max(spacing(0d0),abs(var),abs(vmin(i)),abs(vmax(i)))
+         if (var.ge.vmin(i)-range_tol .and. var.le.vmax(i)+range_tol) then
             k=i
             found=.true.
             exit
@@ -2303,7 +2766,23 @@ contains
       call var_to_random_map(var,power(k),vmin(k),vmax(k),xloc,jac)
       x=q(k)*xloc
       if (k.gt.1) x=x+sum(q(1:k-1))
-      jac=jac/q(k)
+      if (.not.safe_phase_space_ratio(jac,q(k),updated_jac)) then
+         x=0d0
+         jac=-43d0
+         return
+      endif
+      jac=updated_jac
+      if (.not.ieee_is_finite(x) .or. .not.ieee_is_finite(jac)) then
+         x=0d0
+         jac=-43d0
+         return
+      endif
+      if (x.lt.-vtiny .or. x.gt.1d0+vtiny .or. jac.le.0d0) then
+         x=0d0
+         jac=-43d0
+      else
+         x=max(0d0,min(1d0,x))
+      endif
     end subroutine var_to_random
 
     subroutine var_to_random_map(var,power,varmin,varmax,x,jac)
@@ -2311,40 +2790,120 @@ contains
       real(kind=8),intent(in) :: var,power,varmin,varmax
       real(kind=8),intent(out) :: x
       real(kind=8),intent(inout) :: jac
-      integer(kind=4) :: ip
-      if (varmax-varmin.le.tiny*max(1d0,max(abs(varmin),abs(varmax)))) then
+      real(kind=8) :: exponent,scale,ratio_power,scaled_power,log_ratio,log_scaled
+      real(kind=8) :: numerator,denominator,jac_factor,interval_scale,interval_tolerance
+      real(kind=8) :: updated_jac,log_jac_factor
+      x=0d0
+      if (.not.ieee_is_finite(var) .or. .not.ieee_is_finite(power) .or. &
+           .not.ieee_is_finite(varmin) .or. .not.ieee_is_finite(varmax) .or. &
+           .not.ieee_is_finite(jac)) then
+         jac=-43d0
+         return
+      endif
+      interval_scale=max(abs(varmin),abs(varmax))
+      interval_tolerance=128d0*epsilon(1d0)*max(spacing(0d0),interval_scale)
+      if (varmax.le.varmin) then
+         jac=-43d0
+         return
+      endif
+      if (varmax-varmin.le.interval_tolerance) then
          ! A zero-width sector is a phase-space boundary.  It has no
          ! sampling measure, so retain a finite inverse Jacobian and use its
          ! endpoint coordinate instead of classifying the point as invalid.
          x=0d0
          return
       endif
-      ip=nint(power)
-      if (dble(ip).eq.power) then
-         ! integer
-         if (ip.eq.-1) then
-            x=log(varmin/var)/log(varmin/varmax)
-            jac=jac*var*log(varmax/varmin)
-         elseif (ip.eq.-2) then
-            x=varmax/var * ((var-varmin)/(varmax-varmin))
-            jac=jac*var**2*(varmax-varmin)/(varmax*varmin)
-         elseif (ip.eq.0) then
-            x=(var-varmin)/(varmax-varmin)
-            jac=jac*(varmax-varmin)
-         elseif (ip.eq.101) then
-            x=acos(min(max(1d0-2d0*(var-varmin)/(varmax-varmin),-1d0),1d0))/pi
-            jac=jac*(varmax-varmin)*pi*sin(pi*x)/2d0
-         else
-            x=(var**(1+ip)-varmin**(1+ip))/(varmax**(1+ip)-varmin**(1+ip))
-            jac=jac*(varmax**(1+ip)-varmin**(1+ip))* &
-                 (varmin**(1+ip)*(1d0-x)+varmax**(1+ip)*x)**(-power/(1d0+power))/ &
-                 (1d0+power)
+      if (power.eq.0d0) then
+         x=(var-varmin)/(varmax-varmin)
+         jac_factor=varmax-varmin
+      elseif (power.eq.-1d0) then
+         if (varmin.le.0d0 .or. var.le.0d0) then
+            jac=-43d0
+            return
          endif
+         denominator=log(varmax)-log(varmin)
+         if (.not.ieee_is_finite(denominator)) then
+            jac=-43d0
+            return
+         endif
+         if (denominator.le.0d0) then
+            jac=-43d0
+            return
+         endif
+         x=log(var/varmin)/denominator
+         jac_factor=var*denominator
+      elseif (power.eq.101d0) then
+         x=acos(min(max(1d0-2d0*(var-varmin)/(varmax-varmin),-1d0),1d0))/pi
+         jac_factor=(varmax-varmin)*pi*sin(pi*x)/2d0
       else
-         x=(var**(1d0+power)-varmin**(1d0+power))/(varmax**(1d0+power)-varmin**(1d0+power))
-         jac=jac*(varmax**(1d0+power)-varmin**(1d0+power))* &
-              (varmin**(1d0+power)*(1d0-x)+varmax**(1d0+power)*x)**(-power/(1d0+power))/&
-              (1d0+power)
+         if (varmin.lt.0d0 .or. varmax.le.0d0 .or. var.le.0d0) then
+            jac=-43d0
+            return
+         endif
+         exponent=1d0+power
+         if (abs(exponent).le.epsilon(1d0)) then
+            jac=-43d0
+            return
+         endif
+         if (exponent.lt.0d0 .and. varmin.le.0d0) then
+            jac=-43d0
+            return
+         endif
+         if (exponent.gt.0d0) then
+            scale=varmax
+            log_ratio=log(varmin)-log(varmax)
+            ratio_power=exp(exponent*log_ratio)
+            denominator=1d0-ratio_power
+            log_scaled=log(var)-log(scale)
+            scaled_power=exp(exponent*log_scaled)
+            numerator=scaled_power-ratio_power
+         else
+            scale=varmin
+            log_ratio=log(varmax)-log(varmin)
+            ratio_power=exp(exponent*log_ratio)
+            denominator=ratio_power-1d0
+            log_scaled=log(var)-log(scale)
+            scaled_power=exp(exponent*log_scaled)
+            numerator=scaled_power-1d0
+         endif
+         if (.not.ieee_is_finite(denominator)) then
+            jac=-43d0
+            return
+         endif
+         if (abs(denominator).le.128d0*epsilon(1d0)*max(spacing(0d0),abs(ratio_power),1d0)) then
+            jac=-43d0
+            return
+         endif
+         x=numerator/denominator
+         log_jac_factor=log(scale)+log(abs(denominator))-&
+              log(abs(exponent))-power*log_scaled
+         if (.not.ieee_is_finite(log_jac_factor) .or. &
+              log_jac_factor.gt.log(huge(1d0)) .or. &
+              log_jac_factor.lt.log(spacing(0d0))) then
+            jac=-43d0
+            return
+         endif
+         jac_factor=exp(log_jac_factor)
+      endif
+      if (.not.ieee_is_finite(x) .or. .not.ieee_is_finite(jac_factor)) then
+         x=0d0
+         jac=-43d0
+         return
+      endif
+      if (jac_factor.le.0d0) then
+         x=0d0
+         jac=-43d0
+         return
+      endif
+      if (.not.safe_phase_space_product(jac,jac_factor,updated_jac)) then
+         x=0d0
+         jac=-43d0
+         return
+      endif
+      jac=updated_jac
+      if (jac.le.0d0) then
+         x=0d0
+         jac=-43d0
       endif
     end subroutine var_to_random_map
     subroutine generate_mass_inverse(i,shatmin,shatmax)
@@ -2362,7 +2921,7 @@ contains
          write (*,*) 'mi- i',i,shatmin,shatmax,invm(i)
       endif
       ix=ix+1
-      call var_to_random(invm(i),ip_mass,shatmin,shatmax,ps%x(ix),ps%jac)
+      call var_to_random(invm(i),this%ip_mass,shatmin,shatmax,ps%x(ix),ps%jac)
     end subroutine generate_mass_inverse
   end subroutine gen23_compute_x_from_momenta
 
@@ -2398,7 +2957,13 @@ contains
     ! (1969), 2008-2016, doi:10.1103/PhysRev.187.2008
     implicit none
     real(kind=8),intent(in) :: xa2,xb2,S
-    lambda=s**2-2d0*(xa2+xb2)*s+(xa2-xb2)**2
+    if (xb2.eq.0d0) then
+       lambda=(s-xa2)**2
+    elseif (xa2.eq.0d0) then
+       lambda=(s-xb2)**2
+    else
+       lambda=s**2-2d0*(xa2+xb2)*s+(xa2-xb2)**2
+    endif
   end function lambda
 
   subroutine boostm(p,q,m,pboost)
@@ -2413,18 +2978,25 @@ contains
     ! output:
     !       real    pboost(0:3)    : four-momentum p in the boosted frame
     implicit none
-    real(kind=8) ,dimension(0:3) :: p,q,pboost
-    real(kind=8) :: pq,qq,m,lf
-    real(kind=8),parameter :: rZero=0d0
-    qq = q(1)**2+q(2)**2+q(3)**2
-    if ( qq.ne.rZero ) then
-       pq = p(1)*q(1)+p(2)*q(2)+p(3)*q(3)
-       lf = ((q(0)-m)*pq/qq+p(0))/m
-       pboost(0) = (p(0)*q(0)+pq)/m
-       pboost(1:3) =  p(1:3)+q(1:3)*lf
-    else
-       pboost(0:3) = p(0:3)
-    endif
+    real(kind=8),intent(in),dimension(0:3) :: p,q
+    real(kind=8),intent(in) :: m
+    real(kind=8),intent(out),dimension(0:3) :: pboost
+    real(kind=8) :: pq,lf,boost_scale
+    real(kind=8),parameter :: boost_tol=128d0*epsilon(1d0)
+    pboost=0d0
+    if (.not.all(ieee_is_finite(p)) .or. .not.all(ieee_is_finite(q)) .or. &
+         .not.ieee_is_finite(m)) return
+    boost_scale=max(spacing(0d0),abs(m),maxval(abs(q)))
+    if (m.le.boost_tol*boost_scale) return
+    if (q(0)+m.le.boost_tol*boost_scale) return
+    pq=p(1)*q(1)+p(2)*q(2)+p(3)*q(3)
+    if (.not.ieee_is_finite(pq)) return
+    ! q^2=(q0-m)(q0+m) makes this form stable both at rest and for a
+    ! nearly-rest-frame boost; it avoids division by |q_vec|^2.
+    lf=(pq/(q(0)+m)+p(0))/m
+    pboost(0)=(p(0)*q(0)+pq)/m
+    pboost(1:3)=p(1:3)+q(1:3)*lf
+    if (.not.all(ieee_is_finite(pboost))) pboost=0d0
   end subroutine boostm
   subroutine boostz(p,yb,pb)
     ! boost in the z-direction with rapidity yb
@@ -2447,19 +3019,27 @@ contains
     integer(kind=4),parameter :: n=4
     real(kind=8),dimension(n,n) :: a
     integer(kind=4),dimension(0:n) :: p
-    real(kind=8),parameter :: tol=1d-8
-    real(kind=8) :: deter
+    real(kind=8),parameter :: tol=128d0*epsilon(1d0)
+    real(kind=8) :: deter,matrix_scale,log_determinant
     logical :: success
     a(1:4,1)=(/ 0d0           , t_im1-shat_im1 , t_i-shat_i       , t_ip1-shat_ip1    /)
     a(1:4,2)=(/ t_im1-shat_im1, 2d0*t_im1      , t_i+t_im1-m_i_2  , t_im1+t_ip1-s_i   /)
     a(1:4,3)=(/ t_i-shat_i    , t_i+t_im1-m_i_2, 2d0*t_i          , t_i+t_ip1-m_ip1_2 /)
     a(1:4,4)=(/ t_ip1-shat_ip1, t_im1+t_ip1-s_i, t_i+t_ip1-m_ip1_2, 2d0*t_ip1         /)
+    gram_determinant4=0d0
+    if (.not.all(ieee_is_finite(a))) return
+    matrix_scale=maxval(abs(a))
+    if (matrix_scale.le.spacing(0d0)) return
+    a=a/matrix_scale
     call LUPdecompose(a,n,tol,p,success)
     if (success) then
        call LUPdeterminant(a,p,n,deter)
-       gram_determinant4=deter/16d0
-    else
-       gram_determinant4=1d0
+       if (.not.ieee_is_finite(deter)) return
+       if (deter.eq.0d0) return
+       log_determinant=log(abs(deter))+dble(n)*log(matrix_scale)-log(16d0)
+       if (.not.ieee_is_finite(log_determinant)) return
+       if (log_determinant.gt.log(huge(1d0))) return
+       gram_determinant4=sign(exp(log_determinant),deter)
     endif
   end function gram_determinant4
   subroutine tminmax(X,Z,U,V,W,tmin,tmax)
@@ -2476,16 +3056,32 @@ contains
     implicit none
     real(kind=8),intent(in) :: x,z,u,v,w 
     real(kind=8),intent(out):: tmin,tmax
-    real(kind=8) ::  t1,t2,yr
-    yr = lambda(x,u,v)*lambda(x,w,z)
-    if (yr.le.0d0) then
-       write (99,*) 'No allowed range for t: tmin=tmax',yr
-!!$       stop 1
-       yr=0d0
-    endif
+    real(kind=8) :: t1,t2,yr,lambda_left,lambda_right
+    real(kind=8) :: center,numerator,quotient,kinematic_scale
+    tmin=0d0
+    tmax=0d0
+    if (.not.ieee_is_finite(x) .or. .not.ieee_is_finite(z) .or. &
+         .not.ieee_is_finite(u) .or. .not.ieee_is_finite(v) .or. &
+         .not.ieee_is_finite(w)) return
+    center=u+w
+    if (.not.ieee_is_finite(center)) return
+    tmin=center
+    tmax=center
+    kinematic_scale=max(spacing(0d0),abs(x),abs(z),abs(u),abs(v),abs(w))
+    if (abs(x).le.tiny_kin*kinematic_scale) return
+    lambda_left=lambda(x,u,v)
+    lambda_right=lambda(x,w,z)
+    if (.not.ieee_is_finite(lambda_left) .or. &
+         .not.ieee_is_finite(lambda_right)) return
+    if (.not.safe_phase_space_product(lambda_left,lambda_right,yr)) return
+    if (yr.le.0d0) return
     yr=sqrt(yr)
-    t1 = u+w - ((x+u-v)*(x+w-z) - yr)/(2d0*x)
-    t2 = u+w - ((x+u-v)*(x+w-z) + yr)/(2d0*x)
+    if (.not.safe_phase_space_product(x+u-v,x+w-z,numerator)) return
+    if (.not.safe_phase_space_ratio(numerator-yr,2d0*x,quotient)) return
+    t1=center-quotient
+    if (.not.safe_phase_space_ratio(numerator+yr,2d0*x,quotient)) return
+    t2=center-quotient
+    if (.not.ieee_is_finite(t1) .or. .not.ieee_is_finite(t2)) return
     tmin = min(t1,t2)
     tmax = max(t1,t2)
   end subroutine tminmax
@@ -2496,21 +3092,29 @@ contains
     ! 2008-2016, doi:10.1103/PhysRev.187.2008
     use LUPdecomposition
     real(kind=8),intent(in) :: shat_i,shat_im1,shat_ip1,t_i,t_im1,t_ip1,m_i_2,m_ip1_2
-    real(kind=8) :: deter
+    real(kind=8) :: deter,matrix_scale,log_determinant
     integer(kind=4),parameter :: n=3
     real(kind=8),dimension(n,n) :: a
     integer(kind=4),dimension(0:n) :: p
-    real(kind=8),parameter :: tol=1d-8
+    real(kind=8),parameter :: tol=128d0*epsilon(1d0)
     logical :: success
     a(1:3,1)=(/2d0*shat_i             , shat_i-t_i    , shat_i+shat_im1-m_i_2/)
     a(1:3,2)=(/shat_i-t_i             , 0d0           , shat_im1-t_im1       /)
     a(1:3,3)=(/shat_ip1+shat_i-m_ip1_2, shat_ip1-t_ip1, 0d0                  /)
+    computeV=-99d99
+    if (.not.all(ieee_is_finite(a))) return
+    matrix_scale=maxval(abs(a))
+    if (matrix_scale.le.spacing(0d0)) return
+    a=a/matrix_scale
     call LUPdecompose(a,n,tol,p,success)
     if (success) then
        call LUPdeterminant(a,p,n,deter)
-       computeV=-deter/8d0
-    else
-       computeV=-99d99
+       if (.not.ieee_is_finite(deter)) return
+       if (deter.eq.0d0) return
+       log_determinant=log(abs(deter))+dble(n)*log(matrix_scale)-log(8d0)
+       if (.not.ieee_is_finite(log_determinant)) return
+       if (log_determinant.gt.log(huge(1d0))) return
+       computeV=-sign(exp(log_determinant),deter)
     endif
   end function computeV
   real(kind=8) function G(x,y,z,u,v,w)
@@ -2534,10 +3138,16 @@ contains
     implicit none
     real(kind=8),intent(in) :: shat_i,shat_im1,shat_ip1,t_i,t_im1,t_ip1,m_i_2,m_ip1_2
     real(kind=8),intent(out) :: smin,smax,V,sqrtGG
-    real(kind=8) :: GG,s1,s2,lam
+    real(kind=8) :: GG,s1,s2,lam,lam_scale
     V=computeV(shat_i,shat_im1,shat_ip1,t_i,t_im1,t_ip1,m_i_2,m_ip1_2)
     GG = G(t_i  , shat_ip1, shat_i  , t_ip1, m_ip1_2, 0d0) &
         *G(t_im1, shat_i  , shat_im1, t_i  , m_i_2  , 0d0)
+    if (.not.ieee_is_finite(GG) .or. .not.ieee_is_finite(V)) then
+       smin=shat_im1+shat_ip1
+       smax=smin
+       sqrtGG=0d0
+       return
+    endif
     if (GG.le.0d0 .or. V.eq.-99d99) then
 !!$       write (*,*) 'No allowed range for s: smin=smax',GG,V
 !!$       stop 1
@@ -2545,7 +3155,14 @@ contains
        V=0d0
     endif
     lam=lambda(shat_i,t_i,0d0)
-    if (abs(lam).le.tiny_kin*max(1d0,abs(shat_i),abs(t_i))) then
+    lam_scale=max(spacing(0d0),abs(shat_i),abs(t_i))
+    if (.not.ieee_is_finite(lam)) then
+       smin=shat_im1+shat_ip1
+       smax=smin
+       sqrtGG=0d0
+       return
+    endif
+    if (sqrt(abs(lam)).le.sqrt(tiny_kin)*lam_scale) then
        smin=shat_im1+shat_ip1
        smax=smin
        sqrtGG=0d0
@@ -2568,26 +3185,11 @@ contains
     ! output:
     !       real    prot(0:3)      : four-momentum p in the rotated frame
     implicit none
-    real(kind=8),dimension(0:3) :: p,q
-    real(kind=8),dimension(0:3) :: prot
-    real(kind=8) :: qt2,qt,psgn,qq
-    real(kind=8),parameter :: rZero=0d0,rOne=1d0
-    prot(0) = p(0)
-    qt2 = q(1)**2 + q(2)**2
-    if ( qt2.eq.rZero ) then
-       if ( q(3).eq.rZero ) then
-          prot(1:3) = p(1:3)
-       else
-          psgn = sign(rOne,q(3))
-          prot(1:3) = p(1:3)*psgn
-       endif
-    else
-       qq = sqrt(qt2+q(3)**2)
-       qt = sqrt(qt2)
-       prot(1) = q(1)*q(3)/qq/qt*p(1) -q(2)/qt*p(2) +q(1)/qq*p(3)
-       prot(2) = q(2)*q(3)/qq/qt*p(1) +q(1)/qt*p(2) +q(2)/qq*p(3)
-       prot(3) =          -qt/qq*p(1)               +q(3)/qq*p(3)
-    endif
+    real(kind=8),intent(in),dimension(0:3) :: p,q
+    real(kind=8),intent(out),dimension(0:3) :: prot
+    logical :: valid
+    call stable_rotate_from_z_axis(p,q,prot,valid)
+    if (.not.valid) prot=0d0
   end subroutine rotxxx
   subroutine rotxxx_inv(p,q,prot)
     ! Same as rotxxx, but inverse. That is, first doing
@@ -2596,23 +3198,9 @@ contains
     implicit none
     real(kind=8),dimension(0:3),intent(in) :: p,q
     real(kind=8),dimension(0:3),intent(out) :: prot
-    real(kind=8) :: qt2,qt,psgn,qq
-    prot(0) = p(0)
-    qt2 = q(1)**2 + q(2)**2
-    if ( qt2.lt.vtiny ) then
-       if ( q(3).eq.0d0 ) then
-          prot(1:3)=p(1:3)
-       else
-          psgn = sign(1d0,q(3))
-          prot(1:3)=p(1:3)*psgn
-       endif
-    else
-       qq = sqrt(qt2+q(3)**2)
-       qt = sqrt(qt2)
-       prot(1) = q(1)*q(3)/qq/qt*p(1) +q(2)*q(3)/qq/qt*p(2) -  qt/qq*p(3)
-       prot(2) =        -q(2)/qt*p(1) +        q(1)/qt*p(2)
-       prot(3) =   qt*q(1)/qq/qt*p(1) +        q(2)/qq*p(2) +q(3)/qq*p(3)
-    endif
+    logical :: valid
+    call stable_rotate_to_z_axis(p,q,prot,valid)
+    if (.not.valid) prot=0d0
   end subroutine rotxxx_inv
   subroutine rotz(p,phi,prot)
     implicit none
@@ -2623,7 +3211,7 @@ contains
     prot(2)=p(1)*sin(phi)+p(2)*cos(phi)
     prot(3)=p(3)
   end subroutine rotz
-  subroutine gentcms2(pa,pb,pc,t,phi,m1,m2,p1,pr)
+  subroutine gentcms2(pa,pb,pc,t,phi,m1,m2,p1,pr,status)
     ! Generates 4 momentum for particle p1, and remainder pr given the
     ! values t, and phi in the process pa+pb -> pr+p1.  Assumes incoming
     ! particles with momenta pa, pb and outgoing particles with mass
@@ -2634,17 +3222,21 @@ contains
     real(kind=8),intent(in) :: t,phi,m1,m2
     real(kind=8),intent(in),dimension(0:3) :: pa,pb,pc
     real(kind=8),intent(out),dimension(0:3) :: p1,pr
+    integer,intent(out) :: status
     real(kind=8) :: E_acms,p_acms,esum,esum2,ed,pp2,md2,pt,pt2,pt2_tol,phi_off
     real(kind=8),dimension(0:3) :: ptot,pa_cms,ptotm,Pii,pc_cms,pc_rot,pii_rot
     real(kind=8),parameter :: tiny=1d-5
+    p1=0d0
+    pr=0d0
+    status=0
     ptot(0:3)=pa(0:3)+pb(0:3)
     ptotm(0)=ptot(0)
     ptotm(1:3)=-ptot(1:3)
     ! determine magnitude of Pii in cms frame (from dhelas routine mom2cx)
     ESUM2 = dot(ptot,ptot)
     if (esum2 .le. 0d0) then
-       write (*,*) "error :: must be time-like momentum in gentcms2",esum2
-       stop 1
+       status=-1
+       return
     endif
     esum=sqrt(esum2)
     MD2=(M2-M1)*(M1+M2)
@@ -2654,41 +3246,37 @@ contains
     ELSE
        PP2=0.25d0*((MD2/ESUM)**2-2d0*(M1**2+M2**2)+ESUM**2)
        if(pp2.lt.0d0) then
-          write(*,*) 'Error #12 in genps_fks.f: magnitude^2 of '/&
-               &/'3-momentum smaller than 0',pp2
-          stop 1
+          status=-2
+          return
        endif
     ENDIF
     call boostm(pa,ptotm,esum,pa_cms)
     E_acms = pa_cms(0)
     p_acms = sqrt(pa_cms(1)**2+pa_cms(2)**2+pa_cms(3)**2)
+    if (p_acms.le.vtiny*max(spacing(0d0),abs(E_acms),esum)) then
+       status=-3
+       return
+    endif
 
     ! determine the offset in phi; the frame in which phi is defined
     ! is in the ptot rest-frame, with pa_cms aligned with the z-axis,
     ! and pc having zero phi angle.
     call boostm(pc,ptotm,esum,pc_cms)
     call rotxxx_inv(pc_cms,pa_cms,pc_rot)
-    if (pc_rot(1).ne.0d0) then
-       phi_off=atan(pc_rot(2)/pc_rot(1))
-    else
-       phi_off=0d0
-    endif
-    if (pc_rot(1).lt.0d0) then
-       phi_off=phi_off+pi
-    endif
+    phi_off=atan2(pc_rot(2),pc_rot(1))
 
     ! define Pii in the frame where pa_cms is aligned with the positive z axis
     Pii(0) = MAX((ESUM+ED)*0.5d0,0.d0)
     if (esum+ed.le.0d0) then
-       write (*,*) 'Error #15 in genps_fks.f: negative energy',esum,ed
-       stop 1
+       status=-4
+       return
     endif
     Pii(3) = -(m2**2-t-2d0*Pii(0)*E_acms)/(2d0*p_acms)
     pt2=pp2-Pii(3)**2
     pt2_tol=tiny*max(abs(esum2),abs(pp2),abs(Pii(3)**2))
     if (pt2.lt.-pt2_tol) then
-       write (*,*) 'Error #16 in genps_fks.f: relative pt^2 smaller than 0',pt2
-       stop 1
+       status=-5
+       return
     elseif (pt2.lt.0d0) then
        pt2=0d0
     endif
@@ -2709,9 +3297,24 @@ contains
     ! Phys. Rev. 187 (1969), 2008-2016, doi:10.1103/PhysRev.187.2008
     implicit none
     real(kind=8),intent(in) :: si,shat_i,shat_im1,shat_ip1,t_i,V,sqrtGG,ran
-    real(kind=8) :: cosphi,x,lam
+    real(kind=8) :: cosphi,x,lam,lam_scale,sqrtgg_scale
     lam=lambda(shat_i,t_i,0d0)
-    if (abs(lam).le.tiny_kin*max(1d0,abs(shat_i),abs(t_i)) .or. abs(sqrtGG).le.tiny_kin) then
+    if (.not.ieee_is_finite(lam) .or. .not.ieee_is_finite(V) .or. &
+         .not.ieee_is_finite(sqrtGG)) then
+       getphifroms=0d0
+       return
+    endif
+    lam_scale=max(spacing(0d0),abs(shat_i),abs(t_i))
+    if (sqrt(abs(lam)).le.sqrt(tiny_kin)*lam_scale) then
+       getphifroms=0d0
+       return
+    endif
+    sqrtgg_scale=max(spacing(0d0),abs((si-shat_im1-shat_ip1)*0.5d0*lam),abs(4d0*V))
+    if (.not.ieee_is_finite(sqrtgg_scale)) then
+       getphifroms=0d0
+       return
+    endif
+    if (abs(sqrtGG).le.tiny_kin*sqrtgg_scale) then
        getphifroms=0d0
        return
     endif

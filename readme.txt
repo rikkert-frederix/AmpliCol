@@ -44,7 +44,10 @@ will use a 5 Flavour scheme, (both proton 'p' and jet 'j' will include
 the 5 lightest quarks (and the gluon)). Furthermore, flavour
 configurations with three or more quark lines are not included by
 default, but can be included by providing the '--include_3qqbar'
-option.
+option. The matrix-element implementation supports at most three quark
+lines. Consequently, a Born process that already has three quark lines
+cannot currently have complete NLO real g -> q qbar coverage: those real
+states would contain four lines, and '--include_3qqbar' cannot enable them.
 
 
 
@@ -195,7 +198,9 @@ scheme. Use an LHAPDF set with the same flavour convention. Without LHAPDF,
 combined runs are supported only for the default five-flavour scheme.
 Endpoint I histories still come only from local real dipoles, so deliberately
 omitted higher-quark-line subprocesses are not restored by the integrated
-terms.
+terms. Initialisation reports incomplete g -> q qbar flavour coverage and
+distinguishes sectors recoverable with '--include_3qqbar' from the unsupported
+four-quark-line case.
 The integrated kernels require a massless unresolved parton. In addition to
 the fully massless dipoles, they support a massive final-state quark emitter
 for Q -> Qg in FF and FI topologies, a massive final-state spectator in FF and

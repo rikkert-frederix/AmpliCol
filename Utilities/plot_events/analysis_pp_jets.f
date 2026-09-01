@@ -204,10 +204,11 @@ cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
      $     ,evt_wgt_full(1),www(1),ptj1,ptj2,ptj3,ptj4,eta1,eta2,eta3
      $     ,eta4,dr12,dr13,dr14,dr23,dr24,dr34,m12,m13,m14,m23,m24,m34
       double precision pjet(0:3,nexternal-2),max
-      integer nqq,iflav(2),i,imax,j,l
-      logical filled(3:nexternal)
+      integer nqq,iflav(2),i,imax,j,l,ifl,light_flavour_magnitude
+      logical filled(3:nexternal),opposite_light_flavours
       double precision pt,eta,dr,m
-      external pt,eta,dr,m
+      external pt,eta,dr,m,light_flavour_magnitude
+      external opposite_light_flavours
       ! weight distribution
       www(1)=1d0
       call HwU_fill(1,evt_wgt_full(1)/evt_wgt_LC(1),www)
@@ -222,12 +223,13 @@ cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
       iflav(1:2)=0
       nqq=0
       do i=1,nexternal
-         if (abs(ipdg(i)).ge.1 .and. abs(ipdg(i)).lt.6) then
+         ifl=light_flavour_magnitude(ipdg(i))
+         if (ifl.ge.1 .and. ifl.lt.6) then
             nqq=nqq+1
             if (iflav(1).eq.0) then
-               iflav(1)=abs(ipdg(i))
-            elseif (iflav(1).ne.abs(ipdg(i))) then
-               iflav(2)=abs(ipdg(i))
+               iflav(1)=ifl
+            elseif (iflav(1).ne.ifl) then
+               iflav(2)=ifl
             endif
          endif
       enddo
@@ -334,12 +336,12 @@ cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
             call HwU_fill(5,11d0,evt_wgt_full)
          elseif ((ipdg(1).ge.1 .and. ipdg(1).le.6) .and.
      $           (ipdg(2).le.-1 .and. ipdg(2).ge.-6) .and.
-     $           (ipdg(1).eq.-ipdg(2))) then
+     $           opposite_light_flavours(ipdg(1),ipdg(2))) then
 ! qqbar -> QQbar +g
             call HwU_fill(5,12d0,evt_wgt_full)
          elseif ((ipdg(1).le.-1 .and. ipdg(1).ge.-6) .and.
      $           (ipdg(2).ge.1 .and. ipdg(2).le.6) .and.
-     $           (ipdg(1).eq.-ipdg(2))) then
+     $           opposite_light_flavours(ipdg(1),ipdg(2))) then
 ! qbarq -> QQbar +g
             call HwU_fill(5,13d0,evt_wgt_full)
          elseif ((ipdg(1).ge.1 .and. ipdg(1).le.6) .and.
@@ -507,4 +509,28 @@ cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
       double precision p1(0:3),p2(0:3)
       m=sqrt((p1(0)+p2(0))**2-(p1(1)+p2(1))**2-
      $       (p1(2)+p2(2))**2-(p1(3)+p2(3))**2)
+      end
+
+      integer function light_flavour_magnitude(ipdg)
+      implicit none
+      integer ipdg
+      light_flavour_magnitude=0
+      if (ipdg.ge.1 .and. ipdg.le.6) then
+         light_flavour_magnitude=ipdg
+      elseif (ipdg.le.-1 .and. ipdg.ge.-6) then
+         light_flavour_magnitude=-ipdg
+      endif
+      end
+
+      logical function opposite_light_flavours(first,second)
+      implicit none
+      integer first,second
+      opposite_light_flavours=.false.
+      if (first.ge.1 .and. first.le.6) then
+         if (second.le.-1 .and. second.ge.-6)
+     $        opposite_light_flavours=first.eq.-second
+      elseif (first.le.-1 .and. first.ge.-6) then
+         if (second.ge.1 .and. second.le.6)
+     $        opposite_light_flavours=first.eq.-second
+      endif
       end

@@ -2,25 +2,32 @@ module handling_processes
   use common
   use amplitude_QCD_mod
   use phase_space_base
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+  implicit none
+  integer,parameter :: max_process_records=20000000
+  integer(kind=8),parameter :: max_process_workspace_bytes=2147483648_8
+  integer(kind=8),parameter :: max_process_colour_orders=1000000_8
+  integer(kind=8),parameter :: max_process_order_comparisons=100000000_8
+  private :: handling_light_quark_code,handling_same_light_flavour
   type :: multichan_info
      ! if adding variables here, also update the finalize_multichan_info subroutine
      integer,dimension(:,:),allocatable :: channels,unique_channelgroup_list
      integer,dimension(:,:,:),allocatable :: channel_permutations
      integer,dimension(:),allocatable :: unique_channel_list,map_proc_to_channelgroup,number_of_channels
-     integer :: max_channels,n_unique_channels,n_unique_channelgroups
+     integer :: max_channels=0,n_unique_channels=0,n_unique_channelgroups=0
    contains
      final :: finalize_multichan_info
   end type multichan_info
   type dipole
      integer,dimension(:),allocatable :: process_r,dip_map,reduced_color_order
-     integer,dimension(3) :: dip_ijk,dip_ijk_f
-     integer,dimension(2) :: dip_r_ijk,dip_r_ijk_f
+     integer,dimension(3) :: dip_ijk=0,dip_ijk_f=0
+     integer,dimension(2) :: dip_r_ijk=0,dip_r_ijk_f=0
      integer :: dipole_type=0 ! bit convention: 0:II, 1:FI, 2:IF, 3:FF
      integer :: col_fac=1
      real(kind=8) :: lc_weight=1d0
      real(kind=8) :: alpha_variable=huge(1d0)
      type(amplitude_QCD) :: amp
-     real(kind=8),dimension(0:3) :: p_mapped_ij
+     real(kind=8),dimension(0:3) :: p_mapped_ij=0d0
      real(kind=8),dimension(:,:),allocatable :: p_mapped
      logical :: active=.true.,alpha_active=.true.,passes_cuts=.true.
      integer,dimension(:),allocatable :: rho_lookup_ih1,rho_lookup_ih2
@@ -44,14 +51,15 @@ module handling_processes
      integer,dimension(:,:),allocatable :: processes,color_orders
      integer,dimension(:,:),allocatable :: phase_space_permutations
      integer,dimension(:),allocatable :: iden_iproc,phase_space_orders,nhel
-     integer :: nproc
+     integer :: nproc=0
      real(kind=8),dimension(:,:),allocatable :: val_procs,idenCOandMAPfactor
      integer,dimension(:,:,:),allocatable :: iden_processes,same_flavour
      integer(kind=4),dimension(:,:),allocatable :: spin,hel_fac
      integer(kind=8),dimension(:),allocatable :: iden
-     logical,dimension(-6:7,2) :: ipdgs
-     integer(kind=4) :: next,ndim,ndim_extra
+     logical,dimension(-6:7,2) :: ipdgs=.false.
+     integer(kind=4) :: next=0,ndim=0,ndim_extra=0
      logical :: is_subtracted_real=.false.
+     integer(kind=8) :: event_selection_epoch=0_8
      integer,dimension(:),allocatable :: col_fac
      real(kind=8),dimension(:),allocatable :: amp2,amp2_hel
      real(kind=8),dimension(:,:,:),allocatable :: amp2_hel_samples
@@ -63,11 +71,25 @@ module handling_processes
    contains
      final :: finalize_phase_space_order_group
   end type phase_space_order_group
-  integer :: next,nproc_unique,ngroups,nprocs,c_o,nquarks
+  integer :: next=0,nproc_unique=0,ngroups=0,nprocs=0,c_o=0,nquarks=0
   type(phase_space_order_group),dimension(:),allocatable :: pgl
-  logical :: read_proc_from_file
+  logical :: read_proc_from_file=.false.
   integer(kind=4),dimension(:),allocatable :: o,part
 contains
+  pure logical function handling_light_quark_code(flavour)
+    integer,intent(in) :: flavour
+    handling_light_quark_code=(flavour.ge.1 .and. flavour.le.6) .or. &
+         (flavour.le.-1 .and. flavour.ge.-6)
+  end function handling_light_quark_code
+
+  pure logical function handling_same_light_flavour(first,second)
+    integer,intent(in) :: first,second
+    handling_same_light_flavour=.false.
+    if (.not.handling_light_quark_code(first) .or. &
+         .not.handling_light_quark_code(second)) return
+    handling_same_light_flavour=first.eq.second .or. first.eq.-second
+  end function handling_same_light_flavour
+
   subroutine determine_phase_space_orders(part,col_o,n_ps,PS_o)
     use math_functions
     implicit none
@@ -117,13 +139,90 @@ contains
     implicit none
     type(phase_space_order_group),intent(inout) :: pgl
     real(kind=8),dimension(pgl%nproc),intent(in) :: amp2
-    integer :: i,j,k,ii,jj,kk,nevent
+    integer,intent(in) :: nevent
+    integer :: i,j,k,ii,jj,kk,allocation_status
+    integer(kind=8) :: workspace_bytes
+    character(len=256) :: allocation_message
     real(kind=8),parameter :: tiny=1d-8
+    real(kind=8) :: amplitude_scale,normalized_norm,normalized_residual
+    complex(kind=8) :: amp_i,amp_j,amp_k
     if (keep_processes_separate) return
     if (.not.decompose_same_flavour_into_two_diff_flavour) return
+    if (nevent.lt.2 .or. pgl%nproc.lt.1 .or. &
+         pgl%nproc.gt.max_process_records) then
+       write (*,*) 'Invalid same-flavour reduction dimensions:',nevent,pgl%nproc
+       stop 1
+    endif
+    if (.not.all(ieee_is_finite(amp2))) then
+       write (*,*) 'Invalid matrix elements in same-flavour reduction'
+       stop 1
+    endif
+    if (any(amp2.lt.0d0)) then
+       write (*,*) 'Invalid matrix elements in same-flavour reduction'
+       stop 1
+    endif
+    if (.not.allocated(pgl%amps) .or. .not.allocated(pgl%passed)) then
+       write (*,*) 'Incomplete amplitude state in same-flavour reduction'
+       stop 1
+    endif
+    if (size(pgl%amps).lt.1) then
+       write (*,*) 'Empty amplitude state in same-flavour reduction'
+       stop 1
+    endif
+    if (size(pgl%passed).lt.1) then
+       write (*,*) 'Empty sample state in same-flavour reduction'
+       stop 1
+    endif
+    if (pgl%passed(1).lt.1 .or. pgl%passed(1).gt.nevent) then
+       write (*,*) 'Invalid sample index in same-flavour reduction:',&
+            pgl%passed(1),nevent
+       stop 1
+    endif
+    if (.not.allocated(pgl%amps(1)%n_qqbar)) then
+       write (*,*) 'Missing quark-line metadata in same-flavour reduction'
+       stop 1
+    endif
+    if (size(pgl%amps(1)%n_qqbar).ne.pgl%nproc) then
+       write (*,*) 'Incompatible quark-line metadata in same-flavour reduction'
+       stop 1
+    endif
+    if (all(pgl%amps(1)%n_qqbar.lt.2)) return
+    if (.not.allocated(pgl%amps(1)%iproc_start) .or. &
+         .not.allocated(pgl%amps(1)%amps) .or. &
+         .not.allocated(pgl%amps(1)%spins) .or. &
+         .not.allocated(pgl%amps(1)%same_flav) .or. &
+         .not.allocated(pgl%amps(1)%same_flavour_sum)) then
+       write (*,*) 'Incomplete amplitude metadata in same-flavour reduction'
+       stop 1
+    endif
+    if (size(pgl%amps(1)%iproc_start).ne.pgl%nproc+1 .or. &
+         size(pgl%amps(1)%same_flav).ne.pgl%nproc .or. &
+         size(pgl%amps(1)%amps).lt.pgl%amps(1)%n_amps .or. &
+         size(pgl%amps(1)%spins,3).lt.pgl%amps(1)%n_amps .or. &
+         size(pgl%amps(1)%same_flavour_sum,1).lt.pgl%amps(1)%n_amps) then
+       write (*,*) 'Incompatible amplitude metadata in same-flavour reduction'
+       stop 1
+    endif
+    workspace_bytes=8_8*int(nevent,kind=8)*int(pgl%nproc,kind=8)
+    if (workspace_bytes.gt.max_process_workspace_bytes) then
+       write (*,*) 'Same-flavour reduction exceeds the supported workspace:',&
+            workspace_bytes,max_process_workspace_bytes
+       stop 1
+    endif
     if (.not.allocated(pgl%same_flavour)) then
-       allocate(pgl%same_flavour(nevent,pgl%nproc,2))
+       allocate(pgl%same_flavour(nevent,pgl%nproc,2),stat=allocation_status,&
+            errmsg=allocation_message)
+       if (allocation_status.ne.0) then
+          write (*,*) 'Could not allocate same-flavour reduction samples: ',&
+               trim(allocation_message)
+          stop 1
+       endif
        pgl%same_flavour=0
+    elseif (size(pgl%same_flavour,1).ne.nevent .or. &
+         size(pgl%same_flavour,2).ne.pgl%nproc .or. &
+         size(pgl%same_flavour,3).ne.2) then
+       write (*,*) 'Incompatible same-flavour reduction sample storage'
+       stop 1
     endif
     do i=1,pgl%nproc
        if (pgl%amps(1)%n_qqbar(i).lt.2) cycle
@@ -138,12 +237,38 @@ contains
                 do jj=pgl%amps(1)%iproc_start(j),pgl%amps(1)%iproc_start(j+1)-1
                    if (all(pgl%amps(1)%spins(:,1,ii).eq.pgl%amps(1)%spins(:,1,jj))) exit
                 enddo
+                if (jj.ge.pgl%amps(1)%iproc_start(j+1)) exit
                 do kk=pgl%amps(1)%iproc_start(k),pgl%amps(1)%iproc_start(k+1)-1
                    if (all(pgl%amps(1)%spins(:,1,ii).eq.pgl%amps(1)%spins(:,1,kk))) exit
                 enddo
-                if (abs(pgl%amps(1)%amps(ii))+abs(pgl%amps(1)%amps(jj))+abs(pgl%amps(1)%amps(kk)).eq.0d0) cycle
-                if (abs(pgl%amps(1)%amps(ii)-(pgl%amps(1)%amps(jj)+pgl%amps(1)%amps(kk)))/&
-                     (abs(pgl%amps(1)%amps(ii))+abs(pgl%amps(1)%amps(jj))+abs(pgl%amps(1)%amps(kk))).gt.tiny) then
+                if (kk.ge.pgl%amps(1)%iproc_start(k+1)) exit
+                amp_i=pgl%amps(1)%amps(ii)
+                amp_j=pgl%amps(1)%amps(jj)
+                amp_k=pgl%amps(1)%amps(kk)
+                if (.not.ieee_is_finite(real(amp_i,kind=8)) .or. &
+                     .not.ieee_is_finite(aimag(amp_i)) .or. &
+                     .not.ieee_is_finite(real(amp_j,kind=8)) .or. &
+                     .not.ieee_is_finite(aimag(amp_j)) .or. &
+                     .not.ieee_is_finite(real(amp_k,kind=8)) .or. &
+                     .not.ieee_is_finite(aimag(amp_k))) then
+                   write (*,*) 'Non-finite amplitude in same-flavour reduction:',i,j,k
+                   stop 1
+                endif
+                amplitude_scale=max(abs(real(amp_i,kind=8)),abs(aimag(amp_i)),&
+                     abs(real(amp_j,kind=8)),abs(aimag(amp_j)),&
+                     abs(real(amp_k,kind=8)),abs(aimag(amp_k)))
+                if (amplitude_scale.eq.0d0) cycle
+                normalized_norm=abs(amp_i/amplitude_scale)+abs(amp_j/amplitude_scale)+&
+                     abs(amp_k/amplitude_scale)
+                normalized_residual=abs(amp_i/amplitude_scale-&
+                     (amp_j/amplitude_scale+amp_k/amplitude_scale))
+                if (normalized_norm.le.0d0 .or. &
+                     .not.ieee_is_finite(normalized_norm) .or. &
+                     .not.ieee_is_finite(normalized_residual)) then
+                   write (*,*) 'Invalid normalized amplitude in same-flavour reduction:',i,j,k
+                   stop 1
+                endif
+                if (normalized_residual/normalized_norm.gt.tiny) then
                    exit
                 endif
              enddo
@@ -174,9 +299,17 @@ contains
              do jj=pgl%amps(1)%iproc_start(j),pgl%amps(1)%iproc_start(j+1)-1
                 if (all(pgl%amps(1)%spins(:,1,ii).eq.pgl%amps(1)%spins(:,1,jj))) exit
              enddo
+             if (jj.ge.pgl%amps(1)%iproc_start(j+1)) then
+                write (*,*) 'Missing first helicity partner in same-flavour decomposition',i,j,ii
+                stop 1
+             endif
              do kk=pgl%amps(1)%iproc_start(k),pgl%amps(1)%iproc_start(k+1)-1
                 if (all(pgl%amps(1)%spins(:,1,ii).eq.pgl%amps(1)%spins(:,1,kk))) exit
              enddo
+             if (kk.ge.pgl%amps(1)%iproc_start(k+1)) then
+                write (*,*) 'Missing second helicity partner in same-flavour decomposition',i,k,ii
+                stop 1
+             endif
              pgl%amps(1)%same_flavour_sum(ii,1)=jj
              pgl%amps(1)%same_flavour_sum(ii,2)=kk
           enddo
@@ -190,8 +323,32 @@ contains
     ! same number of spin states
     implicit none
     type(phase_space_order_group),intent(inout) :: pgl
-    integer :: i,iproc
-    if (.not. allocated(pgl%spin)) allocate(pgl%spin(0:3,1:pgl%next))
+    integer :: i,iproc,allocation_status
+    character(len=256) :: allocation_message
+    if (pgl%next.lt.3 .or. pgl%next.gt.max_amplitude_external_particles .or. &
+         pgl%nproc.lt.1 .or. .not.allocated(pgl%processes)) then
+       write (*,*) 'Invalid process dimensions while setting up spins:',&
+            pgl%next,pgl%nproc
+       stop 1
+    endif
+    if (size(pgl%processes,1).ne.pgl%next .or. &
+         size(pgl%processes,2).ne.pgl%nproc) then
+       write (*,*) 'Incompatible process array while setting up spins'
+       stop 1
+    endif
+    if (.not.allocated(pgl%spin)) then
+       allocate(pgl%spin(0:3,1:pgl%next),stat=allocation_status,&
+            errmsg=allocation_message)
+       if (allocation_status.ne.0) then
+          write (*,*) 'Could not allocate process spin table: ',&
+               trim(allocation_message)
+          stop 1
+       endif
+    elseif (size(pgl%spin,1).ne.4 .or. size(pgl%spin,2).ne.pgl%next) then
+       write (*,*) 'Existing process spin table has incompatible dimensions'
+       stop 1
+    endif
+    pgl%spin=0
     do i=1,pgl%next
        pgl%spin(0,i)=phys_model%get_spin(pgl%processes(i,1))
        if (pgl%spin(0,i).eq.2) then
@@ -221,13 +378,13 @@ contains
   subroutine setup_color_order(pgl_unique)
     implicit none
     type(phase_space_order_group),intent(inout) :: pgl_unique
-    integer :: i,iproc,nq,ng,nsing,iq,iaq,is,ig,naq
+    integer :: i,iproc,nq,ng,nsing,iq,iaq,is,ig
     do iproc=1,pgl_unique%nproc
        nq=0
        ng=0
        nsing=0
        do i=1,pgl_unique%next
-          if (phys_model%is_quark(abs(pgl_unique%processes(i,iproc)))) then
+          if (handling_light_quark_code(pgl_unique%processes(i,iproc))) then
              nq=nq+1
           elseif(phys_model%is_gluon(pgl_unique%processes(i,iproc))) then
              ng=ng+1
@@ -310,6 +467,7 @@ contains
   end subroutine setup_color_order
 
   subroutine set_initial_state_average_factor(pgl)
+    use math_functions, only: checked_multiply8
     implicit none
     type(phase_space_order_group),intent(inout) :: pgl
     integer :: i,iproc
@@ -317,13 +475,16 @@ contains
        do i=1,2
           if (pgl%processes(i,iproc).eq.21) then
              ! gluon: two polarisations and 8 colours
-             pgl%iden(iproc)=pgl%iden(iproc)*2*8
-          elseif (abs(pgl%processes(i,iproc)).ge.1 .and. abs(pgl%processes(i,iproc)).le.6) then
+             pgl%iden(iproc)=checked_multiply8(pgl%iden(iproc),16_8,&
+                  'initial-state average factor')
+          elseif (handling_light_quark_code(pgl%processes(i,iproc))) then
              ! (anti-)quark: two helicities and 3 colours
-             pgl%iden(iproc)=pgl%iden(iproc)*2*3
+             pgl%iden(iproc)=checked_multiply8(pgl%iden(iproc),6_8,&
+                  'initial-state average factor')
           else
              ! assume two spin states and no colour:
-             pgl%iden(iproc)=pgl%iden(iproc)*2
+             pgl%iden(iproc)=checked_multiply8(pgl%iden(iproc),2_8,&
+                  'initial-state average factor')
           endif
        enddo
     enddo
@@ -333,9 +494,29 @@ contains
     use math_functions
     implicit none
     type(phase_space_order_group),intent(inout) :: pgl
-    integer :: i,j,ni,iproc
+    integer :: i,j,ni,iproc,allocation_status
     integer,dimension(:,:),allocatable :: iden_part
-    allocate(iden_part(1:pgl%next,2))
+    character(len=256) :: allocation_message
+    if (pgl%next.lt.3 .or. pgl%next.gt.max_amplitude_external_particles .or. &
+         pgl%nproc.lt.1 .or. .not.allocated(pgl%processes) .or. &
+         .not.allocated(pgl%iden)) then
+       write (*,*) 'Invalid process state for identical-particle factors'
+       stop 1
+    endif
+    if (size(pgl%processes,1).ne.pgl%next .or. &
+         size(pgl%processes,2).ne.pgl%nproc .or. &
+         size(pgl%iden).ne.pgl%nproc) then
+       write (*,*) 'Incompatible process state for identical-particle factors'
+       stop 1
+    endif
+    allocate(iden_part(1:pgl%next,2),stat=allocation_status,&
+         errmsg=allocation_message)
+    if (allocation_status.ne.0) then
+       write (*,*) 'Could not allocate identical-particle workspace: ',&
+            trim(allocation_message)
+       stop 1
+    endif
+    iden_part=0
     do iproc=1,pgl%nproc
        ni=0
        do i=3,pgl%next
@@ -352,13 +533,15 @@ contains
           endif
        enddo
        do i=1,ni
-          pgl%iden(iproc)=pgl%iden(iproc)*factorial8(iden_part(i,2))
+          pgl%iden(iproc)=checked_multiply8(pgl%iden(iproc),factorial8(iden_part(i,2)),&
+               'identical-particle factor')
        enddo
     enddo
     deallocate(iden_part)
   end subroutine set_final_state_identical_particle_factor
 
   subroutine compute_LC_colour_factor(pgl)
+    use math_functions, only: checked_integer_power
     implicit none
     type(phase_space_order_group),intent(inout) :: pgl
     integer :: i,ifac,iproc
@@ -368,7 +551,7 @@ contains
        do i=1,pgl%next
           if (pgl%processes(i,iproc).eq.21) then
              fac=fac+1d0
-          elseif (abs(pgl%processes(i,iproc)).ge.1 .and. abs(pgl%processes(i,iproc)).le.6) then
+          elseif (handling_light_quark_code(pgl%processes(i,iproc))) then
              fac=fac+0.5d0
           endif
        enddo
@@ -378,35 +561,81 @@ contains
                'colour factor is not an integer',ifac,fac
           stop 1
        endif
-       pgl%col_fac(iproc)=3**ifac
+       pgl%col_fac(iproc)=checked_integer_power(3,ifac,'leading-colour factor')
     enddo
   end subroutine compute_LC_colour_factor
 
   subroutine define_identical_procs(pgl)
     implicit none
     type(phase_space_order_group),intent(inout) :: pgl
-    integer :: iproc,ip,n
+    integer :: iproc,ip,n,max_identical,allocation_status
+    integer(kind=8) :: workspace_bytes
+    character(len=256) :: allocation_message
+    if (pgl%next.lt.3 .or. pgl%next.gt.max_amplitude_external_particles .or. &
+         pgl%nproc.lt.1 .or. pgl%nproc.gt.max_process_records .or. &
+         .not.allocated(pgl%processes)) then
+       write (*,*) 'Invalid dimensions while defining identical processes:',&
+            pgl%next,pgl%nproc
+       stop 1
+    endif
+    if (size(pgl%processes,1).ne.pgl%next .or. &
+         size(pgl%processes,2).ne.pgl%nproc) then
+       write (*,*) 'Incompatible process array while defining identical processes'
+       stop 1
+    endif
+    if (allocated(pgl%iden_iproc)) deallocate(pgl%iden_iproc)
+    if (allocated(pgl%val_procs)) deallocate(pgl%val_procs)
+    if (allocated(pgl%iden_processes)) deallocate(pgl%iden_processes)
     ! first fill the number of identical processes per iproc (so that we can
     ! allocate the array with the right size)
-    allocate(pgl%iden_iproc(1:pgl%nproc))
+    allocate(pgl%iden_iproc(1:pgl%nproc),stat=allocation_status,&
+         errmsg=allocation_message)
+    if (allocation_status.ne.0) then
+       write (*,*) 'Could not allocate identical-process counts: ',&
+            trim(allocation_message)
+       stop 1
+    endif
     do iproc=1,pgl%nproc
        pgl%iden_iproc(iproc)=1
-       if (any(abs(pgl%processes(1:next,iproc)).eq.1)) then
+       if (any(pgl%processes(1:pgl%next,iproc).eq.1 .or. &
+            pgl%processes(1:pgl%next,iproc).eq.-1)) then
           pgl%iden_iproc(iproc)=pgl%iden_iproc(iproc)*5
        endif
-       if (any(abs(pgl%processes(1:next,iproc)).eq.2)) then
+       if (any(pgl%processes(1:pgl%next,iproc).eq.2 .or. &
+            pgl%processes(1:pgl%next,iproc).eq.-2)) then
           pgl%iden_iproc(iproc)=pgl%iden_iproc(iproc)*4
        endif
     enddo
-    allocate(pgl%val_procs(1:maxval(pgl%iden_iproc(1:pgl%nproc)),1:pgl%nproc))
-    allocate(pgl%iden_processes(1:next,1:maxval(pgl%iden_iproc(1:pgl%nproc)),1:pgl%nproc))
+    max_identical=maxval(pgl%iden_iproc)
+    workspace_bytes=4_8*int(pgl%nproc,kind=8)+&
+         8_8*int(max_identical,kind=8)*int(pgl%nproc,kind=8)+&
+         4_8*int(pgl%next,kind=8)*int(max_identical,kind=8)*&
+         int(pgl%nproc,kind=8)
+    if (workspace_bytes.lt.0_8 .or. &
+         workspace_bytes.gt.max_process_workspace_bytes) then
+       write (*,*) 'Identical-process expansion exceeds the supported workspace:',&
+            workspace_bytes,max_process_workspace_bytes
+       stop 1
+    endif
+    allocate(pgl%val_procs(1:max_identical,1:pgl%nproc),&
+         pgl%iden_processes(1:pgl%next,1:max_identical,1:pgl%nproc),&
+         stat=allocation_status,errmsg=allocation_message)
+    if (allocation_status.ne.0) then
+       write (*,*) 'Could not allocate identical-process expansion: ',&
+            trim(allocation_message)
+       stop 1
+    endif
+    pgl%val_procs=0d0
+    pgl%iden_processes=0
     ! Loop again and actually fill the iden_processes()
     do iproc=1,pgl%nproc
        do ip=0,pgl%iden_iproc(iproc)-1
-          do n=1,next
-             if (abs(pgl%processes(n,iproc)).eq.1) then
+          do n=1,pgl%next
+             if (pgl%processes(n,iproc).eq.1 .or. &
+                  pgl%processes(n,iproc).eq.-1) then
                 pgl%iden_processes(n,ip+1,iproc)=sign(mod(ip,5)+1,pgl%processes(n,iproc))
-             elseif (abs(pgl%processes(n,iproc)).eq.2) then
+             elseif (pgl%processes(n,iproc).eq.2 .or. &
+                  pgl%processes(n,iproc).eq.-2) then
                 if (mod(ip,5)+1.eq.ip/5+2) then
                    pgl%iden_processes(n,ip+1,iproc)=sign(1,pgl%processes(n,iproc))
                 else
@@ -424,16 +653,41 @@ contains
     use math_functions
     implicit none
     integer(kind=8),intent(out) :: sym_fac
-    integer :: ngl=0,ngl_tot=0,n_sing=0
+    integer :: ngl,ngl_tot,n_sing
     integer,dimension(6) :: nq,naq
     integer :: i,j
     integer(kind=8) :: tot_ord
-    integer :: ic,i_qq,iaq,i_ini,i_inv,i_swap,k,l,ip
+    integer :: ic,i_qq,iaq,i_ini,i_inv,i_swap,k,l,ios
+    integer(kind=8) :: ip,workspace_bytes,comparison_count
     integer,dimension(next) :: fgluons,ips,ips_out
     logical :: same_flavour
     logical,dimension(next) :: fgluon
     integer,dimension(:,:),allocatable :: io_list,io
+    character(len=256) :: allocation_message
 
+    if (next.lt.4 .or. next.gt.max_amplitude_external_particles .or. &
+         nquarks.lt.0 .or. nquarks.gt.next) then
+       write (*,*) 'Invalid multichannel process dimensions:',next,nquarks
+       stop 1
+    endif
+    if (.not.allocated(part) .or. .not.allocated(o)) then
+       write (*,*) 'Missing process data for multichannel symmetry factor'
+       stop 1
+    endif
+    if (size(part).lt.next .or. size(o).lt.next) then
+       write (*,*) 'Short process data for multichannel symmetry factor'
+       stop 1
+    endif
+    if (any(o(1:next).lt.1) .or. any(o(1:next).gt.next)) then
+       write (*,*) 'Out-of-range colour order for multichannel symmetry factor'
+       stop 1
+    endif
+
+    ngl=0
+    ngl_tot=0
+    n_sing=0
+    tot_ord=0_8
+    sym_fac=0_8
     nq=0
     naq=0
     ! count the number of final state gluons and quarks
@@ -455,7 +709,7 @@ contains
     ! Since we only need to include a subset of all the colour-orderings, we
     ! need to compensate with a symmetry factor
     if (nquarks.eq.0) then
-       tot_ord=factorial8(ngl_tot-1)
+       tot_ord=factorial8(max(ngl_tot-1,0))
        ! All gluon process. This assumes that the only channels we are
        ! including are strictly different. We distinguish them by considering
        ! how many (final state) gluons are attached to the two colour lines
@@ -476,17 +730,17 @@ contains
        if (c_o*2.eq.(ngl)) then
           sym_fac=factorial8(ngl)
        else
-          sym_fac=2*factorial8(ngl)
+          sym_fac=checked_multiply8(2_8,factorial8(ngl),'all-gluon multichannel factor')
        endif
     elseif (nquarks.eq.2) then
        tot_ord=factorial8(ngl_tot)
-       if ((abs(part(1)).ge.1 .and. abs(part(1)).le.6) .and. &
-            (abs(part(2)).ge.1 .and. abs(part(2)).le.6) )then
+       if (handling_light_quark_code(part(1)) .and. &
+            handling_light_quark_code(part(2))) then
           ! quark and anti-quark are incoming. Only 1 channel needed,
           ! which would result in the following symmetry factor:
           sym_fac=factorial8(ngl)
-       elseif ((abs(part(1)).ge.1 .and. abs(part(1)).le.6) .or. &
-            (abs(part(2)).ge.1 .and. abs(part(2)).le.6) )then
+       elseif (handling_light_quark_code(part(1)) .or. &
+            handling_light_quark_code(part(2))) then
           ! one incoming quark (or anti-quark). There are ngluons
           ! channels needed: they correspond to having the incoming
           ! gluon at all possible positions between the quark and
@@ -517,25 +771,29 @@ contains
           ! iaa, with symmetry factor (ngluon-2)!*2*2
           ! iii, with symmetry factor (ngluon-2)!*2
           ! Hence
-          sym_fac=factorial8(ngl)*2
+          sym_fac=checked_multiply8(factorial8(ngl),2_8,'two-quark multichannel factor')
           if (ngl.gt.0) then
-             sym_fac=factorial8(ngl)*2
+             sym_fac=checked_multiply8(factorial8(ngl),2_8,'two-quark multichannel factor')
           endif
           if (ifindloc(o,next,1).ne.next-ifindloc(o,next,2)+1) then
-             sym_fac=sym_fac*2
+             sym_fac=checked_multiply8(sym_fac,2_8,'two-quark multichannel factor')
           endif
        endif
     elseif (nquarks.eq.4) then
        ! total number of potentially different orders: two ways of connecting
        ! quarks, (n-4)! orderings for the gluons, n-3 ways for an order to
        ! distribute the gluons among the two quark lines
-       tot_ord=2*factorial8(ngl_tot)*(ngl_tot+1)
+       tot_ord=checked_multiply8(2_8,factorial8(ngl_tot),'four-quark colour-order count')
+       tot_ord=checked_multiply8(tot_ord,int(ngl_tot,kind=8)+1_8,&
+            'four-quark colour-order count')
        n_sing=next-4-ngl_tot
 
+       same_flavour=.false.
        do i=2,next-1
           if ((o(i).gt.2 .and. part(o(i)).le.-1 .and. part(o(i)).ge.-6) .or. &
                (o(i).le.2 .and. part(o(i)).ge. 1 .and. part(o(i)).le. 6) ) then
-             if (abs(part(o(i))).eq.abs(part(o(1))) .and. abs(part(o(i))).eq.abs(part(o(next)))) then
+             if (handling_same_light_flavour(part(o(i)),part(o(1))) .and. &
+                  handling_same_light_flavour(part(o(i)),part(o(next)))) then
                 same_flavour=.true.
              else
                 same_flavour=.false.
@@ -544,9 +802,36 @@ contains
           endif
        enddo
 
-       allocate(io_list(1:next,tot_ord))
-       allocate(io(1:next,5))
+       if (tot_ord.gt.int(huge(ic),kind=8)) then
+          write (*,*) 'ERROR: multichannel colour-order list exceeds supported integer size:',tot_ord
+          stop 1
+       endif
+       if (tot_ord.lt.1_8 .or. tot_ord.gt.max_process_colour_orders) then
+          write (*,*) 'ERROR: multichannel colour-order count exceeds the supported limit:',&
+               tot_ord,max_process_colour_orders
+          stop 1
+       endif
+       workspace_bytes=4_8*int(next,kind=8)*(tot_ord+5_8)
+       if (workspace_bytes.gt.max_process_workspace_bytes) then
+          write (*,*) 'ERROR: multichannel colour orders exceed the supported workspace:',&
+               workspace_bytes,max_process_workspace_bytes
+          stop 1
+       endif
+       allocate(io_list(1:next,int(tot_ord)),stat=ios,&
+            errmsg=allocation_message)
+       if (ios.ne.0) then
+          write (*,*) 'ERROR: could not allocate multichannel colour-order list:',&
+               next,tot_ord,trim(allocation_message)
+          stop 1
+       endif
+       allocate(io(1:next,5),stat=ios,errmsg=allocation_message)
+       if (ios.ne.0) then
+          write (*,*) 'ERROR: could not allocate multichannel order workspace:',&
+               next,trim(allocation_message)
+          stop 1
+       endif
        ic=0
+       comparison_count=0_8
        ! 1. two ways of connecting quarks with anti-quarks
        do_i_qq: do i_qq=1,2
           io(1:next,1)=o(1:next)
@@ -638,7 +923,7 @@ contains
                       endif
                    enddo
                    io(1:next,5)=io(1:next,4)
-                   do ip=1,factorial(k)
+                   do ip=1_8,factorial8(k)
                       if (ip.eq.1) then
                          do i=1,k
                             ips(i)=i
@@ -668,6 +953,13 @@ contains
                       enddo
                       ! ---> if not yet in list of identical contributions, add it!
                       do i=1,ic
+                         if (comparison_count.ge.max_process_order_comparisons) then
+                            write (*,*) 'ERROR: multichannel order de-duplication exceeds ',&
+                                 'the supported comparison budget:',&
+                                 max_process_order_comparisons
+                            stop 1
+                         endif
+                         comparison_count=comparison_count+1_8
                          if (all(io(1:next,5).eq.io_list(1:next,i))) exit
                       enddo
                       if (i.eq.ic+1) then
@@ -680,9 +972,11 @@ contains
              enddo do_i_inv
           enddo
        enddo do_i_qq
-       sym_fac=ic
+       sym_fac=int(ic,kind=8)
+       deallocate(io_list,io)
     else        
-       write (*,*) 'WARNING: symmetry factor missing',nquarks
+       write (*,*) 'ERROR: multichannel symmetry factor is unavailable for quark count',nquarks
+       stop 1
     endif
     write (99,*) 'total number of orders is',tot_ord,' and multi-channel symmetry factor is',sym_fac,&
          '. They should be the same when including all channels.'
@@ -696,6 +990,9 @@ contains
     if (allocated(mi%unique_channel_list)) deallocate(mi%unique_channel_list)
     if (allocated(mi%map_proc_to_channelgroup)) deallocate(mi%map_proc_to_channelgroup)
     if (allocated(mi%number_of_channels)) deallocate(mi%number_of_channels)
+    mi%max_channels=0
+    mi%n_unique_channels=0
+    mi%n_unique_channelgroups=0
   end subroutine finalize_multichan_info
 
   subroutine finalize_dipole(di)
@@ -707,6 +1004,20 @@ contains
     if (allocated(di%rho_lookup_ih2)) deallocate(di%rho_lookup_ih2)
     if (allocated(di%p_mapped)) deallocate(di%p_mapped)
     call finalize_amplitude_QCD(di%amp)
+    di%dip_ijk=0
+    di%dip_ijk_f=0
+    di%dip_r_ijk=0
+    di%dip_r_ijk_f=0
+    di%dipole_type=0
+    di%col_fac=1
+    di%lc_weight=1d0
+    di%alpha_variable=huge(1d0)
+    di%p_mapped_ij=0d0
+    di%active=.true.
+    di%alpha_active=.true.
+    di%passes_cuts=.true.
+    di%rho_lookup_upper=.false.
+    di%rho_hermitian_checked=.false.
   end subroutine finalize_dipole
 
   subroutine finalize_dipole_set(ds)
@@ -724,10 +1035,12 @@ contains
   subroutine finalize_phase_space_order_group(pgl)
     type(phase_space_order_group),intent(inout) :: pgl
     integer :: i
-    do i=1,size(pgl%amps)
-       call finalize_amplitude_QCD(pgl%amps(i))
-    enddo
-    if (allocated(pgl%amps)) deallocate(pgl%amps)
+    if (allocated(pgl%amps)) then
+       do i=1,size(pgl%amps)
+          call finalize_amplitude_QCD(pgl%amps(i))
+       enddo
+       deallocate(pgl%amps)
+    endif
     if(allocated(pgl%phase_space)) then
        call pgl%phase_space%cleanup()
        deallocate(pgl%phase_space)
@@ -745,6 +1058,7 @@ contains
     if (allocated(pgl%phase_space_permutations)) deallocate(pgl%phase_space_permutations)
     if (allocated(pgl%iden_iproc)) deallocate(pgl%iden_iproc)
     if (allocated(pgl%phase_space_orders)) deallocate(pgl%phase_space_orders)
+    if (allocated(pgl%nhel)) deallocate(pgl%nhel)
     if (allocated(pgl%val_procs)) deallocate(pgl%val_procs)
     if (allocated(pgl%idenCOandMAPfactor)) deallocate(pgl%idenCOandMAPfactor)
     if (allocated(pgl%iden_processes)) deallocate(pgl%iden_processes)
@@ -755,6 +1069,7 @@ contains
     if (allocated(pgl%amp2_hel)) deallocate(pgl%amp2_hel)
     if (allocated(pgl%amp2_hel_samples)) deallocate(pgl%amp2_hel_samples)
     if (allocated(pgl%hel)) deallocate(pgl%hel)
+    if (allocated(pgl%passed)) deallocate(pgl%passed)
     if (allocated(pgl%hel_fac)) deallocate(pgl%hel_fac)
     if (allocated(pgl%include_hel)) deallocate(pgl%include_hel)
     if (allocated(pgl%pT_min)) deallocate(pgl%pT_min)
@@ -768,5 +1083,12 @@ contains
        enddo
        deallocate(pgl%dpl)
     endif
+    pgl%nproc=0
+    pgl%next=0
+    pgl%ndim=0
+    pgl%ndim_extra=0
+    pgl%ipdgs=.false.
+    pgl%is_subtracted_real=.false.
+    pgl%event_selection_epoch=0_8
   end subroutine finalize_phase_space_order_group
 end module handling_processes

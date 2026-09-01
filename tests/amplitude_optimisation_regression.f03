@@ -5,11 +5,18 @@ program amplitude_optimisation_regression
   implicit none
   integer,parameter :: dp=kind(1d0)
   type(physics_model) :: model
+  character(len=64) :: test_mode
 
   call reset_run_parameters()
   call model%init_part()
   call model%init_vert()
   open(unit=99,file='/dev/null',status='unknown',action='write')
+  call get_command_argument(1,test_mode)
+  if (len_trim(test_mode).gt.0) then
+     call check_invalid_filter_state(trim(test_mode))
+     write (*,*) 'Malformed helicity-filter state was not rejected:',trim(test_mode)
+     stop
+  endif
 
   call check_process([21,21,21,21],[1,2,3,4],0d0,0d0,&
        'four-gluon parity pairs',.true.)
@@ -19,6 +26,30 @@ program amplitude_optimisation_regression
   write (*,'(a)') 'Amplitude optimisation regression passed'
 
 contains
+
+  subroutine check_invalid_filter_state(mode)
+    implicit none
+    character(len=*),intent(in) :: mode
+    type(amplitude_QCD) :: amp
+    real(kind=dp) :: samples(3,2)
+    integer :: include_hel(3)
+
+    samples=1d0
+    select case (mode)
+    case ('missing-filter-offsets')
+       amp%n_amps=3
+       amp%nprocs=1
+    case ('nonmonotone-filter-offsets')
+       amp%n_amps=3
+       amp%nprocs=3
+       allocate(amp%iproc_start(4))
+       amp%iproc_start=[1,3,2,4]
+    case default
+       write (*,*) 'Unknown amplitude-optimisation regression mode:',trim(mode)
+       stop 1
+    end select
+    call build_helicity_filter(amp,samples,include_hel,.true.)
+  end subroutine check_invalid_filter_state
 
   subroutine check_process(process,order,mass3,mass4,label,require_degeneracy)
     implicit none
@@ -83,6 +114,18 @@ contains
     call amp%filter_helicity(4,nhel,include_hel)
     if (nhel.ne.amp%n_amps) then
        write (*,*) trim(label),': filtered helicity count is inconsistent'
+       stop 1
+    endif
+    if (.not.allocated(amp%include_amp)) then
+       write (*,*) trim(label),': filtering discarded serialized inclusion metadata'
+       stop 1
+    endif
+    if (size(amp%include_amp).lt.nhel) then
+       write (*,*) trim(label),': filtered inclusion metadata is too short'
+       stop 1
+    endif
+    if (.not.all(amp%include_amp(1:nhel))) then
+       write (*,*) trim(label),': retained amplitudes are not marked for inclusion'
        stop 1
     endif
     call amp%evaluate(4,p,helicity,.false.,model)

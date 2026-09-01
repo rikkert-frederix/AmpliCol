@@ -2,23 +2,37 @@ module cuts
   use common
   use particles
   use handling_processes
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
 contains
   logical function pass_cuts(pgl)
     ! Cuts on the phase-space point. 
     implicit none
     type(phase_space_order_group),intent(in) :: pgl
     integer :: i,j
+    real(kind=8) :: value
     ! cuts on single particles
+    pass_cuts=.false.
+    if (.not.all(ieee_is_finite(pgl%ps(1)%p))) return
     pass_cuts=.true.
     do i=1,pgl%next
        if (pgl%pT_min(i).gt.0d0) then
-          if (pt(pgl%ps(1)%p(0,i)).lt.pgl%pT_min(i)) then
+          value=pt(pgl%ps(1)%p(0,i))
+          if (.not.ieee_is_finite(value)) then
+             pass_cuts=.false.
+             return
+          endif
+          if (value.lt.pgl%pT_min(i)) then
              pass_cuts=.false.
              return
           endif
        endif
        if (pgl%eta_max(i).gt.0d0) then
-          if (abs(eta(pgl%ps(1)%p(0,i))).gt.pgl%eta_max(i)) then
+          value=eta(pgl%ps(1)%p(0,i))
+          if (.not.ieee_is_finite(value)) then
+             pass_cuts=.false.
+             return
+          endif
+          if (abs(value).gt.pgl%eta_max(i)) then
              pass_cuts=.false.
              return
           endif
@@ -28,13 +42,23 @@ contains
     do i=1,pgl%next-1
        do j=i+1,pgl%next
           if (pgl%sqrt_s_min(i,j).gt.0d0) then
-             if (abs(sumdot(pgl%ps(1)%p(0,i),pgl%ps(1)%p(0,j))).lt.pgl%sqrt_s_min(i,j)**2) then
+             value=sumdot(pgl%ps(1)%p(0,i),pgl%ps(1)%p(0,j))
+             if (.not.ieee_is_finite(value)) then
+                pass_cuts=.false.
+                return
+             endif
+             if (abs(value).lt.pgl%sqrt_s_min(i,j)**2) then
                 pass_cuts=.false.
                 return
              endif
           endif
           if (pgl%DR_min(i,j).gt.0d0) then
-             if (abs(deltaR(pgl%ps(1)%p(0,i),pgl%ps(1)%p(0,j))).lt.pgl%DR_min(i,j)) then
+             value=deltaR(pgl%ps(1)%p(0,i),pgl%ps(1)%p(0,j))
+             if (.not.ieee_is_finite(value)) then
+                pass_cuts=.false.
+                return
+             endif
+             if (abs(value).lt.pgl%DR_min(i,j)) then
                 pass_cuts=.false.
                 return
              endif
@@ -80,7 +104,8 @@ contains
     integer :: i,j,kind_i,kind_j
 
     pass_mapped_dipole_cuts=.false.
-    if (size(p,2).ne.size(process)) return
+    if (size(p,1).ne.4 .or. size(p,2).ne.size(process)) return
+    if (.not.all(ieee_is_finite(p))) return
     do i=3,size(process)
        kind_i=object_kind(process(i))
        if (kind_i.eq.1) then
@@ -108,8 +133,11 @@ contains
     integer :: i,j,ijet,njets,nselected,kind_i,kind_j
 
     pass_clustered_jet_cuts=.false.
-    if (size(p,2).ne.size(process)) return
+    if (size(p,1).ne.4 .or. size(p,2).ne.size(process) .or. &
+         njet_required.lt.0) return
+    if (.not.all(ieee_is_finite(p))) return
     call cluster_kt_jets(p,process,jets,njets)
+    if (njets.lt.0) return
     selected=.false.
     nselected=0
     do ijet=1,njets
@@ -161,28 +189,51 @@ contains
     real(kind=8),intent(out) :: jets(0:,:)
     integer,intent(out) :: njets
     real(kind=8) :: work(0:3,max(1,size(process)-2))
-    real(kind=8) :: dmin,dbeam,dij,pti,ptj
+    real(kind=8) :: dmin,dbeam,dij,pti,ptj,pt_scale,dr_value
+    real(kind=8) :: pt_values(max(1,size(process)-2))
     integer :: i,j,imin,jmin,nwork
 
     jets=0d0
     work=0d0
+    njets=-1
+    if (size(p,1).ne.4 .or. size(jets,1).ne.4 .or. &
+         size(p,2).ne.size(process)) return
+    if (.not.all(ieee_is_finite(p))) return
     nwork=0
     do i=3,size(process)
        if (.not.phys_model%is_jet(process(i))) cycle
        nwork=nwork+1
+       if (nwork.gt.size(jets,2)) then
+          nwork=0
+          return
+       endif
        work(:,nwork)=p(:,i)
     enddo
     njets=0
     do while (nwork.gt.0)
+       pt_values=0d0
+       pt_scale=0d0
+       do i=1,nwork
+          pt_values(i)=pt(work(:,i))
+          if (.not.ieee_is_finite(pt_values(i))) then
+             njets=-1
+             jets=0d0
+             return
+          endif
+          pt_scale=max(pt_scale,pt_values(i))
+       enddo
        dmin=huge(1d0)
        imin=0
        jmin=0
        do i=1,nwork
-          pti=pt(work(:,i))
-          if (pti .le. sqrt(tiny(1d0))) then
+          pti=pt_values(i)
+          if (pt_scale.le.0d0) then
              dbeam=0d0
           else
-             dbeam=pti*pti
+             ! All inclusive-kT distances contain the same pT_scale**2.
+             ! Compare their square roots after removing that common factor
+             ! to avoid overflow and underflow in pT**2.
+             dbeam=pti/pt_scale
           endif
           if (dbeam.lt.dmin) then
              dmin=dbeam
@@ -190,26 +241,48 @@ contains
              jmin=0
           endif
        enddo
-       do i=1,nwork-1
-          pti=pt(work(:,i))
-          if (pti .le. sqrt(tiny(1d0))) cycle
-          do j=i+1,nwork
-             ptj=pt(work(:,j))
-             if (ptj .le. sqrt(tiny(1d0))) cycle
-             dij=min(pti*pti,ptj*ptj)*deltaR(work(:,i),work(:,j))**2/DRjj_min**2
-             if (dij.lt.dmin) then
-                dmin=dij
-                imin=i
-                jmin=j
-             endif
+       if (DRjj_min.gt.0d0) then
+          do i=1,nwork-1
+             pti=pt_values(i)
+             if (pti.le.0d0) cycle
+             do j=i+1,nwork
+                ptj=pt_values(j)
+                if (ptj.le.0d0) cycle
+                dr_value=deltaR(work(:,i),work(:,j))
+                if (.not.ieee_is_finite(dr_value)) then
+                   njets=-1
+                   jets=0d0
+                   return
+                endif
+                if (DRjj_min.lt.dr_value/huge(1d0)) then
+                   dij=huge(1d0)
+                else
+                   dij=(min(pti,ptj)/pt_scale)*(dr_value/DRjj_min)
+                endif
+                if (.not.ieee_is_finite(dij)) then
+                   njets=-1
+                   jets=0d0
+                   return
+                endif
+                if (dij.lt.dmin) then
+                   dmin=dij
+                   imin=i
+                   jmin=j
+                endif
+             enddo
           enddo
-       enddo
+       endif
        if (jmin.eq.0) then
           njets=njets+1
           jets(:,njets)=work(:,imin)
           call remove_cluster(work,nwork,imin)
        else
           work(:,imin)=work(:,imin)+work(:,jmin)
+          if (.not.all(ieee_is_finite(work(:,imin)))) then
+             njets=-1
+             jets=0d0
+             return
+          endif
           call remove_cluster(work,nwork,jmin)
        endif
     enddo
@@ -224,6 +297,10 @@ contains
 
     njet_required=real_subtracted_jet_requirement(pgl%processes(:,iint))
     call cluster_kt_jets(pgl%ps(1)%p,pgl%processes(:,iint),jets,njets)
+    if (njets.lt.0) then
+       margin=-huge(1d0)
+       return
+    endif
     margin=jet_pt_cut_margin(jets,njets,njet_required)
   end function real_subtracted_jet_pt_margin
 
@@ -234,6 +311,9 @@ contains
     real(kind=8) :: jets(0:3,max(1,size(process)-2))
     integer :: i,njets
 
+    margin=-huge(1d0)
+    if (size(p,1).ne.4 .or. size(p,2).ne.size(process)) return
+    if (.not.all(ieee_is_finite(p))) return
     jets=0d0
     njets=0
     do i=3,size(process)
@@ -248,19 +328,38 @@ contains
     implicit none
     real(kind=8),intent(in) :: jets(0:,:)
     integer,intent(in) :: njets,njet_required
-    real(kind=8) :: transverse_momenta(max(1,njets)),value
+    real(kind=8) :: transverse_momenta(max(1,njets)),value,eta_value
     integer :: i,j,neligible
 
+    if (size(jets,1).ne.4 .or. njets.lt.0 .or. njets.gt.size(jets,2)) then
+       margin=-huge(1d0)
+       return
+    endif
     if (njet_required.le.0 .or. pTj_min.le.0d0) then
        margin=huge(1d0)
        return
     endif
+    if (njets.gt.0) then
+       if (.not.all(ieee_is_finite(jets(:,1:njets)))) then
+          margin=-huge(1d0)
+          return
+       endif
+    endif
     neligible=0
     do i=1,njets
        value=pt(jets(:,i))
-       if (value.le.sqrt(tiny(1d0))) cycle
+       if (.not.ieee_is_finite(value)) then
+          margin=-huge(1d0)
+          return
+       endif
+       if (value.le.0d0) cycle
        if (etaj_max.gt.0d0) then
-          if (abs(eta(jets(:,i))).ge.etaj_max) cycle
+          eta_value=eta(jets(:,i))
+          if (.not.ieee_is_finite(eta_value)) then
+             margin=-huge(1d0)
+             return
+          endif
+          if (abs(eta_value).gt.etaj_max) cycle
        endif
        neligible=neligible+1
        transverse_momenta(neligible)=value
@@ -309,21 +408,60 @@ contains
   logical function pass_jet_cuts(p)
     implicit none
     real(kind=8),intent(in) :: p(0:3)
-    pass_jet_cuts=pt(p).gt.pTj_min
-    if (pass_jet_cuts .and. etaj_max.gt.0d0) pass_jet_cuts=abs(eta(p)).lt.etaj_max
+    real(kind=8) :: pt_value,eta_value
+    pass_jet_cuts=.false.
+    if (.not.all(ieee_is_finite(p))) return
+    pt_value=pt(p)
+    if (.not.ieee_is_finite(pt_value)) return
+    pass_jet_cuts=pt_value.ge.pTj_min
+    if (pass_jet_cuts .and. etaj_max.gt.0d0) then
+       eta_value=eta(p)
+       if (.not.ieee_is_finite(eta_value)) then
+          pass_jet_cuts=.false.
+       else
+          pass_jet_cuts=abs(eta_value).le.etaj_max
+       endif
+    endif
   end function pass_jet_cuts
 
   logical function pass_nonjet_cuts(p,kind)
     implicit none
     real(kind=8),intent(in) :: p(0:3)
     integer,intent(in) :: kind
+    real(kind=8) :: pt_value,eta_value
+    pass_nonjet_cuts=.false.
+    if (.not.all(ieee_is_finite(p))) return
     pass_nonjet_cuts=.true.
     if (kind.eq.2) then
-       if (pTa_min.gt.0d0 .and. pt(p).lt.pTa_min) pass_nonjet_cuts=.false.
-       if (pass_nonjet_cuts .and. etaa_max.gt.0d0) pass_nonjet_cuts=abs(eta(p)).lt.etaa_max
+       pt_value=pt(p)
+       if (.not.ieee_is_finite(pt_value)) then
+          pass_nonjet_cuts=.false.
+          return
+       endif
+       if (pTa_min.gt.0d0 .and. pt_value.lt.pTa_min) pass_nonjet_cuts=.false.
+       if (pass_nonjet_cuts .and. etaa_max.gt.0d0) then
+          eta_value=eta(p)
+          if (.not.ieee_is_finite(eta_value)) then
+             pass_nonjet_cuts=.false.
+          else
+             pass_nonjet_cuts=abs(eta_value).le.etaa_max
+          endif
+       endif
     elseif (kind.eq.3) then
-       if (pTl_min.gt.0d0 .and. pt(p).lt.pTl_min) pass_nonjet_cuts=.false.
-       if (pass_nonjet_cuts .and. etal_max.gt.0d0) pass_nonjet_cuts=abs(eta(p)).lt.etal_max
+       pt_value=pt(p)
+       if (.not.ieee_is_finite(pt_value)) then
+          pass_nonjet_cuts=.false.
+          return
+       endif
+       if (pTl_min.gt.0d0 .and. pt_value.lt.pTl_min) pass_nonjet_cuts=.false.
+       if (pass_nonjet_cuts .and. etal_max.gt.0d0) then
+          eta_value=eta(p)
+          if (.not.ieee_is_finite(eta_value)) then
+             pass_nonjet_cuts=.false.
+          else
+             pass_nonjet_cuts=abs(eta_value).le.etal_max
+          endif
+       endif
     endif
   end function pass_nonjet_cuts
 
@@ -332,8 +470,10 @@ contains
     real(kind=8),intent(in) :: p1(0:3),p2(0:3)
     integer,intent(in) :: kind1,kind2
     logical,intent(in) :: apply_jet_dr
-    real(kind=8) :: drmin,smin
+    real(kind=8) :: drmin,smin,pair_mass2,dr_value
 
+    pass_object_pair_cuts=.false.
+    if (.not.all(ieee_is_finite(p1)) .or. .not.all(ieee_is_finite(p2))) return
     pass_object_pair_cuts=.true.
     drmin=-1d0
     smin=-1d0
@@ -358,9 +498,21 @@ contains
     else
        return
     endif
-    if (smin.gt.0d0 .and. abs(sumdot(p1,p2)).lt.smin**2) pass_object_pair_cuts=.false.
+    if (smin.gt.0d0) then
+       pair_mass2=sumdot(p1,p2)
+       if (.not.ieee_is_finite(pair_mass2)) then
+          pass_object_pair_cuts=.false.
+       elseif (abs(pair_mass2).lt.smin**2) then
+          pass_object_pair_cuts=.false.
+       endif
+    endif
     if (pass_object_pair_cuts .and. drmin.gt.0d0) then
-       pass_object_pair_cuts=deltaR(p1,p2).ge.drmin
+       dr_value=deltaR(p1,p2)
+       if (.not.ieee_is_finite(dr_value)) then
+          pass_object_pair_cuts=.false.
+       else
+          pass_object_pair_cuts=dr_value.ge.drmin
+       endif
     endif
   end function pass_object_pair_cuts
   
@@ -370,7 +522,7 @@ contains
     real(kind=8), dimension(0:3) :: p
     real(kind=8) :: scale
     scale=max(abs(p(1)),abs(p(2)))
-    if (scale .le. sqrt(tiny(1d0))) then
+    if (scale.eq.0d0) then
        pt=0d0
     else
        pt=scale*sqrt((p(1)/scale)**2+(p(2)/scale)**2)
@@ -397,14 +549,21 @@ contains
     ! pseudo-rapidity of 'p'
     implicit none
     real(kind=8), dimension(0:3) :: p
-    real(kind=8) :: pt_value
+    real(kind=8) :: pt_value,pz_scale,numerator,denominator
     pt_value=pt(p)
-    if (pt_value .le. sqrt(tiny(1d0))) then
-       eta=sign(huge(1d0),p(3))
+    if (pt_value.le.0d0) then
+       eta=sign(log(huge(1d0)),p(3))
     else
-       ! asinh(pz/pT) is equivalent to pseudorapidity and remains stable
-       ! for nearly beam-collinear momenta.
-       eta=asinh(p(3)/pt_value)
+       ! asinh(pz/pT), written with normalized components so neither a
+       ! squared norm nor the pz/pT ratio can overflow.
+       pz_scale=max(abs(p(3)),pt_value)
+       denominator=pt_value/pz_scale
+       if (denominator.le.0d0) then
+          eta=sign(log(huge(1d0)),p(3))
+       else
+          numerator=abs(p(3))/pz_scale+hypot(p(3)/pz_scale,denominator)
+          eta=sign(log(numerator)-log(denominator),p(3))
+       endif
     endif
   end function eta
 
@@ -412,34 +571,23 @@ contains
     ! azimuthal difference of 'p1' and 'p2'
     implicit none
     real(kind=8), dimension(0:3) :: p1,p2
-    real(kind=8) :: pt1,pt2,arg
-    real(kind=8),parameter :: angle_tolerance=1d-8
+    real(kind=8) :: pt1,pt2,cosphi,sinphi
     pt1=pt(p1)
     pt2=pt(p2)
-    if (pt1 .le. sqrt(tiny(1d0)) .or. pt2 .le. sqrt(tiny(1d0))) then
+    if (pt1.le.0d0 .or. pt2.le.0d0) then
        delta_phi=0d0
        return
     endif
-    arg=(p1(1)/pt1)*(p2(1)/pt2)+(p1(2)/pt1)*(p2(2)/pt2)
-    if (arg.lt.-1d0-angle_tolerance) then
-       write (*,*) 'cosine is complex'
-       stop 1
-    elseif (arg.lt.-1d0) then
-       arg=-1d0
-    elseif(arg.gt.1d0+angle_tolerance) then
-       write (*,*) 'cosine is complex'
-       stop 1
-    elseif(arg.gt.1d0) then
-       arg=1d0
-    endif
-    delta_phi=acos(arg)
+    cosphi=(p1(1)/pt1)*(p2(1)/pt2)+(p1(2)/pt1)*(p2(2)/pt2)
+    sinphi=(p1(1)/pt1)*(p2(2)/pt2)-(p1(2)/pt1)*(p2(1)/pt2)
+    delta_phi=atan2(abs(sinphi),cosphi)
   end function delta_phi
 
   real(kind=8) function deltaR(p1,p2)
     ! Distance (Delta-R) between 'p1' and 'p2'
     implicit none
     real(kind=8), dimension(0:3) :: p1,p2
-    deltaR=sqrt(delta_phi(p1,p2)**2+(eta(p1)-eta(p2))**2)
+    deltaR=hypot(delta_phi(p1,p2),eta(p1)-eta(p2))
   end function deltaR
 
   subroutine setup_cuts_for_each_particle(pgl,ichan)
