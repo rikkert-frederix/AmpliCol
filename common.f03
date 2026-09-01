@@ -10,7 +10,7 @@ module common
   ! technical
   logical,parameter :: use_colour_singlet_multichannel=.true.
   logical,parameter :: reduce_to_unique_matrix_elements=.true.
-  logical,parameter :: decompose_same_flavour_into_two_diff_flavour=.true.
+  logical,parameter :: decompose_same_flavour_amplitudes=.true.
   logical,parameter :: use_cross_process_optimisation_of_currents=.true.
   logical :: keep_processes_separate=.true.
   integer,parameter :: timing_none=0,timing_basic=1,timing_detailed=2

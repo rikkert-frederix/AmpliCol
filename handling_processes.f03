@@ -22,7 +22,8 @@ module handling_processes
      integer,dimension(:),allocatable :: iden_iproc,phase_space_orders,nhel
      integer :: nproc
      real(kind=8),dimension(:,:),allocatable :: val_procs,idenCOandMAPfactor
-     integer,dimension(:,:,:),allocatable :: iden_processes,same_flavour
+     integer,dimension(:,:,:),allocatable :: iden_processes
+     integer,dimension(:,:),allocatable :: same_flavour
      integer(kind=4),dimension(:,:),allocatable :: spin,hel_fac
      integer(kind=8),dimension(:),allocatable :: iden
      logical,dimension(-6:7,2) :: ipdgs
@@ -88,75 +89,333 @@ contains
   end subroutine determine_phase_space_orders
 
   subroutine find_same_flavour(pgl,nevent,amp2)
+    ! Identical external fermions admit several Wick contractions.  A
+    ! different-flavour process selects a subset of those contractions.  Find
+    ! an exact, disjoint cover of the target contractions and validate the
+    ! resulting amplitude identity at every sampled phase-space point.
+    !
+    ! For two quark lines the cover has two terms.  With three lines it can
+    ! contain as many as 3!=6 terms (three two-flow terms are common).  The
+    ! candidates are restricted to earlier processes, making the dependency
+    ! graph acyclic and allowing decomposed amplitudes to depend on one another.
     implicit none
     type(phase_space_order_group),intent(inout) :: pgl
+    integer,intent(in) :: nevent
     real(kind=8),dimension(pgl%nproc),intent(in) :: amp2
-    integer :: i,j,k,ii,jj,kk,nevent
-    real(kind=8),parameter :: tiny=1d-8
+    integer :: i,ii,idau,jj,nterms
+
     if (keep_processes_separate) return
-    if (.not.decompose_same_flavour_into_two_diff_flavour) return
+    if (.not.decompose_same_flavour_amplitudes) return
     if (.not.allocated(pgl%same_flavour)) then
-       allocate(pgl%same_flavour(nevent,pgl%nproc,2))
+       allocate(pgl%same_flavour(max_same_flavour_terms,pgl%nproc))
        pgl%same_flavour=0
+       call build_same_flavour_relations(pgl)
     endif
+
     do i=1,pgl%nproc
-       if (pgl%amps(1)%n_qqbar(i).lt.2) cycle
-       do j=1,pgl%nproc
-          if (i.eq.j) cycle
-          if (pgl%amps(1)%n_qqbar(j).ne.pgl%amps(1)%n_qqbar(i)) cycle
-          do k=1,j-1
-             if (k.eq.i) cycle
-             if (pgl%amps(1)%n_qqbar(k).ne.pgl%amps(1)%n_qqbar(i)) cycle
-             do ii=pgl%amps(1)%iproc_start(i),pgl%amps(1)%iproc_start(i+1)-1
-                if (pgl%amps(1)%amps(ii).eq.(0d0,0d0)) cycle
-                do jj=pgl%amps(1)%iproc_start(j),pgl%amps(1)%iproc_start(j+1)-1
-                   if (all(pgl%amps(1)%spins(:,1,ii).eq.pgl%amps(1)%spins(:,1,jj))) exit
-                enddo
-                do kk=pgl%amps(1)%iproc_start(k),pgl%amps(1)%iproc_start(k+1)-1
-                   if (all(pgl%amps(1)%spins(:,1,ii).eq.pgl%amps(1)%spins(:,1,kk))) exit
-                enddo
-                if (abs(pgl%amps(1)%amps(ii))+abs(pgl%amps(1)%amps(jj))+abs(pgl%amps(1)%amps(kk)).eq.0d0) cycle
-                if (abs(pgl%amps(1)%amps(ii)-(pgl%amps(1)%amps(jj)+pgl%amps(1)%amps(kk)))/&
-                     (abs(pgl%amps(1)%amps(ii))+abs(pgl%amps(1)%amps(jj))+abs(pgl%amps(1)%amps(kk))).gt.tiny) then
-                   exit
-                endif
-             enddo
-             if (ii.eq.pgl%amps(1)%iproc_start(i+1)) then
-                pgl%same_flavour(pgl%passed(1),i,1)=j
-                pgl%same_flavour(pgl%passed(1),i,2)=k
-             endif
+       if (pgl%same_flavour(1,i).le.0) cycle
+       if (amp2(i).le.0d0 .or. .not.relation_holds(pgl,i,pgl%same_flavour(:,i))) then
+          pgl%same_flavour(:,i)=0
+       endif
+    enddo
+    if (pgl%passed(1).lt.nevent) return
+
+    do i=1,pgl%nproc
+       if (pgl%same_flavour(1,i).le.0) cycle
+       nterms=count(pgl%same_flavour(:,i).gt.0)
+       write (99,'(a,i0,a)',advance='no') &
+            'Found same-flavour amplitude relation: ',i,' ='
+       do idau=1,nterms
+          write (99,'(1x,i0)',advance='no') pgl%same_flavour(idau,i)
+          if (idau.lt.nterms) write (99,'(a)',advance='no') ' +'
+       enddo
+       write (99,*)
+       pgl%amps(1)%same_flav(i)=.true.
+       do ii=pgl%amps(1)%iproc_start(i),pgl%amps(1)%iproc_start(i+1)-1
+          do idau=1,nterms
+             jj=matching_helicity(pgl%amps(1),pgl%same_flavour(idau,i),ii)
+             pgl%amps(1)%same_flavour_sum(ii,idau)=jj
           enddo
        enddo
     enddo
-    if (pgl%passed(1).lt.nevent) return
-    do i=1,pgl%nproc
-       if ( any(pgl%same_flavour(1,i,1).ne.pgl%same_flavour(2:nevent,i,1)) .or. &
-            any(pgl%same_flavour(1,i,2).ne.pgl%same_flavour(2:nevent,i,2)) ) then
-          write (*,*) 'Inconsistent same flavour decomposition'
-          write (*,*) i
-          write (*,*) pgl%same_flavour(1:nevent,i,1)
-          write (*,*) pgl%same_flavour(1:nevent,i,2)
-          stop 1
+  end subroutine find_same_flavour
+
+  subroutine build_same_flavour_relations(pgl)
+    implicit none
+    type(phase_space_order_group),intent(inout) :: pgl
+    integer :: target,candidate,nlines,target_mask,candidate_mask
+    integer :: ncandidates,wanted_terms
+    integer,dimension(pgl%nproc) :: candidate_processes,candidate_masks
+    integer,dimension(max_same_flavour_terms) :: terms
+    logical :: found
+
+    do target=1,pgl%nproc
+       nlines=pgl%amps(1)%n_qqbar(target)
+       if (nlines.lt.2 .or. nlines.gt.3) cycle
+       if (.not.has_repeated_external_quark(pgl,target)) cycle
+       target_mask=fermion_flow_mask(pgl,target,target,nlines)
+       if (popcnt(target_mask).lt.2) cycle
+
+       ncandidates=0
+       do candidate=1,target-1
+          if (pgl%amps(1)%n_qqbar(candidate).ne.nlines) cycle
+          if (.not.compatible_flavour_refinement(pgl,target,candidate)) cycle
+          candidate_mask=fermion_flow_mask(pgl,target,candidate,nlines)
+          if (candidate_mask.eq.0 .or. candidate_mask.eq.target_mask) cycle
+          if (iand(candidate_mask,not(target_mask)).ne.0) cycle
+          ncandidates=ncandidates+1
+          candidate_processes(ncandidates)=candidate
+          candidate_masks(ncandidates)=candidate_mask
+       enddo
+       if (ncandidates.lt.2) cycle
+
+       ! Several flavour assignments can select the same flow subset.  Their
+       ! electroweak amplitudes need not be interchangeable, particularly for
+       ! charged currents.  Try the small set of exact covers and retain only
+       ! one whose complex helicity amplitudes satisfy the relation.
+       found=.false.
+       terms=0
+       do wanted_terms=2,max_same_flavour_terms
+          call search_cover(1,0)
+          if (found) exit
+       enddo
+       if (found) pgl%same_flavour(:,target)=terms
+    enddo
+  contains
+    recursive subroutine search_cover(depth,coverage)
+      implicit none
+      integer,intent(in) :: depth,coverage
+      integer :: first_bit,icandidate,mask,new_coverage
+      if (found) return
+      do first_bit=0,max_same_flavour_terms-1
+         if (btest(target_mask,first_bit).and..not.btest(coverage,first_bit)) exit
+      enddo
+      do icandidate=1,ncandidates
+         mask=candidate_masks(icandidate)
+         if (.not.btest(mask,first_bit)) cycle
+         if (iand(mask,coverage).ne.0) cycle
+         new_coverage=ior(coverage,mask)
+         terms(depth)=candidate_processes(icandidate)
+         if (depth.eq.wanted_terms) then
+            if (new_coverage.ne.target_mask) cycle
+            terms(depth+1:max_same_flavour_terms)=0
+            if (relation_holds(pgl,target,terms)) then
+               found=.true.
+               return
+            endif
+         elseif (new_coverage.ne.target_mask) then
+            call search_cover(depth+1,new_coverage)
+            if (found) return
+         endif
+      enddo
+      terms(depth)=0
+    end subroutine search_cover
+  end subroutine build_same_flavour_relations
+
+  logical function has_repeated_external_quark(pgl,iproc)
+    implicit none
+    type(phase_space_order_group),intent(in) :: pgl
+    integer,intent(in) :: iproc
+    integer :: i,j,pi,pj
+    has_repeated_external_quark=.false.
+    do i=1,pgl%next-1
+       pi=outgoing_particle(pgl,i,iproc)
+       if (.not.(phys_model%is_quark(pi).or.phys_model%is_antiquark(pi))) cycle
+       do j=i+1,pgl%next
+          pj=outgoing_particle(pgl,j,iproc)
+          if (pi.eq.pj) then
+             has_repeated_external_quark=.true.
+             return
+          endif
+       enddo
+    enddo
+  end function has_repeated_external_quark
+
+  logical function compatible_flavour_refinement(pgl,target,candidate)
+    implicit none
+    type(phase_space_order_group),intent(in) :: pgl
+    integer,intent(in) :: target,candidate
+    integer :: i,pt,pc
+    logical :: pure_qcd
+    pure_qcd=process_is_pure_qcd(pgl,target)
+    compatible_flavour_refinement=.false.
+    do i=1,pgl%next
+       pt=outgoing_particle(pgl,i,target)
+       pc=outgoing_particle(pgl,i,candidate)
+       if (phys_model%is_quark(pt)) then
+          if (.not.phys_model%is_quark(pc)) return
+          if (.not.pure_qcd .and. mod(abs(pt),2).ne.mod(abs(pc),2)) return
+       elseif (phys_model%is_antiquark(pt)) then
+          if (.not.phys_model%is_antiquark(pc)) return
+          if (.not.pure_qcd .and. mod(abs(pt),2).ne.mod(abs(pc),2)) return
+       elseif (pt.ne.pc) then
+          return
        endif
-       if (pgl%same_flavour(1,i,1).ne.0 .or. pgl%same_flavour(1,i,2).ne.0) then
-          j=pgl%same_flavour(1,i,1)
-          k=pgl%same_flavour(1,i,2)
-          write (99,'(a,x,i4,x,a,i4,x,a,i4)') &
-               "Found SF amps equal to a sum of DF amps:",i,'=',j,'+',k
-          pgl%amps(1)%same_flav(i)=.true.
-          do ii=pgl%amps(1)%iproc_start(i),pgl%amps(1)%iproc_start(i+1)-1
-             do jj=pgl%amps(1)%iproc_start(j),pgl%amps(1)%iproc_start(j+1)-1
-                if (all(pgl%amps(1)%spins(:,1,ii).eq.pgl%amps(1)%spins(:,1,jj))) exit
-             enddo
-             do kk=pgl%amps(1)%iproc_start(k),pgl%amps(1)%iproc_start(k+1)-1
-                if (all(pgl%amps(1)%spins(:,1,ii).eq.pgl%amps(1)%spins(:,1,kk))) exit
-             enddo
-             pgl%amps(1)%same_flavour_sum(ii,1)=jj
-             pgl%amps(1)%same_flavour_sum(ii,2)=kk
-          enddo
+       if (phys_model%get_mass(pt).ne.phys_model%get_mass(pc)) return
+       if (phys_model%get_spin(pt).ne.phys_model%get_spin(pc)) return
+    enddo
+    compatible_flavour_refinement=.true.
+  end function compatible_flavour_refinement
+
+  logical function process_is_pure_qcd(pgl,iproc)
+    implicit none
+    type(phase_space_order_group),intent(in) :: pgl
+    integer,intent(in) :: iproc
+    integer :: i,p
+    process_is_pure_qcd=.true.
+    do i=1,pgl%next
+       p=outgoing_particle(pgl,i,iproc)
+       if (phys_model%is_quark(p).or.phys_model%is_antiquark(p).or.&
+            phys_model%is_gluon(p)) cycle
+       process_is_pure_qcd=.false.
+       return
+    enddo
+  end function process_is_pure_qcd
+
+  integer function number_of_charged_current_insertions(pgl,iproc)
+    implicit none
+    type(phase_space_order_group),intent(in) :: pgl
+    integer,intent(in) :: iproc
+    integer :: i,p,charged_lepton
+    integer :: positive_charged,negative_charged,positive_neutrino,negative_neutrino
+    number_of_charged_current_insertions=0
+    do i=1,pgl%next
+       p=abs(outgoing_particle(pgl,i,iproc))
+       if (p.eq.24) number_of_charged_current_insertions=&
+            number_of_charged_current_insertions+1
+    enddo
+    ! A resolved W decay is represented by an oppositely signed charged
+    ! lepton/neutrino pair from the same generation.  Count those pairs rather
+    ! than treating every neutrino as charged-current evidence: nu/anti-nu is
+    ! also a perfectly ordinary neutral-current final state.
+    do charged_lepton=11,15,2
+       positive_charged=0
+       negative_charged=0
+       positive_neutrino=0
+       negative_neutrino=0
+       do i=1,pgl%next
+          p=outgoing_particle(pgl,i,iproc)
+          if (p.eq.charged_lepton) positive_charged=positive_charged+1
+          if (p.eq.-charged_lepton) negative_charged=negative_charged+1
+          if (p.eq.charged_lepton+1) positive_neutrino=positive_neutrino+1
+          if (p.eq.-(charged_lepton+1)) negative_neutrino=negative_neutrino+1
+       enddo
+       number_of_charged_current_insertions=&
+            number_of_charged_current_insertions+&
+            min(positive_charged,negative_neutrino)+&
+            min(negative_charged,positive_neutrino)
+    enddo
+  end function number_of_charged_current_insertions
+
+  integer function outgoing_particle(pgl,ileg,iproc)
+    implicit none
+    type(phase_space_order_group),intent(in) :: pgl
+    integer,intent(in) :: ileg,iproc
+    outgoing_particle=pgl%processes(ileg,iproc)
+    if (ileg.le.2) outgoing_particle=phys_model%get_antipart(outgoing_particle)
+  end function outgoing_particle
+
+  integer function fermion_flow_mask(pgl,target,candidate,nlines)
+    implicit none
+    type(phase_space_order_group),intent(in) :: pgl
+    integer,intent(in) :: target,candidate,nlines
+    integer :: i,iperm,iq,iaq,nflips,ncharged_currents
+    integer,dimension(3) :: qlegs,aqlegs
+    integer,dimension(3,6),parameter :: permutations=reshape([&
+         1,2,3, 2,1,3, 1,3,2, 2,3,1, 3,1,2, 3,2,1],[3,6])
+    logical :: charged_current,allowed
+
+    qlegs=0
+    aqlegs=0
+    iq=0
+    iaq=0
+    do i=1,pgl%next
+       if (phys_model%is_quark(outgoing_particle(pgl,i,target))) then
+          iq=iq+1
+          qlegs(iq)=i
+       elseif (phys_model%is_antiquark(outgoing_particle(pgl,i,target))) then
+          iaq=iaq+1
+          aqlegs(iaq)=i
        endif
     enddo
-  end subroutine find_same_flavour
+    if (iq.ne.nlines .or. iaq.ne.nlines) then
+       fermion_flow_mask=0
+       return
+    endif
+    ncharged_currents=number_of_charged_current_insertions(pgl,target)
+    charged_current=ncharged_currents.gt.0
+    fermion_flow_mask=0
+    do iperm=1,merge(2,6,nlines.eq.2)
+       allowed=.true.
+       nflips=0
+       do i=1,nlines
+          iq=abs(outgoing_particle(pgl,qlegs(i),candidate))
+          iaq=abs(outgoing_particle(pgl,aqlegs(permutations(i,iperm)),candidate))
+          if (charged_current) then
+             if ((iq+1)/2.ne.(iaq+1)/2) allowed=.false.
+             if (mod(iq,2).ne.mod(iaq,2)) nflips=nflips+1
+          elseif (iq.ne.iaq) then
+             allowed=.false.
+          endif
+       enddo
+       ! A charged-current insertion changes weak isospin each time it is
+       ! attached to a fermion line.  With one W (explicit or decayed to
+       ! leptons), for example, flows containing three simultaneous flavour
+       ! flips are not diagrams of this amplitude even when every endpoint
+       ! belongs to the same generation.
+       if (ncharged_currents.gt.0) then
+          if (nflips.gt.ncharged_currents .or. &
+               mod(nflips,2).ne.mod(ncharged_currents,2)) allowed=.false.
+       endif
+       if (allowed) fermion_flow_mask=ibset(fermion_flow_mask,iperm-1)
+    enddo
+  end function fermion_flow_mask
+
+  logical function relation_holds(pgl,target,terms)
+    implicit none
+    type(phase_space_order_group),intent(in) :: pgl
+    integer,intent(in) :: target
+    integer,dimension(:),intent(in) :: terms
+    integer :: ii,idau,jj
+    complex(kind=8) :: rhs
+    real(kind=8) :: scale,error
+    real(kind=8),parameter :: relative_tolerance=1d-9
+    logical :: has_signal
+    relation_holds=.false.
+    has_signal=.false.
+    do ii=pgl%amps(1)%iproc_start(target),pgl%amps(1)%iproc_start(target+1)-1
+       rhs=(0d0,0d0)
+       scale=abs(pgl%amps(1)%amps(ii))
+       do idau=1,size(terms)
+          if (terms(idau).le.0) exit
+          jj=matching_helicity(pgl%amps(1),terms(idau),ii)
+          if (jj.le.0) cycle
+          rhs=rhs+pgl%amps(1)%amps(jj)
+          scale=scale+abs(pgl%amps(1)%amps(jj))
+       enddo
+       error=abs(pgl%amps(1)%amps(ii)-rhs)
+       if (scale.gt.0d0 .and. error.gt.relative_tolerance*scale) then
+          relation_holds=.false.
+          return
+       endif
+       if (scale.gt.0d0) has_signal=.true.
+    enddo
+    relation_holds=has_signal
+  end function relation_holds
+
+  integer function matching_helicity(amp,iproc,reference)
+    implicit none
+    type(amplitude_QCD),intent(in) :: amp
+    integer,intent(in) :: iproc,reference
+    integer :: candidate
+    matching_helicity=0
+    do candidate=amp%iproc_start(iproc),amp%iproc_start(iproc+1)-1
+       if (all(amp%spins(:,1,reference).eq.amp%spins(:,1,candidate))) then
+          matching_helicity=candidate
+          return
+       endif
+    enddo
+  end function matching_helicity
 
   subroutine setup_spin(pgl)
     ! Use the first process in the processes() array to setup all the possible

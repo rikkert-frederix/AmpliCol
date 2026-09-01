@@ -1,6 +1,7 @@
 module read_process_file
   use handling_processes
   use run_parameters, only: ignore_final_state_width_fix
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   integer :: sf_nprocs
   integer,dimension(:,:),allocatable :: unique_procs,processes,color_orders,multi_chans
@@ -126,58 +127,35 @@ contains
 
   subroutine read_processes_from_file(filename)
     implicit none
-    character(len=80) :: filename
+    character(len=*),intent(in) :: filename
     integer :: iproc,igroup,icheck,nproc_in_group,max_channels,iflav,ndim,process_file_version
     real(kind=8) :: idenCOfactor
     integer,dimension(:),allocatable :: process,order,ichans,phase_space_orders,phase_permutation
     integer,dimension(:,:),allocatable :: channel_permutations
     character(len=65536) :: buff
-    integer :: i,j,ios
-    open(unit=10,file=filename,status='old')
-    read(10,'(a)',iostat=ios) buff
-    if (ios.ne.0) then
-       write (*,*) 'Could not read the process-file header'
-       stop 1
-    endif
-    process_file_version=1
-    read(buff,*,iostat=ios) next,nproc_unique,process_file_version
-    if (ios.ne.0) then
-       process_file_version=1
-       read(buff,*,iostat=ios) next,nproc_unique
-       if (ios.ne.0) then
-          write (*,*) 'Malformed process-file header'
-          stop 1
-       endif
-    endif
-    if (process_file_version.lt.1 .or. process_file_version.gt.2) then
-       write (*,*) 'Unsupported process-file version',process_file_version
-       stop 1
-    endif
+    integer :: i,j,ios,iunit
+    call read_unique_process_catalogue(filename,iunit,process_file_version)
     ndim=3*(next-2)-4
     if (include_pdf) ndim=ndim+2
-    allocate(unique_procs(1:next,1:nproc_unique))
-    do iproc=1,nproc_unique
-       read(10,*) unique_procs(1:next,iproc)
-    enddo
     allocate(pgl_unique)
     pgl_unique%next=next
     pgl_unique%ndim=ndim
     call check_unique_processes()
-    read(10,*)
-    read(10,*)
-    read (10,*) ngroups
+    read(iunit,*)
+    read(iunit,*)
+    read (iunit,*) ngroups
     allocate(pgl(ngroups))
 
     allocate(process(1:next))
     allocate(order(1:next))
     allocate(phase_permutation(1:next))
 
-    read (10,*) 
+    read (iunit,*)
     do igroup=1,ngroups
        nprocs=0
        sf_nprocs=0
        allocate(phase_space_orders(1:next))
-       read(10,*) icheck,nproc_in_group,max_channels,phase_space_orders(1:next)
+       read(iunit,*) icheck,nproc_in_group,max_channels,phase_space_orders(1:next)
        if (icheck.ne.igroup) then
           write (*,*) 'ERROR in processes file',icheck,igroup
           stop 1
@@ -196,7 +174,7 @@ contains
        allocate(channel_permutations(1:next,1:max_channels))
        do iflav=1,2
           do iproc=1,nproc_in_group
-             read(10,'(a)',iostat=ios) buff
+             read(iunit,'(a)',iostat=ios) buff
              if (ios.ne.0 .or. len_trim(buff).eq.len(buff)) then
                 write (*,*) 'Could not read a complete subprocess row'
                 stop 1
@@ -261,9 +239,9 @@ contains
              endif
           enddo
           if (iflav.eq.1) then
-             if (.not.decompose_same_flavour_into_two_diff_flavour) exit
+             if (.not.decompose_same_flavour_amplitudes) exit
              do iproc=1,nproc_in_group
-                backspace(10)
+                backspace(iunit)
              enddo
           endif
        enddo
@@ -324,12 +302,115 @@ contains
                pgl(igroup)%multichan%channels(1:pgl(igroup)%multichan%number_of_channels(iproc),iproc)
        enddo
        write (99,*) '****************************************************'
-       read(10,*)
-       read(10,*)
-       read(10,*)
+       read(iunit,*)
+       read(iunit,*)
+       read(iunit,*)
     enddo
-    close(10)
+    close(iunit)
   end subroutine read_processes_from_file
+
+  subroutine read_unique_process_catalogue(filename,iunit,version)
+    implicit none
+    character(len=*),intent(in) :: filename
+    integer,intent(out) :: iunit,version
+    character(len=65536) :: line
+    integer :: ios,iproc,jproc,nquarks,nantiquarks,i,nfields
+    integer,dimension(3) :: header
+
+    open(newunit=iunit,file=trim(filename),status='old',action='read',iostat=ios)
+    if (ios.ne.0) call process_catalogue_error('could not open '//trim(filename))
+    read(iunit,'(a)',iostat=ios) line
+    if (ios.ne.0) call process_catalogue_error('could not read the header')
+    if (len_trim(line).eq.len(line)) &
+         call process_catalogue_error('header exceeds the supported line length')
+    call parse_integer_record(line,header,nfields,ios)
+    if (ios.ne.0 .or. (nfields.ne.2 .and. nfields.ne.3)) &
+         call process_catalogue_error('malformed header')
+    next=header(1)
+    nproc_unique=header(2)
+    version=1
+    if (nfields.eq.3) version=header(3)
+    if (next.lt.4 .or. nproc_unique.lt.1) &
+         call process_catalogue_error('invalid process or record count')
+    if (version.lt.1 .or. version.gt.2) &
+         call process_catalogue_error('unsupported version',version)
+
+    allocate(unique_procs(next,nproc_unique))
+    do iproc=1,nproc_unique
+       read(iunit,'(a)',iostat=ios) line
+       if (ios.ne.0) call process_catalogue_error(&
+            'could not read unique process',iproc)
+       if (len_trim(line).eq.len(line)) call process_catalogue_error(&
+            'unique process exceeds the supported line length',iproc)
+       call parse_integer_record(line,unique_procs(:,iproc),nfields,ios)
+       if (ios.ne.0 .or. nfields.ne.next) call process_catalogue_error(&
+            'malformed unique process',iproc)
+       nquarks=count([(phys_model%is_quark(unique_procs(i,iproc)),i=1,next)])
+       nantiquarks=count([(phys_model%is_antiquark(unique_procs(i,iproc)),i=1,next)])
+       if (nquarks.ne.nantiquarks .or. nquarks.gt.3) &
+            call process_catalogue_error('unbalanced or unsupported quark-line count',iproc)
+       if (nquarks.gt.0) then
+          if (.not.all([(phys_model%is_quark(unique_procs(i,iproc)),i=1,nquarks)])) &
+               call process_catalogue_error('quark endpoints are not first',iproc)
+          if (.not.all([(phys_model%is_antiquark(unique_procs(i,iproc)),&
+               i=nquarks+1,2*nquarks)])) &
+               call process_catalogue_error('antiquark endpoints do not follow quarks',iproc)
+       endif
+       do jproc=1,iproc-1
+          if (all(unique_procs(:,iproc).eq.unique_procs(:,jproc))) &
+               call process_catalogue_error('duplicate unique process',iproc)
+       enddo
+    enddo
+  end subroutine read_unique_process_catalogue
+
+  subroutine parse_integer_record(line,values,nvalues,ios)
+    implicit none
+    character(len=*),intent(in) :: line
+    integer,dimension(:),intent(out) :: values
+    integer,intent(out) :: nvalues,ios
+    integer :: first,last,position
+    values=0
+    nvalues=0
+    ios=0
+    last=len_trim(line)
+    position=1
+    do
+       do while (position.le.last .and. is_record_space(line(position:position)))
+          position=position+1
+       enddo
+       if (position.gt.last) return
+       first=position
+       do while (position.le.last .and. .not.is_record_space(line(position:position)))
+          position=position+1
+       enddo
+       if (nvalues.ge.size(values)) then
+          ios=1
+          return
+       endif
+       nvalues=nvalues+1
+       read(line(first:position-1),*,iostat=ios) values(nvalues)
+       if (ios.ne.0) return
+    enddo
+  contains
+    logical function is_record_space(token_character)
+      implicit none
+      character(len=1),intent(in) :: token_character
+      is_record_space=token_character.eq.' ' .or. &
+           iachar(token_character).eq.9 .or. iachar(token_character).eq.13
+    end function is_record_space
+  end subroutine parse_integer_record
+
+  subroutine process_catalogue_error(message,record)
+    implicit none
+    character(len=*),intent(in) :: message
+    integer,intent(in),optional :: record
+    if (present(record)) then
+       write (*,'(a,1x,a,1x,i0)') 'Invalid unique-process catalogue:',trim(message),record
+    else
+       write (*,'(a,1x,a)') 'Invalid unique-process catalogue:',trim(message)
+    endif
+    stop 1
+  end subroutine process_catalogue_error
 
 
 
@@ -337,11 +418,10 @@ contains
     use phase_space_gen23_mod
     use cuts
     implicit none
-    integer :: i,j,iproc,ih
+    integer :: i,iproc,ih
     integer,parameter :: nevent=10
     real(kind=8),dimension(:,:),allocatable :: amp2
-    real(kind=8),dimension(:),allocatable :: mass,width
-    real(kind=8),dimension(pgl_unique%ndim) :: x
+    real(kind=8),dimension(:),allocatable :: mass
     real(kind=8),external :: ran2
     type(psv) :: ps
     allocate(phase_space_gen23 :: pgl_unique%phase_space)
@@ -350,16 +430,11 @@ contains
     allocate(pgl_unique%phase_space_orders(next))
     allocate(pgl_unique%amps(1))
     allocate(mass(next))
-    allocate(width(next))
     pgl_unique%nproc=nproc_unique
     pgl_unique%processes(1:next,1:nproc_unique)=unique_procs(1:next,1:nproc_unique)
-    do i=1,pgl_unique%next
-       mass(i)=phys_model%get_mass(pgl_unique%processes(i,1))
-       width(i)=phys_model%get_width(pgl_unique%processes(i,1))
-       ! For this unique_prcess checks, use only massless particles
-       if (mass(i).ne.0d0) mass(i)=0d0
-       if (width(i).ne.0d0) width(i)=0d0
-    enddo
+    ! Use a common massless phase space for all unique-process probes.  The
+    ! physical mass layout is checked separately before a map is accepted.
+    mass=0d0
     call setup_spin(pgl_unique)
     call setup_color_order(pgl_unique)
 
@@ -400,7 +475,8 @@ contains
           amp2(pgl_unique%passed(1),iproc)=amp2(pgl_unique%passed(1),iproc)+&
                dble(pgl_unique%amps(1)%amps(ih)*dconjg(pgl_unique%amps(1)%amps(ih)))
        enddo
-       call find_same_flavour(pgl_unique,nevent,amp2(1,:))
+       call find_same_flavour(pgl_unique,nevent,&
+            amp2(pgl_unique%passed(1),:))
     enddo
     allocate(unique_map(1:pgl_unique%nproc))
     allocate(unique_map_value(1:pgl_unique%nproc))
@@ -415,6 +491,7 @@ contains
     deallocate(ps%p)
     deallocate(ps%x)
     deallocate(amp2)
+    deallocate(mass)
   end subroutine check_unique_processes
 
   subroutine find_unique(pgl,nevent,amp2,unique_map,unique_map_value)
@@ -424,41 +501,84 @@ contains
     real(kind=8),dimension(nevent,pgl%nproc),intent(in) :: amp2
     real(kind=8),dimension(pgl%nproc),intent(out) :: unique_map_value
     integer,dimension(pgl%nproc),intent(out) :: unique_map
-    integer :: i,j,k
-    real(kind=8),dimension(nevent) :: ratio
-    real(kind=8) :: ave
-    real(kind=8),parameter :: tiny=1d-6
-    unique_map=-1d0
+    integer :: i,j,representative
+    real(kind=8),dimension(nevent) :: difference
+    real(kind=8) :: denominator,factor,residual,point_residual,best_residual,scale,floor
+    real(kind=8),parameter :: relation_tolerance=1d-8
+    unique_map=-1
+    unique_map_value=1d0
     do i=1,pgl%nproc
-       if (all(amp2(1:nevent,i).eq.0d0)) then
+       if (maxval(abs(amp2(:,i))).eq.0d0) then
           unique_map(i)=0
           unique_map_value(i)=0d0
           cycle
        endif
+       best_residual=huge(1d0)
        do j=1,i-1
-          if (all(amp2(1:nevent,j).eq.0d0)) cycle
-          ! A numerical relation found on the deliberately massless probe
-          ! point is not a valid runtime reduction if it moves a massive
-          ! species to another external leg.
-          do k=1,pgl%next
-             if (phys_model%get_mass(pgl%processes(k,i)).ne.&
-                  phys_model%get_mass(pgl%processes(k,j))) exit
-          enddo
-          if (k.le.pgl%next) cycle
-          ratio(1:nevent)=amp2(1:nevent,i)/amp2(1:nevent,j)
-          ave=sum(ratio(1:nevent))/nevent
-          if (all(abs(ratio(1:nevent)/ave-1d0).lt.tiny)) then
-             unique_map_value(i)=ave
+          if (maxval(abs(amp2(:,j))).eq.0d0) cycle
+          if (.not.compatible_unique_probes(pgl,i,j)) cycle
+          denominator=dot_product(amp2(:,j),amp2(:,j))
+          if (denominator.le.0d0 .or. .not.ieee_is_finite(denominator)) cycle
+          ! Least-squares proportionality avoids divisions by individual
+          ! phase-space values (and hence the NaNs produced by the old ratio
+          ! test whenever a representative vanished at one sample).
+          factor=dot_product(amp2(:,i),amp2(:,j))/denominator
+          if (factor.le.0d0 .or. .not.ieee_is_finite(factor)) cycle
+          difference=amp2(:,i)-factor*amp2(:,j)
+          scale=sqrt(dot_product(amp2(:,i),amp2(:,i)))+&
+               abs(factor)*sqrt(denominator)
+          if (scale.le.0d0 .or. .not.ieee_is_finite(scale)) cycle
+          residual=sqrt(dot_product(difference,difference))/scale
+          floor=epsilon(1d0)*max(maxval(abs(amp2(:,i))),&
+               abs(factor)*maxval(abs(amp2(:,j))))
+          point_residual=maxval(abs(difference)/(&
+               abs(amp2(:,i))+abs(factor*amp2(:,j))+floor))
+          residual=max(residual,point_residual)
+          if (.not.ieee_is_finite(residual)) cycle
+          if (residual.lt.relation_tolerance .and. residual.lt.best_residual) then
+             best_residual=residual
+             unique_map_value(i)=factor
              unique_map(i)=j
-             exit
           endif
        enddo
-       if (j.eq.i) then
-          unique_map(i)=-1
-          unique_map_value(i)=1d0
+       ! Store a direct map to the root representative.  Chained maps made
+       ! the reconstructed flavour labels depend on catalogue ordering and
+       ! lost one or more proportionality factors.
+       if (unique_map(i).gt.0) then
+          representative=unique_map(i)
+          do while (unique_map(representative).gt.0)
+             unique_map_value(i)=unique_map_value(i)*&
+                  unique_map_value(representative)
+             representative=unique_map(representative)
+          enddo
+          unique_map(i)=representative
        endif
     enddo
   end subroutine find_unique
+
+  logical function compatible_unique_probes(pgl,left,right)
+    implicit none
+    type(phase_space_order_group),intent(in) :: pgl
+    integer,intent(in) :: left,right
+    integer :: i,nlines
+    compatible_unique_probes=.false.
+    if (pgl%amps(1)%n_qqbar(left).ne.pgl%amps(1)%n_qqbar(right)) return
+    nlines=pgl%amps(1)%n_qqbar(left)
+    ! The unique-process block varies quark endpoint labels deliberately, but
+    ! all other external particles must agree exactly.  This prevents an
+    ! accidental numerical relation from changing the requested EW state.
+    if (2*nlines.lt.pgl%next) then
+       if (any(unique_procs(2*nlines+1:pgl%next,left).ne.&
+            unique_procs(2*nlines+1:pgl%next,right))) return
+    endif
+    do i=1,pgl%next
+       if (phys_model%get_mass(pgl%processes(i,left)).ne.&
+            phys_model%get_mass(pgl%processes(i,right))) return
+       if (phys_model%get_spin(pgl%processes(i,left)).ne.&
+            phys_model%get_spin(pgl%processes(i,right))) return
+    enddo
+    compatible_unique_probes=.true.
+  end function compatible_unique_probes
 
   subroutine add_to_process_list(process,order,phase_permutation,channel_permutations,&
        idenCOfactor,max_channels,ichans,skip_same_flavour)
@@ -468,11 +588,9 @@ contains
     integer,dimension(next) :: process,order,process_unique,phase_permutation
     integer,dimension(next,max_channels) :: channel_permutations
     real(kind=8) :: idenCOfactor,idenCOMAPfactor,idenMAPfactor
-    integer,dimension(0:6) :: quarks
     logical :: skip_same_flavour,is_same_flavour
-    call find_quarks(process,order,quarks)
-    call get_unique_process_from_quarks(quarks,process,order,process_unique,idenMAPfactor,is_same_flavour)
-    if (decompose_same_flavour_into_two_diff_flavour) then
+    call get_unique_process(process,order,process_unique,idenMAPfactor,is_same_flavour)
+    if (decompose_same_flavour_amplitudes) then
        if (skip_same_flavour .and. is_same_flavour) return
        if ((.not.skip_same_flavour) .and. (.not.is_same_flavour)) return
     endif
@@ -487,64 +605,51 @@ contains
   end subroutine add_to_process_list
 
 
-  subroutine get_unique_process_from_quarks(quarks,process,order,process_unique,idenMAPfactor,is_same_flavour)
+  subroutine get_unique_process(process,order,process_unique,idenMAPfactor,is_same_flavour)
     implicit none
-    integer,dimension(0:6) :: quarks
-    integer,dimension(next) :: process,order,process_unique,process_mapped,mapping
-    integer :: i,iproc,iq
-    real(kind=8) :: idenMAPfactor
-    logical :: is_same_flavour
-    call map_to_canonical_form(process,process_mapped,mapping)
+    integer,dimension(next),intent(in) :: process,order
+    integer,dimension(next),intent(out) :: process_unique
+    integer,dimension(next) :: canonical_process,mapping
+    integer,dimension(3) :: quark_pdgs,antiquark_pdgs,quark_legs,antiquark_legs
+    integer :: i,iproc,nlines,outgoing_pdg
+    real(kind=8),intent(out) :: idenMAPfactor
+    logical,intent(out) :: is_same_flavour
+    call collect_quark_endpoints(process,order,nlines,quark_pdgs,&
+         antiquark_pdgs,quark_legs,antiquark_legs)
+
+    ! Build exactly the layout serialized by process_list.py: all outgoing,
+    ! quark endpoints first in colour-line order, then antiquark endpoints,
+    ! followed by the canonically sorted non-fermion legs.  This replaces the
+    ! separate, hand-written index shuffles for two and three quark lines.
+    canonical_process=process
+    canonical_process(1)=phys_model%get_antipart(canonical_process(1))
+    canonical_process(2)=phys_model%get_antipart(canonical_process(2))
+    call sort_with_mapping(next,canonical_process,mapping)
+    if (nlines.gt.0) then
+       canonical_process(1:nlines)=quark_pdgs(1:nlines)
+       canonical_process(nlines+1:2*nlines)=antiquark_pdgs(1:nlines)
+    endif
     do iproc=1,pgl_unique%nproc
-       if (pgl_unique%amps(1)%n_qqbar(iproc)*2.ne.quarks(0)) cycle
-       if (quarks(0).eq.4) then
-          if (all(pgl_unique%processes(1:4,iproc).eq.-abs(quarks(1:4)))) then ! quarks are consistent 
-             if (all(process_mapped(5:next).eq.pgl_unique%processes(5:next,iproc))) exit ! and the rest as well
-          endif
-       elseif (quarks(0).eq.6) then
-          if (all(abs(pgl_unique%processes(1:6,iproc)).eq.abs(quarks(1:6)))) then ! quarks are consistent 
-             if (all(process_mapped(7:next).eq.pgl_unique%processes(7:next,iproc))) exit ! and the rest as well
-          endif
-       else
-          if (all(process_mapped(1:next).eq.pgl_unique%processes(1:next,iproc))) exit
-       endif
+       if (pgl_unique%amps(1)%n_qqbar(iproc).ne.nlines) cycle
+       if (all(canonical_process.eq.unique_procs(:,iproc))) exit
     enddo
     if (iproc.gt.pgl_unique%nproc) then
-       write (*,*) 'Process not found',quarks
-       write (*,*) process
+       write (*,*) 'Process not found in unique-process catalogue'
+       write (*,*) 'Physical process:',process
+       write (*,*) 'Colour order:',order
+       write (*,*) 'Canonical process:',canonical_process
        stop 1
     endif
-    process_unique(1:next)=process(1:next)
+    process_unique=process
     idenMAPfactor=unique_map_value(iproc)
     if (unique_map(iproc).gt.0) then
-       iq=0
-       do i=1,next
-          if (phys_model%is_quark(process(order(i))) .or. phys_model%is_antiquark(process(order(i)))) then
-             iq=iq+1
-             if (quarks(0).eq.4) then
-                if (iq.eq.1 .or. iq.eq.4) then
-                   process_unique(order(i))=sign(pgl_unique%processes(iq,unique_map(iproc)),quarks(iq))
-                elseif (iq.eq.2) then
-                   process_unique(order(i))=sign(pgl_unique%processes(3,unique_map(iproc)),quarks(3))
-                elseif (iq.eq.3) then
-                   process_unique(order(i))=sign(pgl_unique%processes(2,unique_map(iproc)),quarks(2))
-                endif
-             elseif (quarks(0).eq.6) then
-                if (iq.eq.1 .or. iq.eq.6) then
-                   process_unique(order(i))=sign(pgl_unique%processes(iq,unique_map(iproc)),quarks(iq))
-                elseif (iq.eq.2) then
-                   process_unique(order(i))=sign(pgl_unique%processes(4,unique_map(iproc)),quarks(4))
-                elseif (iq.eq.3) then
-                   process_unique(order(i))=sign(pgl_unique%processes(2,unique_map(iproc)),quarks(2))
-                elseif (iq.eq.4) then
-                   process_unique(order(i))=sign(pgl_unique%processes(5,unique_map(iproc)),quarks(5))
-                elseif (iq.eq.5) then
-                   process_unique(order(i))=sign(pgl_unique%processes(3,unique_map(iproc)),quarks(3))
-                endif
-             elseif (quarks(0).eq.2) then
-                process_unique(order(i))=sign(pgl_unique%processes(iq,unique_map(iproc)),quarks(iq))
-             endif
-          endif
+       do i=1,nlines
+          outgoing_pdg=unique_procs(i,unique_map(iproc))
+          if (quark_legs(i).le.2) outgoing_pdg=phys_model%get_antipart(outgoing_pdg)
+          process_unique(quark_legs(i))=outgoing_pdg
+          outgoing_pdg=unique_procs(nlines+i,unique_map(iproc))
+          if (antiquark_legs(i).le.2) outgoing_pdg=phys_model%get_antipart(outgoing_pdg)
+          process_unique(antiquark_legs(i))=outgoing_pdg
        enddo
     endif
     ! Numerical flavour reduction is constructed on a common massless phase-
@@ -561,12 +666,8 @@ contains
           exit
        endif
     enddo
-    if (pgl_unique%amps(1)%same_flav(iproc)) then
-       is_same_flavour=.true.
-    else
-       is_same_flavour=.false.
-    endif
-  end subroutine get_unique_process_from_quarks
+    is_same_flavour=pgl_unique%amps(1)%same_flav(iproc)
+  end subroutine get_unique_process
 
   subroutine add_to_unique_process_list(process,process_unique,order,phase_permutation,&
        channel_permutations,idenCOMAPfactor,max_channels,ichans)
@@ -635,39 +736,47 @@ contains
   end subroutine add_to_unique_process_list
 
 
-  subroutine find_quarks(process,order,quarks)
+  subroutine collect_quark_endpoints(process,order,nlines,quark_pdgs,&
+       antiquark_pdgs,quark_legs,antiquark_legs)
     implicit none
-    integer,dimension(next) :: process,order
-    integer,dimension(0:6) :: quarks
-    integer :: i
-    quarks=0
+    integer,dimension(next),intent(in) :: process,order
+    integer,intent(out) :: nlines
+    integer,dimension(3),intent(out) :: quark_pdgs,antiquark_pdgs,quark_legs,antiquark_legs
+    integer :: i,leg,pdg,nquarks,nantiquarks
+    quark_pdgs=0
+    antiquark_pdgs=0
+    quark_legs=0
+    antiquark_legs=0
+    nquarks=0
+    nantiquarks=0
     do i=1,next
-       if (phys_model%is_quark(process(order(i))) .or. phys_model%is_antiquark(process(order(i)))) then
-          quarks(0)=quarks(0)+1
-          quarks(quarks(0))=process(order(i))
+       leg=order(i)
+       pdg=process(leg)
+       if (leg.le.2) pdg=phys_model%get_antipart(pdg)
+       if (phys_model%is_quark(pdg)) then
+          nquarks=nquarks+1
+          if (nquarks.gt.size(quark_pdgs)) then
+             write (*,*) 'More than three quark lines are not supported'
+             stop 1
+          endif
+          quark_pdgs(nquarks)=pdg
+          quark_legs(nquarks)=leg
+       elseif (phys_model%is_antiquark(pdg)) then
+          nantiquarks=nantiquarks+1
+          if (nantiquarks.gt.size(antiquark_pdgs)) then
+             write (*,*) 'More than three quark lines are not supported'
+             stop 1
+          endif
+          antiquark_pdgs(nantiquarks)=pdg
+          antiquark_legs(nantiquarks)=leg
        endif
     enddo
-    if (quarks(0).eq.4) then
-       quarks(1:4)=[quarks(1),quarks(3),quarks(2),quarks(4)]
-    elseif (quarks(0).eq.6) then
-       quarks(1:6)=[quarks(1),quarks(3),quarks(5),quarks(2),quarks(4),quarks(6)]
+    if (nquarks.ne.nantiquarks) then
+       write (*,*) 'Unbalanced quark endpoints in process',process
+       stop 1
     endif
-  end subroutine find_quarks
-
-  subroutine map_to_canonical_form(process,part,mapping)
-    ! cross the two initial state particle PDGs, order according to
-    ! the PDG value, (and reflip the two initial states again)
-    implicit none
-    integer,dimension(next) :: process,part,mapping
-    part(1:next)=process(1:next)
-    ! cross the initial state
-    part(1)=phys_model%get_antipart(part(1))
-    part(2)=phys_model%get_antipart(part(2))
-    call sort_with_mapping(next,part,mapping)
-    ! cross the initial state
-    part(1)=phys_model%get_antipart(part(1))
-    part(2)=phys_model%get_antipart(part(2))
-  end subroutine map_to_canonical_form
+    nlines=nquarks
+  end subroutine collect_quark_endpoints
 
   subroutine sort_with_mapping(n,array,mapping)
     !

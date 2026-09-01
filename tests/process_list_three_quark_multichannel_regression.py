@@ -399,6 +399,26 @@ class ThreeQuarkLineMultiChannelRegression(unittest.TestCase):
             process_list.options.clear()
             process_list.options.update(saved_options)
 
+    def test_unique_catalogue_expands_three_line_endpoints_without_duplicates(self):
+        expanded = process_list.ExpandQuarkLineOrderings([
+            ["d", "u", "s", "d~", "u~", "s~", "g"],
+            ["d", "d", "u", "d~", "d~", "u~", "g"],
+        ])
+        self.assertEqual(len(expanded), 36 + 9)
+        self.assertEqual(len({tuple(process) for process in expanded}), 45)
+        for process in expanded:
+            self.assertTrue(all(part in process_list.quarks for part in process[:3]))
+            self.assertTrue(all(
+                part in process_list.antiquarks for part in process[3:6]
+            ))
+            self.assertEqual(process[6], "g")
+
+    def test_unique_catalogue_rejects_an_unbalanced_layout(self):
+        with self.assertRaisesRegex(ValueError, "balanced quark lines"):
+            process_list.ExpandQuarkLineOrderings([
+                ["d", "u", "d~", "g"],
+            ])
+
     def test_four_field_conversion_uses_identity_maps(self):
         proc = ("g", "g", "g", "g")
         line = process_list.ConvertProcToString(

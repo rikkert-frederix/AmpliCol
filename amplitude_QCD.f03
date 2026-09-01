@@ -4,6 +4,7 @@ module amplitude_QCD_mod
   logical,parameter :: use_symmetry=.true.
   logical,parameter :: use_symm_cm=.true.
   logical,parameter :: use_cm_dict=.true.
+  integer,parameter :: max_same_flavour_terms=6
   integer(kind=8),parameter :: max_three_line_color_orders=5000_8
   type :: current
      ! if adding variables here, also update the finalize_current and assign_current subroutines
@@ -259,18 +260,11 @@ contains
                endif
                if (iand(current_list_local(icur)%bin,current_list_local(jcur)%bin).ne.0) cycle
                proc=current_list_local(icur)%iproc.and.current_list_local(jcur)%iproc
-               if (proc%count_bits().eq.0) then
-                  ! combination of icur and jcur does not contribute to any of the processes
-                  cycle
-               elseif (proc%count_bits().ne.1) then
-                  write (*,*) 'A given amplitude should only contribute to one process',proc%count_bits()
-                  do i=1,this%nprocs
-                     if (proc%test_bit(i)) write (*,*) i
-                  enddo
-                  write (*,*) current_list_local(icur)%ext_type(1:n-1),'   , ',current_list_local(jcur)%ext_type(1)
-                  stop 1
-               elseif (.not.proc%test_bit(iproc)) then
-                  ! one process, but it is not equal to process 'iproc'
+               if (.not.proc%test_bit(iproc)) then
+                  ! A current pair can be shared by several flavour processes.
+                  ! It still contributes one amplitude to each process whose
+                  ! bit is set; three-quark-line catalogues encounter this
+                  ! routinely when two Wick contractions share a subtree.
                   cycle
                endif
                this%n_amps=this%n_amps+1
@@ -296,9 +290,10 @@ contains
          stop 1
       endif
 
-      allocate(this%same_flavour_sum(this%n_amps,2))
-      allocate(this%same_flavour_sum_operation(this%n_amps,2))
+      allocate(this%same_flavour_sum(this%n_amps,max_same_flavour_terms))
+      allocate(this%same_flavour_sum_operation(this%n_amps,max_same_flavour_terms))
       this%same_flavour_sum=-1
+      this%same_flavour_sum_operation=0
       this%iproc_start(this%nprocs+1)=this%n_amps+1
 
       allocate(this%include_amp(1:this%n_amps))
@@ -410,8 +405,8 @@ contains
       allocate(old_curr2amp(2,this%n_amps))
       allocate(old_perm(size(this%perm,1),this%n_amps))
       allocate(old_include_amp(this%n_amps))
-      allocate(old_same_flavour_sum(this%n_amps,2))
-      allocate(old_same_flavour_sum_operation(this%n_amps,2))
+      allocate(old_same_flavour_sum(this%n_amps,max_same_flavour_terms))
+      allocate(old_same_flavour_sum_operation(this%n_amps,max_same_flavour_terms))
       old_curr2amp=this%curr2amp
       old_perm=this%perm
       old_include_amp=this%include_amp
@@ -1921,7 +1916,9 @@ contains
     ! amp specific information
     do iproc=1,this%nprocs
        do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
-          write (iunit) this%include_amp(iamp),this%same_flavour_sum(iamp,1:2),this%same_flavour_sum_operation(iamp,1:2)
+          write (iunit) this%include_amp(iamp),&
+               this%same_flavour_sum(iamp,1:max_same_flavour_terms),&
+               this%same_flavour_sum_operation(iamp,1:max_same_flavour_terms)
           write (iunit) this%spins(1:n,1,iamp)
           write (iunit) this%perm(1:n-this%n_sing(1),iamp)
           if (.not.this%same_flav(iproc)) write (iunit) this%curr2amp(1:2,iamp)
@@ -1992,16 +1989,17 @@ contains
     read(iunit) this%iproc_start(this%nprocs+1)
     ! amp specific information
     allocate(this%include_amp(1:this%n_amps))
-    allocate(this%same_flavour_sum(1:this%n_amps,1:2))
+    allocate(this%same_flavour_sum(1:this%n_amps,1:max_same_flavour_terms))
+    allocate(this%same_flavour_sum_operation(1:this%n_amps,1:max_same_flavour_terms))
     allocate(this%spins(1:n,1,1:this%n_amps))
     allocate(this%perm(1:n-this%n_sing(1),1:this%n_amps))
-    do iproc=1,this%nprocs
-       if (this%same_flav(iproc)) exit
-    enddo
-    allocate(this%curr2amp(1:2,1:this%iproc_start(iproc)-1))
+    allocate(this%curr2amp(1:2,1:this%n_amps))
+    this%curr2amp=0
     do iproc=1,this%nprocs
        do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
-          read (iunit) this%include_amp(iamp),this%same_flavour_sum(iamp,1:2),this%same_flavour_sum_operation(iamp,1:2)
+          read (iunit) this%include_amp(iamp),&
+               this%same_flavour_sum(iamp,1:max_same_flavour_terms),&
+               this%same_flavour_sum_operation(iamp,1:max_same_flavour_terms)
           read (iunit) this%spins(1:n,1,iamp)
           read (iunit) this%perm(1:n-this%n_sing(1),iamp)
           if (.not.this%same_flav(iproc)) read (iunit) this%curr2amp(1:2,iamp)
@@ -2522,9 +2520,10 @@ contains
             do iproc=1,this%nprocs
                do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
                   if (this%same_flav(iproc)) then
-                     ! same-flavour amps are build from two different-flavour amps
+                     ! Same-flavour amplitudes are reconstructed from a
+                     ! fermion-flow cover containing up to 3! terms.
                      this%amps(iamp)=(0d0,0d0)
-                     do idau=1,2
+                     do idau=1,max_same_flavour_terms
                         if (this%same_flavour_sum(iamp,idau).gt.0) then
                            this%amps(iamp)=this%amps(iamp)+apply_operation(iamp,idau)
                         endif
@@ -2566,9 +2565,9 @@ contains
                      cycle
                   else
                      if (this%same_flav(iproc)) then
-                        ! same-flavour amps are build from two different-flavour amps
+                        ! Reconstruct the complete fermion-flow cover.
                         this%amps(iamp)=(0d0,0d0)
-                        do idau=1,2
+                        do idau=1,max_same_flavour_terms
                            if (this%same_flavour_sum(iamp,idau).gt.0) then
                               this%amps(iamp)=this%amps(iamp)+apply_operation(iamp,idau)
                            endif
@@ -4683,14 +4682,13 @@ contains
           endif
        enddo
     enddo
-    ! now the same-flavour ones. They are the "sum" of two non-same-flavour ones.
+    ! Now reconstruct same-flavour amplitudes from their fermion-flow covers.
     do iproc=1,this%nprocs
        do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
           if (this%same_flav(iproc)) then
-             ! same-flavour amps are build from two different-flavour amps
              write(tmp,*) iamp
              line='amps('//trim(adjustl(tmp))//')='
-             do idau=1,2
+             do idau=1,max_same_flavour_terms
                 if (this%same_flavour_sum(iamp,idau).gt.0) then
                    write(tmp,*) this%same_flavour_sum(iamp,idau)
                    if (this%same_flavour_sum_operation(iamp,idau) .eq. 0) then
@@ -4740,7 +4738,8 @@ contains
     integer,intent(in) :: n
     integer,intent(inout) :: nhel
     integer,intent(inout),dimension(nhel) :: include_hel
-    integer :: nspin,ispin,ic,iv,iamp
+    integer :: nspin,ispin,ic,iv,iamp,idau
+    logical :: has_included_daughter
     logical,dimension(:),allocatable :: include_current
     integer,dimension(:,:,:),allocatable :: tmp_spin
     ! deallocate a bunch
@@ -4764,30 +4763,33 @@ contains
     do iamp=1,nhel
        if (include_hel(iamp).ge.1) then
           this%include_amp(iamp)=.true.
-          if (this%same_flavour_sum(iamp,1).le.0) then
+          if (.not.any(this%same_flavour_sum(iamp,:).gt.0)) then
              include_current(this%curr2amp(1,iamp))=.true.
              include_current(this%curr2amp(2,iamp))=.true.
           else
              ! same-flavour amplitude.
-             if (all(include_hel(this%same_flavour_sum(iamp,1:2)).eq.0)) then
+             has_included_daughter=.false.
+             do idau=1,max_same_flavour_terms
+                if (this%same_flavour_sum(iamp,idau).le.0) cycle
+                if (include_hel(this%same_flavour_sum(iamp,idau)).ne.0) &
+                     has_included_daughter=.true.
+             enddo
+             if (.not.has_included_daughter) then
                 write (*,*) 'inconsistency in helicity filter for same-flavour process #1'
-                write (*,*) iamp,this%same_flavour_sum(iamp,1:2)
+                write (*,*) iamp,this%same_flavour_sum(iamp,:)
                 stop 1
              endif
-             if (include_hel(this%same_flavour_sum(iamp,1)).lt.0) then
-                this%same_flavour_sum(iamp,1)=-include_hel(this%same_flavour_sum(iamp,1))
-                if (.not. this%include_amp(this%same_flavour_sum(iamp,1))) then
-                   write (*,*) 'inconsistency in helicity filter for same-flavour process #2'
-                   stop 1
+             do idau=1,max_same_flavour_terms
+                if (this%same_flavour_sum(iamp,idau).le.0) cycle
+                if (include_hel(this%same_flavour_sum(iamp,idau)).lt.0) then
+                   this%same_flavour_sum(iamp,idau)=&
+                        -include_hel(this%same_flavour_sum(iamp,idau))
+                   if (.not.this%include_amp(this%same_flavour_sum(iamp,idau))) then
+                      write (*,*) 'inconsistency in helicity filter for same-flavour process #2'
+                      stop 1
+                   endif
                 endif
-             endif
-             if (include_hel(this%same_flavour_sum(iamp,2)).lt.0) then
-                this%same_flavour_sum(iamp,2)=-include_hel(this%same_flavour_sum(iamp,2))
-                if (.not. this%include_amp(this%same_flavour_sum(iamp,2))) then
-                   write (*,*) 'inconsistency in helicity filter for same-flavour process #3'
-                   stop 1
-                endif
-             endif
+             enddo
           endif
           nspin=nspin+1
           tmp_spin(1:n,1,nspin)=this%spins(1:n,1,iamp)
@@ -4937,7 +4939,7 @@ contains
     endif
     do iamp=1,this%n_amps
        if (.not.this%include_amp(iamp)) cycle
-       do i=1,2
+       do i=1,max_same_flavour_terms
           if (this%same_flavour_sum(iamp,i).eq.0) then
              this%same_flavour_sum(where_to_amp(iamp),i)=0
              this%same_flavour_sum_operation(where_to_amp(iamp),i)=0
@@ -5003,7 +5005,7 @@ contains
        endif
     enddo
     do iamp=1,this%n_amps
-       do i=1,2
+       do i=1,max_same_flavour_terms
           if (this%same_flavour_sum(iamp,i).gt.this%n_amps) then
              this%same_flavour_sum(iamp,i)=0
           endif

@@ -2,7 +2,8 @@
 
 .PHONY: test_matrix_elements test_fermi_statistics test_mixed_spinors \
 	test_three_quark_line_reweight test_three_quark_line_multichannel \
-	test_run_parameters test_command_line_parser update_matrix_cases update_matrix_goldens
+	test_same_flavour_relations test_run_parameters test_command_line_parser \
+	update_matrix_cases update_matrix_goldens
 
 FC = gfortran
 #FFLAGS= -fbounds-check -g -ffpe-trap=invalid,zero,overflow,underflow,denormal
@@ -121,6 +122,10 @@ FILES_M_TEST_THREE_QUARK = bitset.o color_algebra.o math_functions.o feynmanrule
 FILES_M_TEST_MIXED_SPINOR = bitset.o color_algebra.o math_functions.o feynmanrules.o run_parameters.o particles.o \
 	amplitude_QCD.o mixed_spinor_regression.o
 
+FILES_M_TEST_SAME_FLAVOUR = bitset.o color_algebra.o math_functions.o feynmanrules.o run_parameters.o particles.o \
+	amplitude_QCD.o helper_modules.o ranmar.o simple_integrator.o common.o phase_space.o handling_processes.o \
+	same_flavour_relation_regression.o
+
 FILES_M_TEST_RUN_PARAMETERS = run_parameters.o particles.o run_parameters_regression.o
 
 FILES_M_TEST_COMMAND_LINE = command_line_parser.o command_line_parser_regression.o
@@ -151,6 +156,9 @@ three_quark_line_reweight_regression: $(FILES_M_TEST_THREE_QUARK)
 mixed_spinor_regression: $(FILES_M_TEST_MIXED_SPINOR)
 	$(FC) $(FFLAGS) -o $@ $(FILES_M_TEST_MIXED_SPINOR)
 
+same_flavour_relation_regression: $(FILES_M_TEST_SAME_FLAVOUR)
+	$(FC) $(FFLAGS) -o $@ $(FILES_M_TEST_SAME_FLAVOUR)
+
 run_parameters_regression: $(FILES_M_TEST_RUN_PARAMETERS)
 	$(FC) $(FFLAGS) -o $@ $(FILES_M_TEST_RUN_PARAMETERS)
 
@@ -169,6 +177,10 @@ three_quark_line_reweight_regression.o: \
 
 mixed_spinor_regression.o: \
 		tests/matrix_elements/mixed_spinor_regression.f03 amplitude_QCD.o particles.o
+	$(FC) $(FFLAGS) -c -I. $< -o $@
+
+same_flavour_relation_regression.o: \
+		tests/matrix_elements/same_flavour_relation_regression.f03 handling_processes.o
 	$(FC) $(FFLAGS) -c -I. $< -o $@
 
 run_parameters_regression.o: tests/run_parameters_regression.f03 run_parameters.o particles.o
@@ -212,6 +224,9 @@ test_three_quark_line_multichannel: \
 		process_list.py tests/process_list_three_quark_multichannel_regression.py
 	$(PYTHON) tests/process_list_three_quark_multichannel_regression.py
 
+test_same_flavour_relations: same_flavour_relation_regression
+	./same_flavour_relation_regression
+
 test_run_parameters: run_parameters_regression
 	./run_parameters_regression run_card.dat tests/input/custom_run_card.dat \
 		tests/input/ignore_final_width_run_card.dat
@@ -247,7 +262,8 @@ run_parameters.o : run_parameters.f03
 	$(FC) $(FFLAGS) -fno-finite-math-only -c -I. $<
 common.o : particles.o run_parameters.o simple_integrator.o
 handling_events.o : common.o handling_processes.o simple_integrator.o
-read_process_file.o : phase_space_gen23.o cuts.o handling_processes.o simple_integrator.o
+read_process_file.o : read_process_file.f03 phase_space_gen23.o cuts.o handling_processes.o simple_integrator.o
+	$(FC) $(FFLAGS) -fno-finite-math-only -c -I. $<
 amplitude_library.o : pdf_wrap.o
 # The inverse-map guard must distinguish NaN/Inf values.  The finite-math
 # part of -ffast-math otherwise makes ieee_is_finite fold to true.

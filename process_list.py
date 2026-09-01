@@ -1158,23 +1158,46 @@ def WriteAllProcsIntoList(lep):
         towrite.append('')
     return towrite
 
+def ExpandQuarkLineOrderings(processes):
+    """Return every distinct ordered quark-endpoint assignment.
+
+    The unique-process probe uses the first ``n`` quarks and following ``n``
+    antiquarks as labelled fermion-line endpoints.  Generate that contract
+    directly for any supported line count.  A set removes permutations of
+    repeated flavours without repeatedly scanning and mutating the list being
+    iterated, which was both quadratic and particularly opaque for three
+    lines.
+    """
+    expanded=set()
+    for process in processes:
+        process=tuple(process)
+        nquarks=count_matching_elements(process,quarks)
+        nantiquarks=count_matching_elements(process,antiquarks)
+        if nquarks != nantiquarks or nquarks > 3:
+            raise ValueError(
+                "unique process must contain zero to three balanced quark lines"
+            )
+        quark_endpoints=process[:nquarks]
+        antiquark_endpoints=process[nquarks:2*nquarks]
+        if any(part not in quarks for part in quark_endpoints) or any(
+            part not in antiquarks for part in antiquark_endpoints
+        ):
+            raise ValueError(
+                "unique process is not in quark/antiquark/non-fermion layout"
+            )
+        quark_orderings=set(itertools.permutations(quark_endpoints))
+        antiquark_orderings=set(itertools.permutations(antiquark_endpoints))
+        for quark_order in quark_orderings:
+            for antiquark_order in antiquark_orderings:
+                expanded.add(
+                    quark_order+antiquark_order+process[2*nquarks:]
+                )
+    return [list(process) for process in sorted(expanded,key=sort_by_pdg_codes)]
+
+
 def Addqq_dfProcesses(sorted_procs):
-    """Include all quark-line permutations for different-flavour processes."""
-    i=0
-    while i < len(sorted_procs):
-        proc = sorted_procs[i]
-        nq=count_matching_elements(proc,quarks)
-        if nq >= 2 :  # multi-quark-line process
-            qs=proc[0:nq]      # assume that first nq elements are the quarks
-            aqs=proc[nq:2*nq]  # then come all the anti-quarks
-            for q_perm in itertools.permutations(qs):
-                for a_perm in itertools.permutations(aqs):
-                    swapped_proc=list(q_perm)+list(a_perm)+proc[2*nq:]
-                    if swapped_proc not in sorted_procs:
-                        sorted_procs.insert(i+1,swapped_proc)
-                        i+=1
-        i+=1
-    return sorted_procs
+    """Backward-compatible name for :func:`ExpandQuarkLineOrderings`."""
+    return ExpandQuarkLineOrderings(sorted_procs)
 
 def WriteUniqueProcsIntoList(procs,lep):
     """Serialize the unique-process block at the top of ``processes.txt``."""
@@ -1184,7 +1207,7 @@ def WriteUniqueProcsIntoList(procs,lep):
             if 'z' in proc:
                 proc[proc.index("z"):proc.index("z")+1] = lep
     # in case of different flavour multiple-quark line processes, add all the possible orders:
-    sorted_procs=Addqq_dfProcesses(sorted_procs)
+    sorted_procs=ExpandQuarkLineOrderings(sorted_procs)
     try:
         line=[str(len(sorted_procs[0]))+' '+str(len(sorted_procs))+' '+str(PROCESS_FILE_VERSION)]
     except IndexError:

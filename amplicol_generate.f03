@@ -674,7 +674,7 @@ contains
 
     if (pgl%passed(iint).lt.nevent_hel_filter) return
 
-    do i=1,2
+    do i=1,max_same_flavour_terms
        do ih1=1,pgl%nhel(iint)
           if (pgl%amps(iint)%same_flavour_sum(ih1,i).le.0) cycle
           pgl%amps(iint)%same_flavour_sum_operation(ih1,i)=0
