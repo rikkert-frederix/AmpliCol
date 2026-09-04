@@ -35,7 +35,7 @@ module phase_space_gen23_mod
   real(kind=8),parameter :: pi=3.1415926535897932d0
   logical,parameter :: use_t_channel_at_start=.true.
   ! If true, the cut-aware bounds are used as the actual integration limits.
-  logical :: use_soft_bounds_as_actual_limits=.false.
+  logical :: use_soft_bounds_as_actual_limits=.true.
 
   public :: set_use_soft_bounds_as_actual_limits
 
