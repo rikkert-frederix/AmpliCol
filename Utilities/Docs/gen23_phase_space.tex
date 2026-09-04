@@ -1,0 +1,937 @@
+% Detailed implementation note for the AmpliCol gen23 phase-space map.
+% Compile with: pdflatex gen23_phase_space.tex
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath,amssymb,mathtools}
+\usepackage{booktabs,array,geometry,hyperref}
+\usepackage{xcolor}
+\geometry{margin=27mm}
+\hypersetup{colorlinks=true,linkcolor=blue!55!black,citecolor=blue!55!black,urlcolor=blue!55!black}
+\setlength{\parskip}{0.55em}
+\setlength{\parindent}{0pt}
+\allowdisplaybreaks
+
+\newcommand{\shat}{\hat{s}}
+\newcommand{\Ph}{\mathrm{d}\Phi}
+\newcommand{\dd}{\mathrm{d}}
+\newcommand{\cM}{\mathcal{M}}
+\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\lam}{\lambda}
+\newcommand{\ET}{E_{\mathrm{T}}}
+\newcommand{\pt}{p_{\mathrm{T}}}
+\newcommand{\mc}[1]{\mathcal{#1}}
+
+\title{The \code{gen23} Phase--Space Generator\\
+       Analytic derivation, implementation map, bounds, and audit}
+\author{AmpliCol implementation note}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This note documents the phase--space parametrisation implemented in the
+\code{gen23} source.  The generator is a recursive,
+colour-order-aware construction for massless incoming partons and an arbitrary
+number of massive or massless final-state particles.  Its distinctive building
+block is the invariant-variable $2\to3$ construction of Byckling and Kajantie;
+ordinary $s$- and $t$-channel two-body blocks and a special double-$t$ block
+are used where they are more natural.  All coordinate maps, Jacobian factors,
+physical boundaries, cut-derived pre-bounds, and the inverse map are described.
+
+The final sections deliberately separate exact kinematics from bounds that are
+only conservative implementation aids.  They also record several concrete
+discrepancies between the analytic acceptance region and the present code,
+including one all-final-state lower bound that can remove accepted partonic
+energies when pair-mass cuts are enabled.
+\end{abstract}
+
+\tableofcontents
+
+\section{Scope and source of truth}
+
+This document describes the current implementation in
+\code{PhaseSpace/phase\_space\_gen23.f03}, rather than an idealised generic
+``gen23'' algorithm.  In particular, a statement such as ``the generator uses
+the Byckling--Kajantie variables'' is not enough to reproduce an AmpliCol
+weight: the code also selects a topology from a colour ordering, applies
+importance maps, inserts cut-based restrictions, chooses between a two-fold
+azimuthal ambiguity, divides out powers of $2\pi$, and includes the partonic
+flux factor.
+
+The analytic invariant construction is based on
+Byckling and Kajantie~\cite{BK}.  The code comments refer especially to their
+Eqs.~(8), (10), (11), and (13).  Equation numbering in this note is local;
+the displayed expressions are written in the variable convention actually
+passed to the Fortran routines.
+
+The map has the following intended domain.
+
+\begin{itemize}
+\item There are two \emph{massless} incoming particles, labelled $a$ and $b$
+  (external labels 1 and 2 in the phase-space ordering), and $N$ final
+  particles.  The code aborts for non-zero incoming masses.
+\item $N\geq2$.  At fixed partonic energy the dimension is $3N-4$; a $2\to1$
+  reaction needs a separate treatment and is not represented by this map.
+\item A cyclic colour ordering contains each external label exactly once and
+  contains labels 1 and 2.  It determines the recursive topology; it is not a
+  mere presentation convention.
+\item Final-state masses are supported.  Some cut pre-bounds are exact only
+  for massless final legs; those qualifications are made explicit below.
+\end{itemize}
+
+\section{Lorentz-invariant phase space and normalisation}
+
+We use metric $g=(+,-,-,-)$ and write
+\begin{equation}
+ p\mathbin{\cdot}q=p^0q^0-\boldsymbol p\mathbin{\cdot}\boldsymbol q,
+ \qquad
+ \lam(x,y,z)=x^2+y^2+z^2-2xy-2xz-2yz .
+ \label{eq:lambda}
+\end{equation}
+The function in Eq.~\eqref{eq:lambda} is implemented by \code{lambda()}.
+For a partonic process $a+b\to1+\cdots+N$, the standard Lorentz-invariant
+measure is
+\begin{equation}
+ \dd\Phi_N(P;p_1,\ldots,p_N)=
+ (2\pi)^4\delta^{(4)}\!\left(P-\sum_{r=1}^{N}p_r\right)
+ \prod_{r=1}^{N}\frac{\dd^3\boldsymbol p_r}{(2\pi)^3 2E_r},
+ \qquad P=p_a+p_b,
+ \label{eq:lips}
+\end{equation}
+where $P^2=\shat$.  The partonic differential cross section used by the code is
+\begin{equation}
+ \dd\hat\sigma=\frac{1}{2\shat}\,
+ \overline{|\cM|^2}\,\dd\Phi_N .
+ \label{eq:flux}
+\end{equation}
+Thus the final division by \code{2d0*sqrtshat**2} in the source is the flux
+factor, not part of the phase-space volume itself.
+
+At fixed $\shat$, resolving four momentum-conservation delta functions leaves
+\begin{equation}
+ D_{\rm PS}=3N-4=3(n-2)-4,
+ \label{eq:dimension}
+\end{equation}
+where \code{n} is the total number of external particles.  This is exactly
+\code{this\%ndim} without PDFs.  With PDFs, the map additionally integrates
+two Bjorken fractions and has $D_{\rm PS}+2$ adaptive coordinates.
+
+It is useful to define a reduced measure in which the global $2\pi$ factors
+are temporarily suppressed.  Every complete fixed-$\shat$ map constructed by
+the source obeys
+\begin{equation}
+ \dd\Phi_N=\frac{\dd\overline\Phi_N}{(2\pi)^{3N-4}}.
+ \label{eq:reducedmeasure}
+\end{equation}
+The source first accumulates $\dd\overline\Phi_N$ and, at the end of
+\code{generate\_momenta}, divides the Jacobian by
+\code{(2d0*pi)**(3*(next-2)-4)}.  Equations below quote reduced Jacobians when
+they are meant to match an individual kernel directly.
+
+\section{Masks, crossed sums, and colour-order topology}
+
+\subsection{Bit-mask representation}
+
+An integer mask $A$ labels a subset of external legs.  Bit $r-1$ represents
+external label $r$.  Hence the singleton $r$ is \code{ibset(0,r-1)}, disjoint
+masks are combined by integer addition, and the complement is
+\begin{equation}
+ \bar A=(2^n-1)-A .
+\end{equation}
+The arrays \code{pp(:,A)} and \code{invm(A)} respectively hold an intermediate
+four-vector and its square.  For the invariant bookkeeping, the natural
+crossed sum is
+\begin{equation}
+ P_A=\sum_{r\in A\cap\mc F}p_r-
+     \sum_{c\in A\cap\{a,b\}}p_c,
+ \qquad M_A^2=P_A^2 .
+ \label{eq:maskedmomentum}
+\end{equation}
+The forward map stores singleton beam vectors with their positive physical
+energies, while non-singleton masks are reconstructed through equivalent
+relations.  This detail can change a vector's sign but not the invariant
+relations used by the map.  In the inverse map, \code{fill\_momentum\_array}
+implements Eq.~\eqref{eq:maskedmomentum} explicitly.
+
+Momentum conservation implies $M_A^2=M_{\bar A}^2$.  The initialization stores
+the mass of each singleton and its complement; the generator fills other masks
+as they become known.  This representation makes a $t$-channel invariant just
+as cheap to access as a final-state invariant mass.
+
+\subsection{Canonical colour order and the two sets}
+
+Let the supplied cyclic order be rotated such that label 1 is first.  If label
+2 occurs at position $r$, define
+\begin{equation}
+ \mc A=(o_2,\ldots,o_{r-1}),\qquad
+ \mc B=(o_{r+1},\ldots,o_n).
+ \label{eq:sets}
+\end{equation}
+The masks of these lists are \code{sets(0,1)} and \code{sets(0,2)}; their
+ordered entries are retained in \code{sets(1:,1)} and \code{sets(1:,2)}.
+They are the final-state legs on the two arcs between the incoming legs in the
+cyclic order.  The generator first connects the two arcs centrally and then
+peels legs from each arc in its stored order.
+
+This is why changing the colour order changes the sampling density even when
+the final-state particle list is unchanged.  It is also why the inverse map
+can evaluate a partner multichannel density only after permuting momenta into
+the partner's phase-space order.
+
+\section{Global flow of one phase-space point}
+
+For reference, the forward map follows this sequence.
+
+\begin{enumerate}
+\item Initialise singleton masses, masks, cut-derived bounds, the canonical
+  colour order, and the two sets $\mc A$, $\mc B$.
+\item If PDFs are enabled, sample $\shat$ and the longitudinal centre-of-mass
+  rapidity $y_{\rm cm}$.  Otherwise set $\shat=s_{\rm had}$ supplied to
+  \code{init}.
+\item Put the two incoming momenta back-to-back in the partonic centre-of-mass
+  frame.
+\item Make a central connection between $\mc A$ and $\mc B$ using either a
+  two-body $t$ block or a special double-$t$ block.
+\item Expand each multi-particle set.  Ordinary two-body blocks initialise a
+  chain; when \code{t\_channel=.false.}, the subsequent internal steps use the
+  invariant $2\to3$ kernel.
+\item Divide by the global $(2\pi)^{3N-4}$ and $2\shat$ factors, then boost
+  the final and incoming vectors to the lab if PDFs were used.
+\end{enumerate}
+
+The source marks an unusable point by making \code{ps\%jac} negative.  Such a
+point has zero integrand and must not be interpreted as a negative physical
+Jacobian.
+
+\section{Maps from unit random numbers to invariants}
+
+\subsection{Power maps}
+
+For a positive variable $v\in[v_{\min},v_{\max}]$, the routine
+\code{random\_to\_var} maps $x\in[0,1]$ to a density proportional to
+$v^\alpha$.  For $\alpha\ne-1$ it uses
+\begin{align}
+ v(x)&=\left[v_{\min}^{\alpha+1}(1-x)+v_{\max}^{\alpha+1}x\right]^{1/(\alpha+1)},
+ \label{eq:powermap}\\
+ \left|\frac{\dd v}{\dd x}\right|&=
+ \frac{v_{\max}^{\alpha+1}-v_{\min}^{\alpha+1}}{\alpha+1}\,v^{-\alpha}.
+ \label{eq:powerjac}
+\end{align}
+For $\alpha=-1$ it instead uses the logarithmic map
+\begin{equation}
+ v(x)=v_{\min}^{1-x}v_{\max}^{x},\qquad
+ \left|\frac{\dd v}{\dd x}\right|=v\log\frac{v_{\max}}{v_{\min}}.
+ \label{eq:logmap}
+\end{equation}
+The derivative is multiplied into \code{ps\%jac}.  If the entire interval is
+negative, the source applies Eqs.~\eqref{eq:powermap}--\eqref{eq:logmap} to
+$-v$ and restores the sign afterwards.  A non-flat map across zero is rejected
+and replaced by a flat map.
+
+The default exponents are
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+source variable & exponent & reason for the choice\\
+\midrule
+ordinary $t$ and local $s$ & \code{ip=-1} & logarithmic enhancement near a pole\\
+partonic $\shat$ & \code{ip\_shat=-1.2} & stronger low-$\shat$ emphasis\\
+double-$t$ invariants & \code{ip\_dt=-1} & logarithmic $t$ sampling\\
+composite masses & \code{ip\_mass=-0.5} & threshold-oriented sampling\\
+angles & $0$ & flat sampling\\
+\bottomrule
+\end{tabular}
+\end{center}
+Passing \code{flat=.true.} sets all four non-angular exponents to zero.  The
+unused special exponent \code{101} implements
+$v=v_{\min}+(v_{\max}-v_{\min})(1-\cos\pi x)/2$.
+
+\subsection{PDF variables and the lab boost}
+
+Let $S=s_{\rm had}=\code{this\%sqrts**2}$ and
+\begin{equation}
+ \tau=\frac{\shat}{S},\qquad
+ x_a=\sqrt\tau\,e^{y_{\rm cm}},\qquad
+ x_b=\sqrt\tau\,e^{-y_{\rm cm}} .
+ \label{eq:tauy}
+\end{equation}
+The Jacobian is particularly simple:
+\begin{equation}
+ \left|\frac{\partial(x_a,x_b)}{\partial(\tau,y_{\rm cm})}\right|=1,
+ \qquad \dd x_a\dd x_b=\frac{\dd\shat}{S}\dd y_{\rm cm} .
+ \label{eq:pdfjac}
+\end{equation}
+For fixed $\tau$, the constraints $0<x_a,x_b\le1$ give
+\begin{equation}
+ \frac12\log\tau\le y_{\rm cm}\le-\frac12\log\tau .
+ \label{eq:ylimits}
+\end{equation}
+The source samples $\shat$ between its cut-derived lower limit and $S$,
+multiplies its Jacobian by $1/S$, then samples Eq.~\eqref{eq:ylimits} flatly.
+The partonic CM vectors are transformed to the lab by a $z$ boost of rapidity
+$-y_{\rm cm}$ in the source's sign convention.
+
+\section{Composite-mass bounds and ordinary two-body blocks}
+
+\subsection{Mass recursion}
+
+Suppose a parent system of invariant mass $M_P$ is split into groups $I$ and
+$R$.  Before cut-specific refinements, the allowed mass of $I$ is
+\begin{equation}
+ \left(\sum_{r\in I}m_r\right)^2
+ \le M_I^2\le
+ \left(M_P-\sqrt{\max(M_R^2,M_{R,\min}^2)}\right)^2 .
+ \label{eq:massbounds}
+\end{equation}
+This is \code{shatminmax}.  \code{generate\_mass} then intersects the result
+with \code{invm\_min(I)} and \code{invm\_max(I)} and samples the surviving
+interval using $\alpha=\code{ip\_mass}$.  When both daughter groups are
+composite, the code samples one mass first and makes the other conditional on
+it.  This avoids treating two correlated masses as independent coordinates.
+
+\subsection{$s$-channel two-body block}
+
+For a parent $P$ with $P^2=S_P$ and daughters of masses $m_I,m_R$, work in the
+rest frame of $P$.  The standard two-body kinematics are
+\begin{align}
+ E_I&=\frac{S_P+m_I^2-m_R^2}{2\sqrt{S_P}}, &
+ E_R&=\frac{S_P-m_I^2+m_R^2}{2\sqrt{S_P}},\\
+ |\boldsymbol p_I|&=|\boldsymbol p_R|=
+ \frac{\sqrt{\lam(S_P,m_I^2,m_R^2)}}{2\sqrt{S_P}} .
+ \label{eq:twobodykinematics}
+\end{align}
+Sampling $\cos\theta\in[-1,1]$ and $\phi\in[0,2\pi)$ gives the reduced
+Jacobian
+\begin{equation}
+ J_s=\frac{\sqrt{\lam(S_P,m_I^2,m_R^2)}}{8S_P}.
+ \label{eq:sblockjac}
+\end{equation}
+Indeed, $J_s/(2\pi)^2$ reproduces
+$\dd\Phi_2=\sqrt{\lam}/(32\pi^2S_P)\,\dd\cos\theta\dd\phi$.
+The source routine \code{gens\_one\_step} implements
+Eqs.~\eqref{eq:twobodykinematics}--\eqref{eq:sblockjac} through
+\code{mom2cx} followed by \code{boostm}.
+
+\subsection{$t$-channel two-body block}
+
+The physical range of a momentum transfer follows from an ordinary two-body
+scattering problem.  Let $X$ be the squared total energy, let incoming squared
+masses be $W,Z$, let outgoing squared masses be $U,V$, and define the transfer
+to the outgoing object of mass $U$ by $T=(p_{\rm in}-p_U)^2$.  At fixed $X$,
+the endpoints are
+\begin{equation}
+ T_{1,2}=U+W-
+ \frac{(X+U-V)(X+W-Z)\mp
+ \sqrt{\lam(X,U,V)\lam(X,W,Z)}}{2X}.
+ \label{eq:tlimitsgeneric}
+\end{equation}
+The order of the two signs is immaterial: the code explicitly takes
+\code{min} and \code{max}.  This is the formula in \code{tminmax}, where
+\begin{equation}
+ (X,Z,U,V,W)=
+ (\hat s_i,t_i,\hat s_{i-1},m_i^2,m_a^2).
+ \label{eq:tminmaxarguments}
+\end{equation}
+
+After clipping Eq.~\eqref{eq:tlimitsgeneric} by cuts, \code{gent\_one\_step}
+samples the relevant transfer and an azimuth.  In a suitable parent rest frame,
+the transfer fixes the longitudinal component of a daughter:
+\begin{equation}
+ p_{I,z}=-\frac{m_I^2+m_a^2-T-2E_I E_a}{2|\boldsymbol p_a|},
+ \qquad p_{I,\perp}^2=|\boldsymbol p_I|^2-p_{I,z}^2 .
+ \label{eq:treconstruct}
+\end{equation}
+The source rotates the vector back to the actual incoming direction and boosts
+it to the event frame.  Its reduced Jacobian is accumulated exactly as
+\begin{equation}
+ J_t^{\rm code}=
+ \frac{1}{4\sqrt{\lam\bigl(M_{I+R}^2,0,M_{I+R+b}^2\bigr)}}.
+ \label{eq:tblockjac}
+\end{equation}
+The apparently unusual third argument in Eq.~\eqref{eq:tblockjac} is a
+consequence of the crossed mask convention.  It should not be replaced by a
+textbook $2\to2$ factor without following the recursive invariant definitions.
+
+When the parent is the full final-state system, the code additionally uses
+\begin{equation}
+ E_I=\frac{\sqrt{\shat}+(M_I^2-M_R^2)/\sqrt{\shat}}{2},\qquad
+ E_R=\frac{\sqrt{\shat}+(M_R^2-M_I^2)/\sqrt{\shat}}{2}
+ \label{eq:twobodyenergies}
+\end{equation}
+to restrict sampled masses by the precomputed $\ET$ minima.  These are useful
+necessary conditions, not a replacement for the final cut test.
+
+\section{The special double-$t$ block}
+
+\code{double\_t(i,ir,ia,ib)} is used when one colour-order set consists of a
+single leg $i$ and the other is a multi-particle remainder $r$.  It generates
+three variables $t_a,t_b,\phi$ while deriving the remainder mass.  In the
+partonic CM frame let
+\begin{equation}
+ t_a=(p_i-p_a)^2,\qquad t_b=(p_i-p_b)^2,
+ \qquad p_a^2=p_b^2=0 .
+ \label{eq:doubletdefs}
+\end{equation}
+Solving these equations gives precisely the source formulas
+\begin{align}
+ E_i&=\frac{-t_a-t_b+2m_i^2}{2\sqrt{\shat}}, &
+ p_{i,z}&=\frac{t_a-t_b}{2\sqrt{\shat}},\\
+ p_{i,\perp}^2&=
+ \frac{t_at_b+m_i^4-m_i^2(t_a+t_b)}{\shat}-m_i^2,
+ & M_r^2&=\shat+t_a+t_b-m_i^2 .
+ \label{eq:doubletsolution}
+\end{align}
+The azimuth determines the transverse components
+$p_{i,x}=p_{i,\perp}\cos\phi$ and
+$p_{i,y}=p_{i,\perp}\sin\phi$; the remainder is $p_r=p_a+p_b-p_i$.
+
+If the remainder must have $M_r^2\geq M_{r,\min}^2$, the initial range is
+\begin{equation}
+ t_a\in\left[
+ \frac{-\shat+m_i^2+M_{r,\min}^2-
+ \sqrt{\lam(\shat,m_i^2,M_{r,\min}^2)}}{2},
+ \frac{-\shat+m_i^2+M_{r,\min}^2+
+ \sqrt{\lam(\shat,m_i^2,M_{r,\min}^2)}}{2}\right].
+ \label{eq:doubletfirstbound}
+\end{equation}
+After $t_a$ is chosen, $M_r^2\geq M_{r,\min}^2$ and
+$p_{i,\perp}^2\geq0$ imply, respectively,
+\begin{align}
+ t_b&\geq-\shat-t_a+m_i^2+M_{r,\min}^2,\\
+ t_b&\leq \frac{m_i^2(m_i^2-\shat-t_a)}{m_i^2-t_a} .
+ \label{eq:doubletsecondbound}
+\end{align}
+The routine further intersects both intervals with mask-level cut bounds and
+with its $\ET$ restrictions.  Its reduced local factor is
+\begin{equation}
+ J_{tt}=\frac{1}{4\sqrt{\lam(M_{i+r}^2,0,0)}}=
+ \frac{1}{4\shat}
+ \quad\hbox{for a massless incoming pair.}
+ \label{eq:doubletjac}
+\end{equation}
+
+\section{The invariant $2\to3$ Byckling--Kajantie block}
+
+\subsection{Local invariant dictionary}
+
+The routine \code{gen23\_one\_step(i,ir,ib,im1)} is easiest to read by
+renaming its masks locally.  Let $q=\code{i}$ be the leg being resolved,
+$r=\code{ir}$ the remaining group, $h=\code{im1}$ the neighbouring already
+known leg, and $b=\code{ib}$ the beam-side mask.  Define
+\begin{align}
+ H_0&=(p_q+p_r)^2,& H_-&=p_r^2,& H_+&=(p_h+p_q+p_r)^2,\\
+ T_0&=(p_q+p_r+p_b)^2,& T_-&=(p_r+p_b)^2,&
+ T_+&=(p_h+p_q+p_r+p_b)^2,\\
+ s&=(p_q+p_h)^2,& m_q^2&=p_q^2,&m_h^2&=p_h^2 .
+ \label{eq:bkdictionary}
+\end{align}
+For example, the code call
+\begin{center}
+\code{sminmax(invm(ir+i), invm(ir), invm(ir+i+im1),\ldots)}
+\end{center}
+passes $(H_0,H_-,H_+,T_0,T_-,T_+,m_q^2,m_h^2)$ in that order.  This local
+notation avoids an otherwise easy off-by-one ambiguity in the historical
+$\hat s_i,t_i,s_i$ labels.
+
+If $q$ or $r$ is composite, its invariant mass is generated first using
+Eq.~\eqref{eq:massbounds}.  The continuous invariants particular to this
+local $2\to3$ relation are then $T_-$ and $s$.  The remaining azimuth is not
+sampled independently: $s$ determines $\cos\phi$, leaving two possible
+orientations.
+
+\subsection{Gram determinant and local measure}
+
+The source constructs the symmetric matrix
+\begin{equation}
+ A_4=\begin{pmatrix}
+ 0&T_--H_-&T_0-H_0&T_+-H_+\\
+ T_--H_-&2T_-&T_0+T_--m_q^2&T_-+T_+-s\\
+ T_0-H_0&T_0+T_--m_q^2&2T_0&T_0+T_+-m_h^2\\
+ T_+-H_+&T_-+T_+-s&T_0+T_+-m_h^2&2T_+
+ \end{pmatrix},\qquad
+ \Delta_4=\frac{\det A_4}{16}.
+ \label{eq:gram4}
+\end{equation}
+It is the quantity returned by \code{gram\_determinant4}.  In the physical
+interior relevant here, $\Delta_4<0$.  After the masses are fixed, the
+invariant reduced measure used by the code is
+\begin{equation}
+ \dd\overline\Phi_{23}=\frac{\dd T_-\,\dd s}{8\sqrt{-\Delta_4}}.
+ \label{eq:bkmeasure}
+\end{equation}
+The factor in Eq.~\eqref{eq:bkmeasure} is accumulated at the end of
+\code{gen23\_one\_step}; the power-map derivatives for $T_-$ and $s$ have
+already been accumulated separately.
+
+\subsection{First boundary: the transfer $T_-$}
+
+Applying Eq.~\eqref{eq:tlimitsgeneric} to the local dictionary gives
+\begin{align}
+ T_-^{(1,2)}={}&H_- -
+ \frac{(H_0+H_--m_q^2)(H_0-T_0)
+ \mp\sqrt{\lam(H_0,H_-,m_q^2)\lam(H_0,0,T_0)}}{2H_0},\\
+ T_-&\in[\min(T_-^{(1)},T_-^{(2)}),\max(T_-^{(1)},T_-^{(2)})].
+ \label{eq:bktbound}
+\end{align}
+Here the incoming mass argument is zero, as required by the implementation.
+The source clips this interval with \code{invm\_min(ir+ib)} and
+\code{invm\_max(ir+ib)}, then with bounds derived from transverse-energy
+requirements.  Empty intervals are rejected before a random number is mapped.
+
+For the latter refinement, boost to a frame in which $p_q+p_r$ has zero
+longitudinal momentum.  If $E_{qr}$ and $E_b$ are the corresponding energies
+and $\mu_q,\mu_r$ are the effective transverse-energy minima, define
+\begin{equation}
+ B=E_{qr}^2-\mu_q^2+\mu_r^2,
+ \qquad R=\lam(E_{qr}^2,\mu_q^2,\mu_r^2).
+ \label{eq:etbounddefinitions}
+\end{equation}
+The code intersects the transfer interval with
+\begin{equation}
+ T_-\geq m_r^2-\frac{E_b}{E_{qr}}(B+\sqrt R),\qquad
+ T_-\leq m_r^2-\frac{E_b}{E_{qr}}(B-\sqrt R).
+ \label{eq:ettransferbound}
+\end{equation}
+The effective $\mu$ values include a correction when a singleton daughter
+already carries transverse momentum.  This makes Eq.~\eqref{eq:ettransferbound}
+stronger than merely applying $\ET\geq\ET^{\min}$ after reconstruction.
+
+\subsection{Second boundary: the adjacent invariant $s$}
+
+The $s$ boundary is obtained by demanding $|\cos\phi|\leq1$.  The source
+first defines
+\begin{equation}
+ V=-\frac{1}{8}\det\begin{pmatrix}
+ 2H_0&H_0-T_0&H_0+H_+-m_h^2\\
+ H_0-T_0&0&H_+-T_+\\
+ H_0+H_--m_q^2&H_--T_-&0
+ \end{pmatrix}.
+ \label{eq:vdet}
+\end{equation}
+The matrix in Eq.~\eqref{eq:vdet} is the code's $V$ matrix; it is not itself a
+symmetric Gram matrix.  Define the polynomial
+\begin{align}
+ G(x,y,z,u,v,w)={}&x^2y+xy^2+z^2u+zu^2+v^2w+vw^2
+ +xzw+xuv+yzv+yuw\notag\\
+ &{}-xy(z+u+v+w)-zu(x+y+v+w)-vw(x+y+z+u),
+ \label{eq:gpoly}
+\end{align}
+and
+\begin{equation}
+ \Gamma=G(T_0,H_+,H_0,T_+,m_h^2,0)\,
+          G(T_-,H_0,H_-,T_0,m_q^2,0).
+ \label{eq:gamma}
+\end{equation}
+The exact kinematic endpoints are
+\begin{equation}
+ s_\pm=H_-+H_++
+ \frac{2\left(4V\pm\sqrt\Gamma\right)}{\lam(H_0,T_0,0)},
+ \qquad s\in[\min(s_+,s_-),\max(s_+,s_-)].
+ \label{eq:sbounds}
+\end{equation}
+These equations are implemented by \code{computeV}, \code{G}, and
+\code{sminmax}.  The source subsequently intersects Eq.~\eqref{eq:sbounds}
+with direct mask bounds for $q+h$ and, when $h$ is a final-state leg, with
+additional $\ET$ and neighbouring-$\Delta R$ pre-bounds.
+
+For completeness, the relation inverted by \code{getphifroms} is
+\begin{equation}
+ \cos\phi=
+ \frac{\tfrac12(s-H_--H_+)\lam(H_0,T_0,0)-4V}{\sqrt\Gamma}.
+ \label{eq:cosphi}
+\end{equation}
+Equation~\eqref{eq:sbounds} is simply Eq.~\eqref{eq:cosphi} evaluated at
+$\cos\phi=\pm1$.  This is the analytic origin of both the $s$ limits and the
+two-fold ambiguity.
+
+\subsection{Momentum reconstruction and the two branches}
+
+Given $T_-$ and a solution for $\phi$, \code{gentcms2} reconstructs the two
+outgoing objects in the rest frame of a suitable parent.  It aligns the
+massless reference momentum with the $z$ axis, uses the transfer to fix the
+longitudinal component, uses the positive square root for the transverse
+magnitude, and fixes the azimuth relative to the known reference vector $h$.
+It then rotates and boosts back.  This construction enforces all invariants in
+Eq.~\eqref{eq:bkdictionary}.
+
+For an interior value of $s$, Eq.~\eqref{eq:cosphi} has
+\begin{equation}
+ \phi_1=\arccos(\cos\phi),\qquad
+ \phi_2=2\pi-\arccos(\cos\phi).
+ \label{eq:twobranches}
+\end{equation}
+The base factor in Eq.~\eqref{eq:bkmeasure} accounts for both branches.  If
+both reconstructed points satisfy the local $\ET$ requirements, an additional
+flat random number selects one with probability $1/2$.  If exactly one branch
+survives, the source divides the Jacobian by two.  If neither survives, the
+forward map rejects the point.  The extra random number does not describe a
+new physical dimension; it only resolves Eq.~\eqref{eq:twobranches}.
+
+\section{Recursive topology and number of extra random numbers}
+
+Let $n_A=|\mc A|$ and $n_B=|\mc B|$.  The central operation is chosen as
+follows.
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+condition & central routine & interpretation\\
+\midrule
+$n_A>1$, $n_B>1$ & \code{gent\_one\_step} & central $t$-channel block\\
+$n_A=1$, $n_B>1$ & \code{double\_t} & singleton against a composite arc\\
+$n_A>1$, $n_B=1$ & \code{double\_t} & reflected singleton case\\
+$n_A=n_B=1$ & \code{gent\_one\_step} & ordinary $2\to2$ scattering\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Each set with three or more legs is then opened with an ordinary $t$ block and
+continued one leg at a time.  For later steps the choice is
+\begin{equation}
+ \code{t\_channel=.true.}:\quad\code{gent\_one\_step},
+ \qquad
+ \code{t\_channel=.false.}:\quad\code{gen23\_one\_step}.
+ \label{eq:channelchoice}
+\end{equation}
+For a two-leg set opposite a non-empty set, the same choice applies once.  A
+two-leg set with an empty opposite side uses the ordinary two-body block.
+
+Each invariant $2\to3$ step needs one branch selector.  The source therefore
+allocates
+\begin{align}
+ n_{\rm extra}={}&\boldsymbol1_{n_A=2,\,n_B>0}
+ +\boldsymbol1_{n_B=2,\,n_A>0}\notag\\
+ &{}+\max(n_A-2,0)+\max(n_B-2,0).
+ \label{eq:extra}
+\end{align}
+These coordinates appear after the adaptive coordinates in \code{ps\%x}.
+They are intentionally sampled flatly by the integrator.  As discussed in the
+audit, the formula is not conditional on \code{t\_channel}; it can therefore
+allocate unused selectors in pure-$t$ mode.
+
+\section{Cut-derived bounds}
+
+\subsection{Cuts ultimately tested}
+
+The generator is only a proposal density.  The final acceptance function in
+\code{cuts.f03} checks, for each physical external momentum,
+\begin{equation}
+ p_{\mathrm{T},i}\geq p_{\mathrm{T},i}^{\rm cut},\qquad |\eta_i|\leq\eta_i^{\rm max},
+ \qquad |(p_i+p_j)^2|\geq Q_{ij}^2,
+ \qquad \Delta R_{ij}\geq R_{ij}^{\rm cut}.
+ \label{eq:finalcuts}
+\end{equation}
+The phase-space initialization tries to turn a subset of these into integration
+limits.  This can improve efficiency dramatically, but a pre-bound must be a
+\emph{necessary} condition for the final cuts.  A bound that is stronger than
+necessary removes valid phase space and biases an integral.
+
+For a final-only mask $A$, the code constructs
+\begin{equation}
+ c_{ij}^{\rm code}=\max\left[Q_{ij}^2,
+ 2p_{\mathrm{T},i}^{\rm cut}p_{\mathrm{T},j}^{\rm cut}
+ \left(1-\cos R_{ij}^{\rm cut}\right)\right],
+ \qquad C_A=\sum_{i<j\in A}c_{ij}^{\rm code}.
+ \label{eq:codepairbound}
+\end{equation}
+It then sets
+\begin{equation}
+ M_{A,\min}^{2\,\rm code}=
+ \begin{cases}
+ \max\left[(\sum_{i\in A}m_i)^2,\ \dfrac{|A|}{|A|-1}C_A\right],
+      &A=\mc F\quad\hbox{(all final legs)},\\[1.1ex]
+ \max\left[(\sum_{i\in A}m_i)^2,\ \dfrac12 C_A\right],
+      &A\subsetneq\mc F.
+ \end{cases}
+ \label{eq:codeaggregatebound}
+\end{equation}
+This is \code{setup\_PS\_cuts}, lines 248--262.  The corresponding transverse
+energy proposal threshold is
+\begin{equation}
+ E_{\mathrm{T},A}^{\min,\rm code}=\max\left[\sum_{i\in A}\sqrt{m_i^2+(p_{\mathrm{T},i}^{\rm cut})^2},\
+ \sqrt{M_{A,\min}^{2\,\rm code}}\right].
+ \label{eq:etmin}
+\end{equation}
+For the full final state, $\shat$ is sampled above
+\begin{equation}
+ \hat{s}_{\min}^{\rm code}=\max\left[M_{\mc F,\min}^{2\,\rm code},
+ (E_{\mathrm{T},\mc F}^{\min,\rm code})^2\right].
+ \label{eq:shatmincode}
+\end{equation}
+
+For a two-particle mask containing one incoming and one final leg, the source
+uses a negative $t$ upper bound,
+\begin{equation}
+ t_{if}^{\max,\rm code}=-\max\left(Q_{if}^2,
+ (p_{\mathrm{T},i}^{\rm cut})^2,(p_{\mathrm{T},f}^{\rm cut})^2\right),
+ \label{eq:tcutcode}
+\end{equation}
+and assigns the same bound to the complementary mask.  This is appropriate as
+a massless crossed-pair relation, subject to the caveats in
+Section~\ref{sec:audit}.
+
+\subsection{Exact identities useful for checking bounds}
+
+For a final-only set $A$ of $r$ particles,
+\begin{equation}
+ M_A^2=\sum_{i<j\in A}s_{ij}-(r-2)\sum_{i\in A}m_i^2,
+ \qquad s_{ij}=(p_i+p_j)^2.
+ \label{eq:subsetidentity}
+\end{equation}
+Consequently, if $s_{ij}\geq L_{ij}$ are genuine pairwise lower bounds, a
+safe aggregate lower bound is
+\begin{equation}
+ M_A^2\geq
+ \max\left\{(\sum_{i\in A}m_i)^2,
+ \sum_{i<j\in A}L_{ij}-(r-2)\sum_{i\in A}m_i^2\right\}.
+ \label{eq:exactaggregatebound}
+\end{equation}
+For massless legs this reduces to $M_A^2\geq\sum_{i<j}L_{ij}$.
+
+For massless final legs with $p_{\mathrm{T},i}\geq p_i$ and a usual
+$0\leq R_{ij}\leq\pi$ cut,
+\begin{equation}
+ s_{ij}=2p_{\mathrm{T},i}p_{\mathrm{T},j}\left(\cosh\Delta\eta_{ij}-\cos\Delta\phi_{ij}\right)
+ \geq2p_ip_j(1-\cos R_{ij}).
+ \label{eq:drbound}
+\end{equation}
+This establishes the massless part of Eq.~\eqref{eq:codepairbound}.  It is a
+lower bound, not generally the exact minimum after all other cuts and momentum
+conservation are imposed.
+
+The remaining implementation refinements use these ideas locally: parent
+masses are restricted by Eq.~\eqref{eq:massbounds}, $t$ intervals by
+Eqs.~\eqref{eq:bktbound} and \eqref{eq:ettransferbound}, and $s$ intervals by
+Eq.~\eqref{eq:sbounds} plus the mask bounds.  Any cuts not encoded in these
+limits are left to Eq.~\eqref{eq:finalcuts}.
+
+\section{The inverse map}
+
+\code{gen23\_compute\_x\_from\_momenta} is used by the colour-singlet
+multichannel weight computation.  Given a physical event, it:
+
+\begin{enumerate}
+\item reconstructs every mask vector with Eq.~\eqref{eq:maskedmomentum} and
+  boosts them to the partonic CM frame;
+\item obtains $\shat$, $\tau$, and $y_{\rm cm}$ if PDFs are enabled;
+\item follows the same central and recursive topology as the forward map;
+\item evaluates each generated invariant from the supplied momenta and applies
+  \code{var\_to\_random}, the analytic inverse of
+  \code{random\_to\_var};
+\item recomputes the same forward Jacobian.  This is the quantity needed to
+  compare proposal densities across channels.
+\end{enumerate}
+
+The inverse uses the same $t$, $s$, mass, and $\ET$ bounds, which is essential:
+a momentum outside a partner channel's support should return a negative
+Jacobian and be omitted from that partner's multichannel density.  The branch
+coordinate itself is deliberately not reconstructed, since it is an auxiliary
+flat selector rather than an adaptive physical coordinate.
+
+\section{Implementation audit and improvements}
+\label{sec:audit}
+
+This section distinguishes exact issues from deliberate but loose bounds.  The
+findings below are based on the present source and on the identities derived
+above; no code change is made by this document.
+
+\subsection{Confirmed support or semantic discrepancies}
+
+\paragraph{All-final aggregate bound can exclude accepted phase space
+(high priority).}
+For massless final legs, Eq.~\eqref{eq:subsetidentity} says that a full
+final-state system subject to pair lower bounds has the necessary condition
+$\shat\geq C_{\mc F}$, not
+$\shat\geq N C_{\mc F}/(N-1)$.  The latter is the first branch of
+Eq.~\eqref{eq:codeaggregatebound}.  A particularly transparent counterexample
+is $N=2$, zero masses and zero $\pt$ cuts, with only
+$s_{34}\geq Q^2$.  The final cut accepts every $\shat=s_{34}\geq Q^2$.
+The current setup instead sets
+\begin{equation}
+ \code{invm\_min(all finals)}=2Q^2,
+\end{equation}
+so PDF sampling starts at $2Q^2$ and the valid interval
+$Q^2\leq\shat<2Q^2$ is never proposed.  The same issue exists for more legs
+unless another valid bound happens to dominate.  This is a coverage issue, not
+just an efficiency issue.
+
+The direct replacement should be a demonstrably necessary bound such as
+Eq.~\eqref{eq:exactaggregatebound}; for massless legs, use $C_A$ rather than
+$|A|C_A/(|A|-1)$.  A regression test should integrate a constant matrix element
+with a non-zero pair-mass cut and compare against an independent phase-space
+volume or a deliberately loose generator.
+
+\paragraph{Initial--final pair bounds overwrite the requested pair cut
+(efficiency and regulator risk).}
+For a two-leg mask with one beam and one final leg,
+\code{setup\_PS\_cuts} loops over all four ordered pairs including both
+diagonal pairs (source lines 232--239).  It assigns instead of accumulates
+\code{invm\_max(k)}.  The final diagonal iteration normally has
+\code{sqrt\_s\_min(i,i)=0}, so an off-diagonal $Q_{if}$ can be overwritten by
+the $\pt$ term.  The later final cut still rejects forbidden points, so this
+does not by itself lose physical support; it can however remove the intended
+$t$-channel pre-regulation and severely reduce efficiency.
+
+The fix is to loop only over the two distinct legs and retain the strongest
+negative upper bound, e.g. initialise to zero and apply
+\code{invm\_max(k)=min(invm\_max(k),-candidate)}.  Symmetrise or validate the
+input cut matrix at initialization.
+
+\paragraph{Massive initial--final pair semantics differ from the final cut
+(conditional coverage risk).}
+For a massless beam leg $a$ and a massive final leg $f$,
+\begin{equation}
+ s_{af}^{(+)}=(p_a+p_f)^2=m_f^2+2p_a\!\cdot p_f,
+ \qquad t_{af}=(p_a-p_f)^2=2m_f^2-s_{af}^{(+)} .
+ \label{eq:massivetrelation}
+\end{equation}
+The final cut in Eq.~\eqref{eq:finalcuts} tests $s_{af}^{(+)}$, whereas
+Eq.~\eqref{eq:tcutcode} implements $t_{af}\leq-Q_{af}^2$.  If the API intends
+these to represent the same $Q_{af}$ cut, the latter requires
+$s_{af}^{(+)}\geq Q_{af}^2+2m_f^2$, which is stricter than the final test.
+For massless legs the two expressions coincide.  The implementation should
+either define incoming--final cuts explicitly as crossed $-t$ cuts or derive
+the mask bound from Eq.~\eqref{eq:massivetrelation} so that it matches the
+final acceptance definition.
+
+\paragraph{The inverse $2\to3$ branch test is not symmetric with the forward
+map (multichannel-density risk).}
+The forward routine rejects when neither $\phi_1$ nor $\phi_2$ satisfies the
+local $\ET$ checks (lines 795--831).  The inverse routine tests ``both'',
+``only first'', and ``only second'' (lines 1677--1683), but has no final
+\code{else} that sets \code{ps\%jac} negative.  Thus a point for which neither
+candidate satisfies those local conditions can continue with a non-zero
+partner density.  This matters precisely in the multichannel use case, where a
+point generated in one channel is tested against another channel's support.
+
+The inverse should mirror the forward rejection branch.  Add an explicit
+``neither'' case that sets a negative Jacobian and returns, then test
+forward--inverse agreement for randomly chosen partner channel permutations.
+
+\paragraph{The interface calls an input a rapidity cut but \code{gen23} does
+not use it, and the later cut is pseudorapidity.}
+\code{gen23\_init} explicitly labels \code{rap\_cut} ``not used'' and does
+not store it.  The later acceptance routine applies $|\eta|<\eta_{\max}$,
+not true rapidity $|y|<y_{\max}$.  For massless particles $y=\eta$, but for
+massive legs they differ.  Therefore neither the name nor the phase-space
+pre-bound semantics are currently those of a massive-particle rapidity cut.
+Rename the input to an eta cut, or implement the desired rapidity definition
+consistently and, where possible, include it in the proposal bounds.
+
+\subsection{Bounds that are safe but unnecessarily loose}
+
+For a proper final-state subset, the code uses $C_A/2$ in
+Eq.~\eqref{eq:codeaggregatebound}.  Since Eq.~\eqref{eq:exactaggregatebound}
+is available, this can be much weaker than necessary.  It does not bias the
+result, but it sends avoidable points into later rejection tests.  The same is
+true of the massless $\Delta R$ lower estimate when legs are massive or when
+other kinematic information is known.
+
+A stronger safe massless pair estimate for $0\le R\le\pi$ is already
+Eq.~\eqref{eq:drbound}.  For massive legs, the exact relation depends on the
+rapidity rather than the pseudorapidity used by \code{cuts.f03}; it should not
+be upgraded casually.  A robust implementation can first use the exact
+mass-threshold and pair-mass identity in Eq.~\eqref{eq:exactaggregatebound},
+then add only separately proved $\pt$/$\Delta R$ inequalities.
+
+\subsection{Numerical robustness issues}
+
+\begin{itemize}
+\item The logarithmic map needs strictly positive endpoints.  With fully
+  inclusive massless $t$ ranges, an endpoint can be zero, but
+  \code{ip=-1} evaluates logarithms or powers of zero.  Likewise
+  \code{ip\_shat=-1.2} is not defined at a zero lower $\shat$ endpoint.
+  Require a positive physical regulator, switch to a finite endpoint-aware
+  map, or return a clean rejected point before evaluating the map.
+\item \code{getphifroms} returns $\phi=0$ when the computed cosine lies
+  outside $[-1,1]$, even if the excess is not roundoff.  That does not preserve
+  the requested invariant $s$.  Use a scale-aware tolerance: clamp only a
+  tiny overshoot and reject a material violation.
+\item Several expressions take square roots of quantities that can be a few
+  ulps negative near an endpoint, and several azimuths use
+  \code{atan(y/x)} rather than \code{atan2(y,x)}.  Use an invariant-scale
+  tolerance, clamp only tiny negative radicands, and use \code{atan2} to
+  avoid divisions by zero and quadrant errors.
+\item The Gram and $V$ determinants use an absolute LU pivot tolerance
+  \code{1d-8}.  Their entries carry powers of energy, so this criterion is
+  not scale invariant.  Rescaling the matrix or using a relative pivot test
+  would make high- and low-energy behaviour more uniform.
+\item The global module variables \code{includePDF}, \code{ip},
+  \code{ip\_shat}, \code{ip\_dt}, and \code{ip\_mass} are shared by all
+  \code{phase\_space\_gen23} objects.  This is safe only if all active maps
+  use identical settings and calls are serialized.  Put them in \code{this}
+  for re-entrant or threaded use.
+\end{itemize}
+
+\subsection{Topology-selection and bookkeeping caveats}
+
+The public comment says \code{t\_chan=.false.} selects the Byckling--Kajantie
+construction and \code{.true.} selects the ordinary $t$ construction.  In
+practice the central split between two non-trivial sets is controlled by the
+private compile-time parameter \code{use\_t\_channel\_at\_start=.true.}.
+Thus even \code{t\_chan=.false.} begins with a $t$ block in that topology.
+This is a valid sampling choice, but the public wording should describe the
+mixed construction accurately.
+
+Also, Eq.~\eqref{eq:extra} allocates branch-selector dimensions independently
+of \code{t\_channel}.  In pure-$t$ mode those coordinates are unused.  This
+does not change a properly normalised flat integral, but it adds dimensions to
+the integrator and can slow adaptation.
+
+Finally, the nested Breit--Wigner routines are present but their calls are
+commented out in the forward map.  The current \code{gen23} implementation
+does \emph{not} perform resonance-mass importance sampling through those
+routines.
+
+\section{Recommended validation programme}
+
+The following tests exercise the derivation and catch the issues above.
+
+\begin{enumerate}
+\item \textbf{Constant-integrand volumes.}  Compare $2\to2$ and $2\to3$
+  massless volumes against analytic results, both with flat maps and with the
+  default importance maps.
+\item \textbf{Threshold scan.}  With PDFs enabled, set a single final--final
+  $Q_{ij}$ cut and verify non-zero support immediately above $Q_{ij}^2$.
+  This directly tests the all-final bound in Eq.~\eqref{eq:codeaggregatebound}.
+\item \textbf{Forward/inverse closure.}  Generate points in every relevant
+  topology, invert them in the same channel, regenerate, and compare all
+  momenta, invariants, $x$ coordinates, and Jacobians within a scale-aware
+  tolerance.
+\item \textbf{Partner-channel support.}  Permute a generated point into each
+  partner colour-order channel.  Check that an inverse map returns negative
+  Jacobian exactly when neither azimuthal branch is supported.
+\item \textbf{Boundary stress tests.}  Probe $\pt\to0$, $t\to0$, Gram
+  determinant endpoints, massive legs, $\Delta R$ limits, and nearly
+  threshold composite masses with floating-point exceptions enabled.
+\end{enumerate}
+
+\section{Summary}
+
+\code{gen23} is a hybrid recursive phase-space generator.  Its invariant
+$2\to3$ core samples a transfer and an adjacent pair mass, derives their
+physical region through Gram determinants, reconstructs one of two azimuthal
+branches, and uses the factor $1/(8\sqrt{-\Delta_4})$.  Ordinary two-body and
+double-$t$ blocks complete the colour-order topology.  The total event weight
+is the product of all coordinate derivatives and local reduced Jacobians,
+divided by $(2\pi)^{3N-4}$ and $2\shat$.
+
+The analytic formulae also make the implementation reviewable.  In particular,
+the full-final-state pair-cut lower bound should be corrected before relying on
+PDF integrations with non-zero pair-mass cuts; the inverse no-valid-branch
+case should mirror the forward rejection; and endpoint/numerical handling
+should be hardened.  The other improvements listed above mostly preserve
+coverage while making the proposal density more efficient and robust.
+
+\begin{thebibliography}{9}
+\bibitem{BK}
+E.~Byckling and K.~Kajantie,
+``Reductions of the Phase-Space Integral in Terms of Simpler Processes,''
+\emph{Physical Review} \textbf{187} (1969) 2008--2016,
+\href{https://doi.org/10.1103/PhysRev.187.2008}{doi:10.1103/PhysRev.187.2008}.
+\end{thebibliography}
+
+\end{document}
