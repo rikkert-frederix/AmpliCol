@@ -3,7 +3,7 @@
 .PHONY: test_matrix_elements test_fermi_statistics test_mixed_spinors \
 	test_three_quark_line_reweight test_three_quark_line_multichannel \
 	test_same_flavour_relations test_run_parameters test_command_line_parser \
-	update_matrix_cases update_matrix_goldens
+	test_phase_space_gen23 update_matrix_cases update_matrix_goldens
 
 FC = gfortran
 #FFLAGS= -fbounds-check -g -ffpe-trap=invalid,zero,overflow,underflow,denormal
@@ -130,6 +130,9 @@ FILES_M_TEST_RUN_PARAMETERS = run_parameters.o particles.o run_parameters_regres
 
 FILES_M_TEST_COMMAND_LINE = command_line_parser.o command_line_parser_regression.o
 
+FILES_M_TEST_PHASE_SPACE_GEN23 = phase_space.o LUPdecompose.o run_parameters.o \
+	phase_space_gen23.o phase_space_gen23_regression.o
+
 # ----------------------------------------------------------------------
 # 5. Build executables
 # ----------------------------------------------------------------------
@@ -165,6 +168,9 @@ run_parameters_regression: $(FILES_M_TEST_RUN_PARAMETERS)
 command_line_parser_regression: $(FILES_M_TEST_COMMAND_LINE)
 	$(FC) $(FFLAGS) -o $@ $(FILES_M_TEST_COMMAND_LINE)
 
+phase_space_gen23_regression: $(FILES_M_TEST_PHASE_SPACE_GEN23)
+	$(FC) $(FFLAGS) -o $@ $(FILES_M_TEST_PHASE_SPACE_GEN23)
+
 matrix_element_regression.o: tests/matrix_elements/matrix_element_regression.f03 amplitude_QCD.o particles.o
 	$(FC) $(FFLAGS) -c -I. $< -o $@
 
@@ -188,6 +194,9 @@ run_parameters_regression.o: tests/run_parameters_regression.f03 run_parameters.
 
 command_line_parser_regression.o: tests/command_line_parser_regression.f03 command_line_parser.o
 	$(FC) $(FFLAGS) -c -I. $< -o $@
+
+phase_space_gen23_regression.o: tests/phase_space_gen23_regression.f03 phase_space_gen23.o
+	$(FC) $(FFLAGS) -c -I. -IPhaseSpace $< -o $@
 
 tests/matrix_elements/cases.dat: tests/matrix_elements/generate_matrix_cases.py process_list.py
 	$(PYTHON) tests/matrix_elements/generate_matrix_cases.py --output $@
@@ -236,6 +245,9 @@ test_command_line_parser: command_line_parser_regression
 	test "$$($(CURDIR)/command_line_parser_regression --combine_subprocesses)" = "T"
 	$(CURDIR)/command_line_parser_regression --help | grep -q -- '--combine_subprocesses'
 	! $(CURDIR)/command_line_parser_regression --combine_subprocesses=true >/dev/null 2>&1
+
+test_phase_space_gen23: phase_space_gen23_regression
+	./phase_space_gen23_regression
 
 update_matrix_cases: tests/matrix_elements/generate_matrix_cases.py process_list.py
 	$(PYTHON) tests/matrix_elements/generate_matrix_cases.py --output tests/matrix_elements/cases.dat

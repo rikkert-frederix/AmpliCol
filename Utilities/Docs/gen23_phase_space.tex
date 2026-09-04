@@ -42,10 +42,10 @@ are used where they are more natural.  All coordinate maps, Jacobian factors,
 physical boundaries, cut-derived pre-bounds, and the inverse map are described.
 
 The final sections deliberately separate exact kinematics from bounds that are
-only conservative implementation aids.  They also record several concrete
-discrepancies between the analytic acceptance region and the present code,
-including one all-final-state lower bound that can remove accepted partonic
-energies when pair-mass cuts are enabled.
+only conservative implementation aids.  They also record the safeguards used
+to keep the proposal support consistent with the analytic acceptance region,
+including the aggregate pair-mass bound, crossed massive pair cuts, and the
+forward--inverse treatment of the two azimuthal branches.
 \end{abstract}
 
 \tableofcontents
@@ -641,14 +641,14 @@ It then sets
 \begin{equation}
  M_{A,\min}^{2\,\rm code}=
  \begin{cases}
- \max\left[(\sum_{i\in A}m_i)^2,\ \dfrac{|A|}{|A|-1}C_A\right],
+ \max\left[(\sum_{i\in A}m_i)^2,\ C_A-(|A|-2)\sum_{i\in A}m_i^2\right],
       &A=\mc F\quad\hbox{(all final legs)},\\[1.1ex]
  \max\left[(\sum_{i\in A}m_i)^2,\ \dfrac12 C_A\right],
       &A\subsetneq\mc F.
  \end{cases}
  \label{eq:codeaggregatebound}
 \end{equation}
-This is \code{setup\_PS\_cuts}, lines 248--262.  The corresponding transverse
+This is implemented by \code{setup\_PS\_cuts}.  The corresponding transverse
 energy proposal threshold is
 \begin{equation}
  E_{\mathrm{T},A}^{\min,\rm code}=\max\left[\sum_{i\in A}\sqrt{m_i^2+(p_{\mathrm{T},i}^{\rm cut})^2},\
@@ -662,16 +662,20 @@ For the full final state, $\shat$ is sampled above
  \label{eq:shatmincode}
 \end{equation}
 
-For a two-particle mask containing one incoming and one final leg, the source
-uses a negative $t$ upper bound,
+For a two-particle mask containing a massless incoming leg $a$ and a final leg
+$f$, the source combines the transverse-momentum bound with the physical pair
+cut using
 \begin{equation}
- t_{if}^{\max,\rm code}=-\max\left(Q_{if}^2,
- (p_{\mathrm{T},i}^{\rm cut})^2,(p_{\mathrm{T},f}^{\rm cut})^2\right),
+ t_{af}^{\max,\rm code}=\min\left[-\max\left(
+ (p_{\mathrm{T},a}^{\rm cut})^2,(p_{\mathrm{T},f}^{\rm cut})^2\right),
+ 2m_f^2-Q_{af}^2\right]
  \label{eq:tcutcode}
 \end{equation}
-and assigns the same bound to the complementary mask.  This is appropriate as
-a massless crossed-pair relation, subject to the caveats in
-Section~\ref{sec:audit}.
+when $Q_{af}>0$; without a pair cut only the first argument is used.  This
+upper bound is accumulated into both the mask and its complement, retaining
+the smaller value if a complementary physical pair supplies another
+constraint.  The mass term follows from the crossed-pair identity in
+Eq.~\eqref{eq:massivetrelation}.
 
 \subsection{Exact identities useful for checking bounds}
 
@@ -738,78 +742,44 @@ This section distinguishes exact issues from deliberate but loose bounds.  The
 findings below are based on the present source and on the identities derived
 above; no code change is made by this document.
 
-\subsection{Confirmed support or semantic discrepancies}
+\subsection{Corrected support and semantic discrepancies}
 
-\paragraph{All-final aggregate bound can exclude accepted phase space
-(high priority).}
-For massless final legs, Eq.~\eqref{eq:subsetidentity} says that a full
-final-state system subject to pair lower bounds has the necessary condition
-$\shat\geq C_{\mc F}$, not
-$\shat\geq N C_{\mc F}/(N-1)$.  The latter is the first branch of
-Eq.~\eqref{eq:codeaggregatebound}.  A particularly transparent counterexample
-is $N=2$, zero masses and zero $\pt$ cuts, with only
-$s_{34}\geq Q^2$.  The final cut accepts every $\shat=s_{34}\geq Q^2$.
-The current setup instead sets
-\begin{equation}
- \code{invm\_min(all finals)}=2Q^2,
-\end{equation}
-so PDF sampling starts at $2Q^2$ and the valid interval
-$Q^2\leq\shat<2Q^2$ is never proposed.  The same issue exists for more legs
-unless another valid bound happens to dominate.  This is a coverage issue, not
-just an efficiency issue.
+\paragraph{All-final aggregate bound.}
+The full-final-state lower bound now uses
+Eq.~\eqref{eq:exactaggregatebound}.  In particular, for two massless final
+legs with $s_{34}\geq Q^2$, it sets
+\code{invm\_min(all finals)} to $Q^2$, rather than the former value $2Q^2$.
+Thus PDF sampling retains the complete accepted interval immediately above
+threshold.  The bound regression test includes this two-particle case.
 
-The direct replacement should be a demonstrably necessary bound such as
-Eq.~\eqref{eq:exactaggregatebound}; for massless legs, use $C_A$ rather than
-$|A|C_A/(|A|-1)$.  A regression test should integrate a constant matrix element
-with a non-zero pair-mass cut and compare against an independent phase-space
-volume or a deliberately loose generator.
+\paragraph{Initial--final pair bounds and massive crossing.}
+For a two-leg mask containing one beam and one final leg,
+\code{setup\_PS\_cuts} now identifies those two distinct legs explicitly.
+It computes one upper bound, takes the strongest of the pair-cut and
+transverse-momentum conditions, and accumulates the result into the
+complementary mask.  Diagonal entries and a later complementary traversal can
+therefore no longer overwrite a stronger requested cut.
 
-\paragraph{Initial--final pair bounds overwrite the requested pair cut
-(efficiency and regulator risk).}
-For a two-leg mask with one beam and one final leg,
-\code{setup\_PS\_cuts} loops over all four ordered pairs including both
-diagonal pairs (source lines 232--239).  It assigns instead of accumulates
-\code{invm\_max(k)}.  The final diagonal iteration normally has
-\code{sqrt\_s\_min(i,i)=0}, so an off-diagonal $Q_{if}$ can be overwritten by
-the $\pt$ term.  The later final cut still rejects forbidden points, so this
-does not by itself lose physical support; it can however remove the intended
-$t$-channel pre-regulation and severely reduce efficiency.
-
-The fix is to loop only over the two distinct legs and retain the strongest
-negative upper bound, e.g. initialise to zero and apply
-\code{invm\_max(k)=min(invm\_max(k),-candidate)}.  Symmetrise or validate the
-input cut matrix at initialization.
-
-\paragraph{Massive initial--final pair semantics differ from the final cut
-(conditional coverage risk).}
 For a massless beam leg $a$ and a massive final leg $f$,
 \begin{equation}
  s_{af}^{(+)}=(p_a+p_f)^2=m_f^2+2p_a\!\cdot p_f,
  \qquad t_{af}=(p_a-p_f)^2=2m_f^2-s_{af}^{(+)} .
  \label{eq:massivetrelation}
 \end{equation}
-The final cut in Eq.~\eqref{eq:finalcuts} tests $s_{af}^{(+)}$, whereas
-Eq.~\eqref{eq:tcutcode} implements $t_{af}\leq-Q_{af}^2$.  If the API intends
-these to represent the same $Q_{af}$ cut, the latter requires
-$s_{af}^{(+)}\geq Q_{af}^2+2m_f^2$, which is stricter than the final test.
-For massless legs the two expressions coincide.  The implementation should
-either define incoming--final cuts explicitly as crossed $-t$ cuts or derive
-the mask bound from Eq.~\eqref{eq:massivetrelation} so that it matches the
-final acceptance definition.
+Consequently, the final requirement $s_{af}^{(+)}\geq Q_{af}^2$ maps to
+$t_{af}\leq2m_f^2-Q_{af}^2$, which is the second argument in
+Eq.~\eqref{eq:tcutcode}.  This avoids the extra, unrequested $2m_f^2$
+restriction of the former $t_{af}\leq-Q_{af}^2$ implementation.
 
-\paragraph{The inverse $2\to3$ branch test is not symmetric with the forward
-map (multichannel-density risk).}
-The forward routine rejects when neither $\phi_1$ nor $\phi_2$ satisfies the
-local $\ET$ checks (lines 795--831).  The inverse routine tests ``both'',
-``only first'', and ``only second'' (lines 1677--1683), but has no final
-\code{else} that sets \code{ps\%jac} negative.  Thus a point for which neither
-candidate satisfies those local conditions can continue with a non-zero
-partner density.  This matters precisely in the multichannel use case, where a
-point generated in one channel is tested against another channel's support.
+\paragraph{Forward--inverse $2\to3$ branch symmetry.}
+Both directions now handle the same three possibilities: both azimuthal
+branches pass the local $\ET$ checks, exactly one passes, or neither passes.
+The inverse map explicitly returns a negative Jacobian in the last case, so an
+unsupported partner channel cannot contribute a non-zero multichannel
+density.  The regression test also checks a five-particle BK forward--inverse
+Jacobian closure.
 
-The inverse should mirror the forward rejection branch.  Add an explicit
-``neither'' case that sets a negative Jacobian and returns, then test
-forward--inverse agreement for randomly chosen partner channel permutations.
+\subsection{Remaining semantic discrepancy}
 
 \paragraph{The interface calls an input a rapidity cut but \code{gen23} does
 not use it, and the later cut is pseudorapidity.}
@@ -837,33 +807,28 @@ be upgraded casually.  A robust implementation can first use the exact
 mass-threshold and pair-mass identity in Eq.~\eqref{eq:exactaggregatebound},
 then add only separately proved $\pt$/$\Delta R$ inequalities.
 
-\subsection{Numerical robustness issues}
+\subsection{Numerical safeguards}
 
 \begin{itemize}
-\item The logarithmic map needs strictly positive endpoints.  With fully
-  inclusive massless $t$ ranges, an endpoint can be zero, but
-  \code{ip=-1} evaluates logarithms or powers of zero.  Likewise
-  \code{ip\_shat=-1.2} is not defined at a zero lower $\shat$ endpoint.
-  Require a positive physical regulator, switch to a finite endpoint-aware
-  map, or return a clean rejected point before evaluating the map.
-\item \code{getphifroms} returns $\phi=0$ when the computed cosine lies
-  outside $[-1,1]$, even if the excess is not roundoff.  That does not preserve
-  the requested invariant $s$.  Use a scale-aware tolerance: clamp only a
-  tiny overshoot and reject a material violation.
-\item Several expressions take square roots of quantities that can be a few
-  ulps negative near an endpoint, and several azimuths use
-  \code{atan(y/x)} rather than \code{atan2(y,x)}.  Use an invariant-scale
-  tolerance, clamp only tiny negative radicands, and use \code{atan2} to
-  avoid divisions by zero and quadrant errors.
-\item The Gram and $V$ determinants use an absolute LU pivot tolerance
-  \code{1d-8}.  Their entries carry powers of energy, so this criterion is
-  not scale invariant.  Rescaling the matrix or using a relative pivot test
-  would make high- and low-energy behaviour more uniform.
-\item The global module variables \code{includePDF}, \code{ip},
-  \code{ip\_shat}, \code{ip\_dt}, and \code{ip\_mass} are shared by all
-  \code{phase\_space\_gen23} objects.  This is safe only if all active maps
-  use identical settings and calls are serialized.  Put them in \code{this}
-  for re-entrant or threaded use.
+\item A negative-power sector whose lower endpoint is zero is switched to a
+  flat map before logarithms or negative powers are evaluated.  Invalid or
+  zero-width intervals return a rejected point cleanly.
+\item \code{getphifroms} reports validity to its caller.  It estimates the
+  cancellation scale in the computed cosine, clamps only a small endpoint
+  overshoot to $[-1,1]$, and rejects a material violation.  In particular, an
+  overshoot below $-1$ maps to the correct $\phi=\pi$ endpoint rather than
+  silently selecting $\phi=0$.
+\item Kinematic square roots and boost denominators use scale-aware checks;
+  tiny negative endpoint radicands are clamped while material violations are
+  rejected.  Azimuthal reconstruction in \code{gen23} uses \code{atan2}.
+\item The Gram and $V$ matrices are divided by their largest entry before LU
+  decomposition and use an epsilon-scaled pivot tolerance.  Their determinants
+  are restored in logarithmic form, avoiding an energy-unit-dependent absolute
+  threshold and reducing overflow risk.
+\item \code{include\_pdf}, \code{ip}, \code{ip\_shat}, \code{ip\_dt}, and
+  \code{ip\_mass} are stored in each \code{phase\_space\_gen23} object.  The
+  module-level soft-bound default is copied into the object during
+  initialization, so already initialized channels retain their own setting.
 \end{itemize}
 
 \subsection{Topology-selection and bookkeeping caveats}
@@ -896,7 +861,8 @@ The following tests exercise the derivation and catch the issues above.
   default importance maps.
 \item \textbf{Threshold scan.}  With PDFs enabled, set a single final--final
   $Q_{ij}$ cut and verify non-zero support immediately above $Q_{ij}^2$.
-  This directly tests the all-final bound in Eq.~\eqref{eq:codeaggregatebound}.
+  This directly tests the all-final bound in Eq.~\eqref{eq:codeaggregatebound};
+  the repository regression test checks its exact two-particle value.
 \item \textbf{Forward/inverse closure.}  Generate points in every relevant
   topology, invert them in the same channel, regenerate, and compare all
   momenta, invariants, $x$ coordinates, and Jacobians within a scale-aware
@@ -919,12 +885,14 @@ double-$t$ blocks complete the colour-order topology.  The total event weight
 is the product of all coordinate derivatives and local reduced Jacobians,
 divided by $(2\pi)^{3N-4}$ and $2\shat$.
 
-The analytic formulae also make the implementation reviewable.  In particular,
-the full-final-state pair-cut lower bound should be corrected before relying on
-PDF integrations with non-zero pair-mass cuts; the inverse no-valid-branch
-case should mirror the forward rejection; and endpoint/numerical handling
-should be hardened.  The other improvements listed above mostly preserve
-coverage while making the proposal density more efficient and robust.
+The analytic formulae also make the implementation reviewable.  The current
+code uses the exact aggregate identity for its full-final-state pair-cut lower
+bound, translates massive initial--final cuts into the crossed invariant,
+retains the strongest such bound without diagonal overwrites, and rejects the
+same unsupported azimuthal branches in the forward and inverse maps.  Its
+endpoint and determinant safeguards preserve those relations under ordinary
+floating-point roundoff.  The remaining caveats above concern interface
+semantics and sampling efficiency rather than these corrected support rules.
 
 \begin{thebibliography}{9}
 \bibitem{BK}

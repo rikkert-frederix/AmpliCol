@@ -326,9 +326,8 @@ contains
     ! invariants not used in the phase-space generation.
     implicit none
     class(phase_space_gen23),intent(inout) :: this
-    real(kind=8) :: s_cut(2)
-    real(kind=8) :: mass,cut
-    integer(kind=4) :: i,j,k,npart
+    real(kind=8) :: mass,mass_squared_sum,cut,t_upper,pair_cut
+    integer(kind=4) :: i,j,k,npart,incoming_particle,final_particle
     this%invm_min=0d0
     this%invm_max=0d0
     do k=1,maskr(this%next)
@@ -337,21 +336,44 @@ contains
           this%invm_min(k,1:2)=0d0 ! no cuts
        elseif (btest(k,0).or.btest(k,1)) then ! one of the initial state particles is part of 'k'
           if (npart.eq.2) then ! exaclty two particles in 'k'
+             incoming_particle=0
+             final_particle=0
              do i=1,this%next
                 if (.not.btest(k,i-1)) cycle ! particle 'i' is not in combined particle 'k'
-                do j=1,this%next
-                   if (.not.btest(k,j-1)) cycle ! particle 'j' is not in combined particle 'k'
-                   this%invm_max(k,2)=-max(this%sqrt_s_min(i,j)**2,this%ptcut(i)**2,this%ptcut(j)**2)
-                   this%invm_max(maskr(this%next)-k,2)=this%invm_max(k,2) ! all but the two particles
-                enddo
+                if (i.le.2) then
+                   incoming_particle=i
+                else
+                   final_particle=i
+                endif
              enddo
+             if (incoming_particle.eq.0 .or. final_particle.eq.0) cycle
+
+             ! For a massless incoming momentum p_a and a final momentum p_f,
+             ! the crossed mask stores
+             !
+             !   t_af = (p_f-p_a)^2 = 2*m_f^2-(p_f+p_a)^2.
+             !
+             ! Translate the physical pair cut on (p_f+p_a)^2 accordingly.
+             ! Accumulate it with the pT-derived bound instead of repeatedly
+             ! overwriting the off-diagonal cut with diagonal entries.
+             t_upper=-max(this%ptcut(incoming_particle)**2,&
+                  this%ptcut(final_particle)**2)
+             pair_cut=this%sqrt_s_min(incoming_particle,final_particle)
+             if (pair_cut.gt.0d0) then
+                t_upper=min(t_upper,2d0*this%masses(final_particle)**2-pair_cut**2)
+             endif
+             this%invm_max(k,2)=min(this%invm_max(k,2),t_upper)
+             this%invm_max(maskr(this%next)-k,2)=min(&
+                  this%invm_max(maskr(this%next)-k,2),t_upper)
           endif
        else ! only final state particles in the combined particle 'k'
           ! total mass of external particles in 'k'
           mass=0d0
+          mass_squared_sum=0d0
           do i=0,this%next-1
              if (.not.btest(k,i)) cycle ! particle 'i' is not in combined particle 'k'
              mass=mass+sqrt(this%invm(ibset(0,i)))
+             mass_squared_sum=mass_squared_sum+this%invm(ibset(0,i))
           enddo
           ! total from the cuts
           cut=0d0
@@ -365,7 +387,11 @@ contains
           enddo
           if (npart.eq.this%next-2) then ! all final state particles are in 'k'
              this%invm_min(k,1)=mass**2
-             this%invm_min(k,2)=max(cut*dble(npart)/dble(npart-1),mass**2)
+             ! M_k^2=sum_{i<j}s_ij-(npart-2)*sum_i m_i^2.  Since 'cut'
+             ! is the sum of independently valid pair lower bounds, this is
+             ! the corresponding necessary aggregate bound.  The former
+             ! npart/(npart-1) factor was too strong and removed support.
+             this%invm_min(k,2)=max(cut-dble(npart-2)*mass_squared_sum,mass**2)
           else
              this%invm_min(k,1)=mass**2
              this%invm_min(k,2)=max(cut/2d0,mass**2)
@@ -1136,7 +1162,7 @@ contains
       real(kind=8) :: tmin_S,tmax_S,smin_S,smax_S,phi1,phi2,gram4,V,sqrtGG,y,phi_rot,delta_ir,delta_scale
       real(kind=8),dimension(1:2) :: shatmin,shatmax,tmin,tmax,etminir,etmini,base,root,smin,smax,rad
       real(kind=8),dimension(0:3) :: pi1,pr1,ppibir1,pi2,pr2,ppibir2,piir,pib,pim1,piirr,pim1r
-      logical :: rapidity_ok
+      logical :: rapidity_ok,phi_ok
       if (popcnt(i).gt.1) then
          if (popcnt(ir).gt.1) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
          call shatminmax(this,i,ir,shatmin,shatmax,invm)
@@ -1305,7 +1331,11 @@ contains
       ! (if it's only one). If both pass, simply pick one of the two at random
       ! with a flat prior.
       phi1=getphifroms(invm(i+im1),invm(ir+i),invm(ir),invm(ir+i+im1)&
-           &,invm(ir+i+ib),V,sqrtGG,1d0)
+           &,invm(ir+i+ib),V,sqrtGG,1d0,phi_ok)
+      if (.not.phi_ok) then
+         ps%jac=-20d0
+         return
+      endif
       call gentcms2(pp(0,ib),pp(0,ib+ir+i),pp(0,ib+ir+i+im1),invm(ir+ib),phi1 &
            &,sqrt0(invm(i)),sqrt0(invm(ir)),pi1,ppibir1,gent_status)
       if (gent_status.ne.0) then
@@ -1314,7 +1344,11 @@ contains
       endif
       pr1(0:3)=pp(0:3,ir+i)-pi1(0:3)
       phi2=getphifroms(invm(i+im1),invm(ir+i),invm(ir),invm(ir+i+im1)&
-           &,invm(ir+i+ib),V,sqrtGG,0d0)
+           &,invm(ir+i+ib),V,sqrtGG,0d0,phi_ok)
+      if (.not.phi_ok) then
+         ps%jac=-20d0
+         return
+      endif
       call gentcms2(pp(0,ib),pp(0,ib+ir+i),pp(0,ib+ir+i+im1),invm(ir+ib),phi2 &
            &,sqrt0(invm(i)),sqrt0(invm(ir)),pi2,ppibir2,gent_status)
       if (gent_status.ne.0) then
@@ -1916,7 +1950,8 @@ contains
     logical function bad_inverse_jac()
       implicit none
       ! Inverse-status codes used below: -2/-3/-4 are singular or empty
-      ! kinematic intervals, -5 is a non-negative Gram determinant,
+      ! kinematic intervals, -5 is a non-negative Gram determinant, -19 is
+      ! an unsupported BK azimuth branch, -20 is an invalid BK azimuth,
       ! -33 is a negative reconstruction root, -35 is a light-like boost
       ! reference, -36/-37 are double-t bound failures, -38 is a zero
       ! reconstructed energy, -39 is a zero Eir denominator, -40 is an
@@ -2460,7 +2495,7 @@ contains
       real(kind=8) :: tmin_S,tmax_S,smin_S,smax_S,phi1,phi2,gram4,V,sqrtGG,y,phi_rot,delta_ir,delta_scale
       real(kind=8),dimension(1:2) :: shatmin,shatmax,tmin,tmax,etminir,etmini,base,root,smin,smax,rad
       real(kind=8),dimension(0:3) :: pi1,pr1,ppibir1,pi2,pr2,ppibir2,piir,pib,pim1,piirr,pim1r
-      logical :: rapidity_ok
+      logical :: rapidity_ok,phi_ok
       if (popcnt(i).gt.1) then
          if (popcnt(ir).gt.1) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
          call shatminmax(this,i,ir,shatmin,shatmax,invm)
@@ -2613,7 +2648,11 @@ contains
       ! (if it's only one). If both pass, simply pick one of the two at random
       ! with a flat prior.
       phi1=getphifroms(invm(i+im1),invm(ir+i),invm(ir),invm(ir+i+im1)&
-           &,invm(ir+i+ib),V,sqrtGG,1d0)
+           &,invm(ir+i+ib),V,sqrtGG,1d0,phi_ok)
+      if (.not.phi_ok) then
+         ps%jac=-20d0
+         return
+      endif
       call gentcms2(pp(0,ib),pp(0,ib+ir+i),pp(0,ib+ir+i+im1),invm(ir+ib),phi1 &
            &,sqrt0(invm(i)),sqrt0(invm(ir)),pi1,ppibir1,gent_status)
       if (gent_status.ne.0) then
@@ -2622,7 +2661,11 @@ contains
       endif
       pr1(0:3)=pp(0:3,ir+i)-pi1(0:3)
       phi2=getphifroms(invm(i+im1),invm(ir+i),invm(ir),invm(ir+i+im1)&
-           &,invm(ir+i+ib),V,sqrtGG,0d0)
+           &,invm(ir+i+ib),V,sqrtGG,0d0,phi_ok)
+      if (.not.phi_ok) then
+         ps%jac=-20d0
+         return
+      endif
       call gentcms2(pp(0,ib),pp(0,ib+ir+i),pp(0,ib+ir+i+im1),invm(ir+ib),phi2 &
            &,sqrt0(invm(i)),sqrt0(invm(ir)),pi2,ppibir2,gent_status)
       if (gent_status.ne.0) then
@@ -2637,6 +2680,12 @@ contains
          if (.not.update_inverse_jac(1d0,2d0)) return
       elseif (pi2(0)**2-pi2(3)**2.ge.this%ETmin(i,1)**2 .and. pr2(0)**2-pr2(3)**2.ge.this%ETmin(ir,1)**2) then
          if (.not.update_inverse_jac(1d0,2d0)) return
+      else
+         ! Mirror the forward map: this channel has no support when neither
+         ! azimuthal reconstruction satisfies its local transverse-energy
+         ! bounds.
+         ps%jac=-19d0
+         return
       endif
       ! Compute the Jacobian
       gram4=gram_determinant4(invm(ir+i+im1),invm(ir+ib),invm(ir+i+ib)&
@@ -3288,7 +3337,7 @@ contains
     p1(0:3)=ptot(0:3)-pii(0:3)
     pr(0:3)=pb(0:3)-p1(0:3)         !Return remainder of momentum
   end subroutine gentcms2
-  real(kind=8) function getphifroms(si,shat_i,shat_im1,shat_ip1,t_i,V,sqrtGG,ran)
+  real(kind=8) function getphifroms(si,shat_i,shat_im1,shat_ip1,t_i,V,sqrtGG,ran,valid)
     ! Given s_i (invariant mass of p_i and p_i+1, it transforms it
     ! into phi_i. Note that there are two possibilities for phi: need
     ! to pick one at random.
@@ -3297,39 +3346,52 @@ contains
     ! Phys. Rev. 187 (1969), 2008-2016, doi:10.1103/PhysRev.187.2008
     implicit none
     real(kind=8),intent(in) :: si,shat_i,shat_im1,shat_ip1,t_i,V,sqrtGG,ran
+    logical,intent(out) :: valid
     real(kind=8) :: cosphi,x,lam,lam_scale,sqrtgg_scale
+    real(kind=8) :: cos_numerator,numerator_scale,cosphi_tolerance
+    valid=.false.
+    getphifroms=0d0
+    if (.not.ieee_is_finite(ran) .or. ran.lt.0d0 .or. ran.gt.1d0) return
     lam=lambda(shat_i,t_i,0d0)
     if (.not.ieee_is_finite(lam) .or. .not.ieee_is_finite(V) .or. &
          .not.ieee_is_finite(sqrtGG)) then
-       getphifroms=0d0
        return
     endif
     lam_scale=max(spacing(0d0),abs(shat_i),abs(t_i))
     if (sqrt(abs(lam)).le.sqrt(tiny_kin)*lam_scale) then
-       getphifroms=0d0
        return
     endif
-    sqrtgg_scale=max(spacing(0d0),abs((si-shat_im1-shat_ip1)*0.5d0*lam),abs(4d0*V))
+    cos_numerator=(si-shat_im1-shat_ip1)*0.5d0*lam-4d0*V
+    sqrtgg_scale=max(spacing(0d0),abs(cos_numerator),abs(4d0*V))
     if (.not.ieee_is_finite(sqrtgg_scale)) then
-       getphifroms=0d0
        return
     endif
     if (abs(sqrtGG).le.tiny_kin*sqrtgg_scale) then
-       getphifroms=0d0
        return
     endif
-    cosphi=((si-shat_im1-shat_ip1)*0.5d0*lam-4d0*V)/sqrtGG
-    if (cosphi.lt.-1d0 .or. cosphi.gt.1d0) then
-       write (99,*) 'WARNING cosphi does not have a reasonable value',cosphi
-       getphifroms=0d0
+    cosphi=cos_numerator/sqrtGG
+    if (.not.ieee_is_finite(cosphi)) return
+
+    ! Estimate the roundoff amplification in the cancellation that forms the
+    ! numerator.  Clamp only a small endpoint overshoot; a material violation
+    ! must invalidate the phase-space point rather than silently selecting
+    ! phi=0 (which does not reproduce the requested adjacent invariant).
+    numerator_scale=max(spacing(0d0),abs((si-shat_im1-shat_ip1)*0.5d0*lam),&
+         abs(4d0*V),abs(sqrtGG))
+    cosphi_tolerance=1024d0*epsilon(1d0)*max(1d0,numerator_scale/abs(sqrtGG))
+    cosphi_tolerance=min(cosphi_tolerance,sqrt(epsilon(1d0)))
+    if (cosphi.lt.-1d0-cosphi_tolerance .or. cosphi.gt.1d0+cosphi_tolerance) then
+       if (debug) write (99,*) 'Rejected out-of-range BK cosine',cosphi,cosphi_tolerance
        return
     endif
+    cosphi=max(-1d0,min(1d0,cosphi))
     x=ran
     if (x.gt.0.5d0) then
        getphifroms=acos(cosphi)
     else
        getphifroms=-acos(cosphi)+2d0*pi
     endif
+    valid=ieee_is_finite(getphifroms)
   end function getphifroms
 
 end module phase_space_gen23_mod
